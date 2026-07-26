@@ -5,8 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      build-musllinux:
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -77,7 +80,7 @@ jobs:
     env:
       CIBW_ARCHS: "${{ matrix.archs }}"
       CIBW_PLATFORM: "${{ matrix.platform || 'auto' }}"
-      CIBW_SKIP: "${{ github.event_name != 'release' && '*-musllinux_*' || '' }}"
+      CIBW_SKIP: "${{ !inputs.build-musllinux && '*-musllinux_*' || '' }}"
     steps:
     - uses: actions/checkout@v4.2.2
       with:
@@ -121,19 +124,3 @@ jobs:
         name: artifact-wheels-${{ matrix.os }}-${{ matrix.archs }}
         path: wheelhouse/*.whl
         if-no-files-found: error
-
-  publish-pypi:
-    name: Publish to PyPI
-    if: github.event_name == 'release' && github.event.action == 'published'
-    needs: [build-sdist, build-wheels]
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-    - uses: actions/download-artifact@v4.2.0
-      with:
-        pattern: artifact-*
-        merge-multiple: true
-        path: dist
-
-    - uses: pypa/gh-action-pypi-publish@v1.14.0
