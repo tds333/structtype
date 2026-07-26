@@ -20,6 +20,8 @@ Benchmarks
     x86 Linux laptop) using CPython 3.11.
 
 
+.. _library-comparison:
+
 Library Comparison
 ------------------
 

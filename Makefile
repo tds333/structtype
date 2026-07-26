@@ -22,6 +22,10 @@ test-cov: ## Run tests with coverage
 test-lf: ## Run tests in current Python
 	uv run --reinstall pytest --lf
 
+.PHONY: test-doc
+test-doc: ## Run doctests
+	uv run pytest --doctest-modules --pyargs structtype
+
 .PHONY: test-all
 test-all: ## Run tests in all supporte Python versions
 	for py_v in $(PY_VERSIONS); do \

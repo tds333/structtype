@@ -5,48 +5,6 @@ Here we present a few tips and tricks for squeezing maximum performance out of
 ``structtype``. They're presented in order from "sane, definitely a good idea" to
 "fast, but you may not want to do this".
 
-Reuse Encoders/Decoders
------------------------
-
-Every call to a top-level ``encode`` function like `struct_dump_json`
-allocates some temporary internal state used for encoding. While fine for
-normal use, for maximum performance you'll want to create an ``Encoder`` (e.g.
-`structtype._core.JSONEncoder`) once and reuse it for all encoding calls, avoiding
-paying that setup cost for every call.
-
-.. code-block:: python
-
-    >>> from structtype import Struct, Field
-
-    >>> encoder = structtype._core.JSONEncoder()  # Create once
-
-    >>> for msg in msgs:
-    ...     data = encoder.encode(msg)  # reuse multiple times
-
-The same goes for decoding. If you're making multiple ``decode`` calls in a
-performance-sensitive code path, you'll want to create a ``Decoder`` (e.g.
-`structtype._core.JSONDecoder`) once and reuse it for each call. Since decoders are
-typed, you may need to create multiple decoders, one for each type.
-
-.. code-block:: python
-
-    >>> from structtype import Struct, Field
-
-    >>> decoder = structtype._core.JSONDecoder(list[int])  # Create once
-
-    >>> for data in input_buffers:
-    ...     msg = decoder.decode(data)  # reuse multiple times
-
-
-Use Structs
------------
-
-:doc:`structs` are structtype's native way of expressing user-defined types.
-They're :ref:`fast to encode/decode <json-benchmark>` and :ref:`fast to use
-<struct-benchmark>`. If you have data with a known schema, we recommend
-defining a `structtype.Struct` type (or types) for your schema and preferring that
-over other types like `dict` / `dataclasses` / etc.
-
 
 Avoid Encoding Default Values
 -----------------------------
@@ -97,143 +55,44 @@ We can then use these types to decode the `example tweet json
 
 .. code-block:: python
 
-    >>> tweet = structtype._core.json_decode(example_json, type=Tweet)
+    >>> tweet = Tweet.struct_validate_json(example_json)
 
     >>> tweet.user.name
     'Twitter Dev'
 
-    >>> tweet.user.favorite_count
+    >>> tweet.favorite_count
     70
 
 Of course there are downsides to defining smaller "view" types, but if decoding
 performance is a bottleneck in your workflow, you may benefit from this
 technique.
 
-For a more in-depth example of this technique, see the
-:doc:`examples/conda-repodata` example.
-
-
-Reduce Allocations
-------------------
-
-Every call to ``encode`` / ``Encoder.encode`` allocates a new `bytes` object for
-the output. ``structtype`` exposes an alternative ``Encoder.encode_into`` (e.g.
-`structtype._core.JSONEncoder.encode_into`) that writes into a pre-allocated
-`bytearray` instead (possibly reallocating to increase capacity).
-
-This has the following uses.
-
-Reusing an output buffer
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-If you're encoding and writing messages to a socket/file in a hot loop, you
-*may* benefit from allocating a single `bytearray` buffer once and reusing it
-for every message.
-
-For example:
-
-.. code-block:: python
-
-    encoder = structtype._core.JSONEncoder()
-
-    # Allocate a single shared buffer
-    buffer = bytearray()
-
-    for msg in msgs:
-        # Encode a message into the buffer at the start of the buffer.
-        # Note that this overwrites any previous contents.
-        encoder.encode_into(msg, buffer)
-
-        # Write the buffer to the socket
-        socket.sendall(buffer)
-
-A few caveats:
-
-- ``Encoder.encode_into`` will expand the capacity of ``buffer`` as needed to
-  fit the message size. This means that if a large message is encountered the
-  buffer will be expanded to be equally large, but won't be reduced back to
-  normal afterwards (possibly bloating memory usage). You can use
-  `sys.getsizeof` (or call `bytearray.__sizeof__`) directly to determine the
-  actual capacity of the buffer, since ``len(buffer)`` will only reflect the
-  part of the buffer that is written to.
-
-- Small messages (for some definition of "small") likely won't see a
-  performance improvement from using this method, and may instead see a
-  slowdown. We recommend using a realistic benchmark to determine if this
-  method can benefit your workload.
-
 Line-Delimited JSON
 ^^^^^^^^^^^^^^^^^^^
 
-Some protocols require appending a suffix to an encoded message. One place
-where this comes up is when encoding `line-delimited JSON`_, where every
-payload contains a JSON message followed by ``b"\n"``.
-
-This *could* be handled in python as:
+When working with newline-delimited JSON (NDJSON), use the class methods
+:meth:`Struct.struct_validate_jsonln` and :meth:`Struct.struct_dump_jsonln`
+to avoid per-line loop overhead:
 
 .. code-block:: python
 
-    from structtype import Struct, Field
+    >>> from structtype import Struct
 
-    json_msg = structtype._core.json_encode(["my", "message"])
+    >>> class Item(Struct):
+    ...     name: str
+    ...     price: float
 
-    full_payload = json_msg + b'\n'
+    >>> data = b'{"name":"a","price":1.0}\n{"name":"b","price":2.0}\n'
+    >>> items = Item.struct_validate_jsonln(data)
 
-However, this results in an unnecessary copy of ``json_msg``, which can be
-avoided by using `structtype._core.JSONEncoder.encode_into`.
+    >>> for item in items:
+    ...     print(item.name)
+    a
+    b
 
-.. code-block:: python
-
-    from structtype import Struct, Field
-
-    encoder = structtype._core.JSONEncoder()
-
-    # Allocate a buffer. We recommend using a small non-empty buffer to
-    # avoid reallocating for small messages. Choose something larger than
-    # your common message size, but not excessively large.
-    buffer = bytearray(64)
-
-    # Encode into the existing buffer.
-    encoder.encode_into(["my", "message"], buffer)
-
-    # Append a newline character without copying
-    buffer.extend(b"\n")
-
-    # Write the full buffer to a socket/file/etc...
-    socket.sendall(buffer)
-
-Length-Prefix Framing
-^^^^^^^^^^^^^^^^^^^^^
-
-Some protocols require prepending a prefix to an encoded message. This comes up
-in `Length-prefix framing
-<https://eli.thegreenplace.net/2011/08/02/length-prefix-framing-for-protocol-buffers>`__
-, where every message is prefixed by its length stored as a fixed-width integer
-(e.g. a big-endian ``uint32``). Like line-delimited JSON above, this is more
-efficient to do using ``Encoder.encode_into`` to avoid excessive copying.
-
-.. code-block:: python
-
-    from structtype import Struct, Field
-
-    encoder = structtype._core.JSONEncoder()
-
-    # Allocate a buffer. We recommend using a small non-empty buffer to
-    # avoid reallocating for small messages. Choose something larger than
-    # your common message size, but not excessively large.
-    buffer = bytearray(64)
-
-    # Encode into the existing buffer, offset by 4 bytes at the front to
-    # store the length prefix.
-    encoder.encode_into(msg, buffer, 4)
-
-    # Encode the message length as a 4 byte big-endian integer, and
-    # prefix the message with it (without copying).
-    n = len(msg) - 4
-    buffer[:4] = n.to_bytes(4, "big")
-
-    # Write the buffer to a socket/file/etc...
-    socket.sendall(buffer)
+    >>> encoded = Item.struct_dump_jsonln(items)
+    >>> encoded
+    b'{"name":"a","price":1.0}\n{"name":"b","price":2.0}\n'
 
 Use ``gc=False``
 -----------------
@@ -269,12 +128,12 @@ average another ~2x speedup for decoding (and ~1.5x speedup for encoding).
 
     >>> x = Example("some string", 2)
 
-    >>> msg = structtype._core.json_encode(x)
+    >>> msg = x.struct_dump_json()
 
     >>> msg
     b'["some string",2]'
 
-    >>> structtype._core.json_decode(msg, type=Example)
+    >>> Example.struct_validate_json(msg)
     Example(my_first_field="some string", my_second_field=2)
 
 
@@ -293,7 +152,7 @@ For example, this model:
       items: frozendict[str, int]  # requires Python3.15+ to be used
 
   msg = b'{"items": {"pen": 1, "book": 2}}'
-  structtype._core.json_decode(msg, type=Example)
+  Example.struct_validate_json(msg)  # need to convert anyway
   # Example(items=frozendict({"pen": 1, "book": 2}))
 
 As ``frozendict`` does not allow adding items one at a time,
@@ -314,7 +173,7 @@ The same can be said for :class:`tuple` vs :class:`list`:
 
     >>> msg = b'{"items": ["pen", "book"]}'
 
-    >>> structtype._core.json_decode(msg, type=Example)
+    >>> Example.struct_validate_json(msg)
     Example(items=("pen", "book"))
 
 We would first create a ``list`` object and then convert
@@ -328,4 +187,3 @@ use collection types that can be constructed natively:
 
 
 .. _JSON: https://json.org
-.. _line-delimited JSON: https://en.wikipedia.org/wiki/JSON_streaming#Line-delimited_JSON

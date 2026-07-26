@@ -18,8 +18,8 @@ Python. It features:
   use dataclasses_ or attrs_, :doc:`structs` should feel familiar. However,
   they're :ref:`5-60x <struct-benchmark>` faster for common operations.
 
-All of this is included in a :ref:`lightweight library
-<benchmark-library-size>` with no required dependencies.
+All of this is included in a lightweight library
+with no required dependencies.
 
 -----
 
@@ -79,8 +79,7 @@ Highlights
   also be added through :doc:`extensions <extending>`.
 
 - ``structtype`` is **lightweight**. It has no required dependencies, and the
-  binary size is :ref:`a fraction of that of comparable libraries
-  <benchmark-library-size>`.
+  binary size is a fraction of that of comparable libraries.
 
 - ``structtype`` is **correct**. The JSON encoder/decoder is strictly compliant
   with the JSON specification, providing strong guarantees of compatibility.
