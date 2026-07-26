@@ -45,7 +45,7 @@ User.struct_validate_json(
 
 ## Documentation
 
-Full documentation is available at **https://structtype.readthedocs.io**.
+Full documentation is available at **https://tds333.github.io/structtype/**.
 
 ## Benchmarks
 
