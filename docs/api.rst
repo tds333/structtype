@@ -8,8 +8,7 @@ Structs
 
 .. autoclass:: Struct
     :members: struct_dump_json, struct_validate_json, struct_dump, struct_validate,
-              struct_to_dict, struct_to_tuple, struct_force_setattr,
-              struct_validate_jsonln, struct_dump_jsonln
+              struct_to_dict, struct_to_tuple, struct_force_setattr
 
 .. autoclass:: StructMeta(name, bases, namespace, /, *, **struct_config)
 

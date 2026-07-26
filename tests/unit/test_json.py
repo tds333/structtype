@@ -317,59 +317,6 @@ class TestEncoderMisc:
         out2 = enc.encode([1, 2, 3])
         assert out1 == out2
 
-    @pytest.mark.parametrize("n", range(3))
-    @pytest.mark.parametrize("iterable", [False, True])
-    def test_encode_lines(self, n, iterable):
-        class custom:
-            def __init__(self, x):
-                self.x = x
-
-            def __str__(self):
-                return f"<{self.x}>"
-
-        enc = JSONEncoder(enc_hook=str)
-
-        items = [{"x": i, "y": custom(i)} for i in range(n)]
-        sol = b"".join(enc.encode(i) + b"\n" for i in items)
-        if iterable:
-            items = (i for i in items)
-
-        res = enc.encode_lines(items)
-        assert res == sol
-
-    @pytest.mark.parametrize("iterable", [False, True])
-    def test_encode_lines_iterable_unsupported_item_errors(self, iterable):
-        enc = JSONEncoder()
-
-        def gen():
-            yield 1
-            yield object()
-
-        items = gen() if iterable else list(gen())
-
-        with pytest.raises(TypeError):
-            enc.encode_lines(items)
-
-    def test_encode_lines_iterable_iter_error(self):
-        enc = JSONEncoder()
-
-        class noiter:
-            def __iter__(self):
-                raise ValueError("Oh no!")
-
-        with pytest.raises(ValueError, match="Oh no!"):
-            enc.encode_lines(noiter())
-
-    def test_encode_lines_iterable_next_error(self):
-        enc = JSONEncoder()
-
-        def gen():
-            yield 1
-            raise ValueError("Oh no!")
-
-        with pytest.raises(ValueError, match="Oh no!"):
-            enc.encode_lines(gen())
-
 
 class TestDecodeFunction:
     def test_decode(self):
@@ -468,60 +415,6 @@ class TestDecoderMisc:
 
         with pytest.raises(structtype.DecodeError):
             dec.decode(b'[1, 2, 3]"trailing"')
-
-    @pytest.mark.parametrize(
-        "msg",
-        ["", "\n", "1", "  1", "1\t\r\n", "1\n\r\t 2", "1\n2\n", "1\n2\n3\n"],
-    )
-    def test_decode_lines(self, msg):
-        dec = JSONDecoder()
-        sol = []
-        for part in msg.splitlines():
-            if part := part.strip():
-                sol.append(dec.decode(part))
-
-        res = dec.decode_lines(msg)
-        assert res == sol
-
-    def test_decode_lines_typed(self):
-        class Ex(structtype.Struct):
-            x: int
-
-        sol = [Ex(1), Ex(2)]
-        buf = JSONEncoder().encode_lines(sol)
-        res = JSONDecoder(Ex).decode_lines(buf)
-        assert res == sol
-
-    def test_decode_lines_typed_error(self):
-        class Ex(structtype.Struct):
-            x: int
-
-        buf = b'{"x": 1}\n{"x": "bad"}\n'
-
-        dec = JSONDecoder(Ex)
-        with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode_lines(buf)
-
-        assert "Expected `int`, got `str`" in str(rec.value)
-        assert "`$[1].x" in str(rec.value)
-
-    def test_decode_lines_malformed(self):
-        buf = b'{"x": 1}\n{"x": efg'
-        dec = JSONDecoder()
-        with pytest.raises(structtype.DecodeError, match="malformed"):
-            dec.decode_lines(buf)
-
-    def test_decode_lines_bad_call(self):
-        dec = JSONDecoder()
-
-        with pytest.raises(TypeError):
-            dec.decode()
-
-        with pytest.raises(TypeError):
-            dec.decode("{}", 2)
-
-        with pytest.raises(TypeError):
-            dec.decode(1)
 
     def test_decoder_init_float_hook(self):
         dec = JSONDecoder()

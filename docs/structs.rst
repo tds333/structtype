@@ -670,7 +670,7 @@ of the Struct definition:
 Omitting defaults reduces the size of the encoded message, and often also
 improves encoding and decoding performance (since there's less work to do).
 
-``omit_defaults`` affects `struct_dump_json`, `struct_dump_jsonln`,
+``omit_defaults`` affects `struct_dump_json`
 and `struct_dump`. It has no effect on `struct_to_dict` or
 `struct_to_tuple`,
 which always include every field.

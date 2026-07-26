@@ -8360,8 +8360,6 @@ static PyObject *Struct_replace_wrapper(PyObject *, PyObject *const *, Py_ssize_
 static PyObject *Struct_force_setattr_wrapper(PyObject *, PyObject *const *, Py_ssize_t);
 static PyObject *Struct_dump(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_validate(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
-static PyObject *Struct_validate_jsonln(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
-static PyObject *Struct_dump_jsonln(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_check(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 
 static PyMethodDef Struct_methods[] = {
@@ -8376,8 +8374,6 @@ static PyMethodDef Struct_methods[] = {
     {"struct_force_setattr", (PyCFunction) Struct_force_setattr_wrapper, METH_FASTCALL, "Force set an attribute on a frozen struct"},
     {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, "Convert this struct to built-in Python types"},
     {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Convert built-in types to this struct type"},
-    {"struct_validate_jsonln", (PyCFunction) Struct_validate_jsonln, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Deserialize newline-delimited JSON to a list of structs"},
-    {"struct_dump_jsonln", (PyCFunction) Struct_dump_jsonln, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Serialize a list of structs as newline-delimited JSON"},
     {"struct_check", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, "Validate this struct's fields against their declared types"},
     {NULL, NULL},
 };
@@ -13500,79 +13496,6 @@ JSONEncoder_encode(Encoder *self, PyObject *const *args, Py_ssize_t nargs)
     return encoder_encode_common(self, args, nargs, &json_encode);
 }
 
-PyDoc_STRVAR(JSONEncoder_encode_lines__doc__,
-"encode_lines(self, items)\n"
-"--\n"
-"\n"
-"Encode an iterable of items as newline-delimited JSON, one item per line.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"items : iterable\n"
-"    An iterable of items to encode.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"data : bytes\n"
-"    The items encoded as newline-delimited JSON, one item per line.\n"
-"\n"
-"Examples\n"
-"--------\n"
-">>> import structtype\n"
-">>> items = [{\"name\": \"alice\"}, {\"name\": \"ben\"}]\n"
-">>> encoder = structtype.json.Encoder()\n"
-">>> encoder.encode_lines(items)\n"
-"b'{\"name\":\"alice\"}\\n{\"name\":\"ben\"}\\n'"
-);
-static PyObject *
-JSONEncoder_encode_lines(Encoder *self, PyObject *const *args, Py_ssize_t nargs)
-{
-    if (!check_positional_nargs(nargs, 1, 1)) return NULL;
-
-    EncoderState state = {
-        .mod = self->mod,
-        .enc_hook = self->enc_hook,
-        .decimal_format = self->decimal_format,
-        .decimal_callable = self->decimal_callable,
-        .in_decimal_callable = false,
-        .uuid_format = self->uuid_format,
-        .order = self->order,
-        .output_len = 0,
-        .max_output_len = ENC_LINES_INIT_BUFSIZE,
-        .resize_buffer = &ms_resize_bytes
-    };
-    state.output_buffer = PyBytes_FromStringAndSize(NULL, state.max_output_len);
-    if (state.output_buffer == NULL) return NULL;
-    state.output_buffer_raw = PyBytes_AS_STRING(state.output_buffer);
-
-    PyObject *input = args[0];
-    if (MS_LIKELY(PyList_Check(input))) {
-        for (Py_ssize_t i = 0; i < PyList_GET_SIZE(input); i++) {
-            if (json_encode(&state, PyList_GET_ITEM(input, i)) < 0) goto error;
-            if (ms_write(&state, "\n", 1) < 0) goto error;
-        }
-    }
-    else {
-        PyObject *iter = PyObject_GetIter(input);
-        if (iter == NULL) goto error;
-
-        PyObject *item;
-        while ((item = PyIter_Next(iter))) {
-            int status = json_encode(&state, item);
-            Py_DECREF(item);
-            if (status < 0) goto error;
-            if (ms_write(&state, "\n", 1) < 0) goto error;
-        }
-        if (PyErr_Occurred()) goto error;
-    }
-
-    FAST_BYTES_SHRINK(state.output_buffer, state.output_len);
-    return state.output_buffer;
-
-error:
-    Py_DECREF(state.output_buffer);
-    return NULL;
-}
 
 static struct PyMethodDef JSONEncoder_methods[] = {
     {
@@ -13582,10 +13505,6 @@ static struct PyMethodDef JSONEncoder_methods[] = {
     {
         "encode_into", (PyCFunction) JSONEncoder_encode_into, METH_FASTCALL,
         Encoder_encode_into__doc__,
-    },
-    {
-        "encode_lines", (PyCFunction) JSONEncoder_encode_lines, METH_FASTCALL,
-        JSONEncoder_encode_lines__doc__,
     },
     {NULL, NULL}                /* sentinel */
 };
@@ -16184,120 +16103,21 @@ JSONDecoder_decode(JSONDecoder *self, PyObject *const *args, Py_ssize_t nargs)
     return NULL;
 }
 
-PyDoc_STRVAR(JSONDecoder_decode_lines__doc__,
-"decode_lines(self, buf)\n"
-"--\n"
-"\n"
-"Decode a list of items from newline-delimited JSON.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"buf : bytes-like or str\n"
-"    The message to decode.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"items : list\n"
-"    A list of decoded objects.\n"
-"Examples\n"
-"--------\n"
-">>> import structtype\n"
-">>> msg = \"\"\"\n"
-"... {\"x\": 1, \"y\": 2}\n"
-"... {\"x\": 3, \"y\": 4}\n"
-"... \"\"\"\n"
-">>> dec = structtype.json.Decoder()\n"
-">>> dec.decode_lines(msg)\n"
-"[{'x': 1, 'y': 2}, {'x': 3, 'y': 4}]"
-);
-static PyObject*
-JSONDecoder_decode_lines(JSONDecoder *self, PyObject *const *args, Py_ssize_t nargs)
-{
-    if (!check_positional_nargs(nargs, 1, 1)) {
-        return NULL;
-    }
-
-    JSONDecoderState state = {
-        .type = self->type,
-        .strict = self->strict,
-        .dec_hook = self->dec_hook,
-        .float_hook = self->float_hook,
-        .scratch = NULL,
-        .scratch_capacity = 0,
-        .scratch_len = 0
-    };
-
-    Py_buffer buffer;
-    buffer.buf = NULL;
-    if (ms_get_buffer(args[0], &buffer) >= 0) {
-
-        state.buffer_obj = args[0];
-        state.input_start = buffer.buf;
-        state.input_pos = buffer.buf;
-        state.input_end = state.input_pos + buffer.len;
-
-        PathNode path = {NULL, 0, NULL};
-
-        PyObject *out = PyList_New(0);
-        if (out == NULL) return NULL;
-        while (true) {
-            /* Skip until first non-whitespace character, or return if buffer
-             * exhausted */
-            while (true) {
-                if (state.input_pos == state.input_end) {
-                    goto done;
-                }
-                unsigned char c = *state.input_pos;
-                if (MS_LIKELY(c != ' ' && c != '\n' && c != '\r' && c != '\t')) {
-                    break;
-                }
-                state.input_pos++;
-            }
-
-            /* Read and append next item */
-            PyObject *item = json_decode(&state, state.type, &path);
-            path.index++;
-            if (item == NULL) {
-                Py_CLEAR(out);
-                goto done;
-            }
-            int status = PyList_Append(out, item);
-            Py_DECREF(item);
-            if (status < 0) {
-                Py_CLEAR(out);
-                goto done;
-            }
-        }
-    done:
-
-        ms_release_buffer(&buffer);
-
-        PyMem_Free(state.scratch);
-        return out;
-    }
-
-    return NULL;
-}
-
-static struct PyMethodDef JSONDecoder_methods[] = {
-    {
-        "decode", (PyCFunction) JSONDecoder_decode, METH_FASTCALL,
-        JSONDecoder_decode__doc__,
-    },
-    {
-        "decode_lines", (PyCFunction) JSONDecoder_decode_lines, METH_FASTCALL,
-        JSONDecoder_decode_lines__doc__,
-    },
-    {"__class_getitem__", Py_GenericAlias, METH_O|METH_CLASS},
-    {NULL, NULL}                /* sentinel */
-};
-
 static PyMemberDef JSONDecoder_members[] = {
     {"type", T_OBJECT_EX, offsetof(JSONDecoder, orig_type), READONLY, "The Decoder type"},
     {"strict", T_BOOL, offsetof(JSONDecoder, strict), READONLY, "The Decoder strict setting"},
     {"dec_hook", T_OBJECT, offsetof(JSONDecoder, dec_hook), READONLY, "The Decoder dec_hook"},
     {"float_hook", T_OBJECT, offsetof(JSONDecoder, float_hook), READONLY, "The Decoder float_hook"},
     {NULL},
+};
+
+static struct PyMethodDef JSONDecoder_methods[] = {
+    {
+        "decode", (PyCFunction) JSONDecoder_decode, METH_FASTCALL,
+        JSONDecoder_decode__doc__,
+    },
+    {"__class_getitem__", Py_GenericAlias, METH_O|METH_CLASS},
+    {NULL, NULL}                /* sentinel */
 };
 
 static PyTypeObject JSONDecoder_Type = {
@@ -19242,88 +19062,6 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
     PyObject *out = convert(&state, obj, type, NULL);
     TypeNode_Free(type);
     return out;
-}
-
-static PyObject *
-Struct_validate_jsonln(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
-{
-    if (nargs != 1) {
-        return PyErr_Format(PyExc_TypeError,
-            "struct_validate_jsonln() takes exactly 1 positional argument (%zd given)", nargs);
-    }
-
-    JSONDecoder *dec = (JSONDecoder *)JSONDecoder_Type.tp_alloc(&JSONDecoder_Type, 0);
-    if (dec == NULL) return NULL;
-
-    PyObject *init_args = PyTuple_Pack(1, cls);
-    if (init_args == NULL) { Py_DECREF(dec); return NULL; }
-
-    /* Build keyword dict from user kwargs */
-    PyObject *kwds = NULL;
-    if (kwnames != NULL) {
-        kwds = PyDict_New();
-        if (kwds == NULL) { Py_DECREF(init_args); Py_DECREF(dec); return NULL; }
-        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
-        for (Py_ssize_t i = 0; i < nkwargs; i++) {
-            PyObject *key = PyTuple_GET_ITEM(kwnames, i);
-            PyObject *val = args[nargs + i];
-            if (PyDict_SetItem(kwds, key, val) < 0) {
-                Py_DECREF(kwds); Py_DECREF(init_args); Py_DECREF(dec); return NULL;
-            }
-        }
-    }
-
-    if (JSONDecoder_init(dec, init_args, kwds) < 0) {
-        Py_XDECREF(kwds); Py_DECREF(init_args); Py_DECREF(dec); return NULL;
-    }
-    Py_XDECREF(kwds);
-    Py_DECREF(init_args);
-
-    PyObject *dl_args[1] = {args[0]};
-    PyObject *result = JSONDecoder_decode_lines(dec, dl_args, 1);
-    Py_DECREF(dec);
-    return result;
-}
-
-static PyObject *
-Struct_dump_jsonln(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
-{
-    if (nargs != 1) {
-        return PyErr_Format(PyExc_TypeError,
-            "struct_dump_jsonln() takes exactly 1 positional argument (%zd given)", nargs);
-    }
-
-    Encoder *enc = (Encoder *)JSONEncoder_Type.tp_alloc(&JSONEncoder_Type, 0);
-    if (enc == NULL) return NULL;
-
-    PyObject *init_args = PyTuple_New(0);
-    if (init_args == NULL) { Py_DECREF(enc); return NULL; }
-
-    /* Build keyword dict from user kwargs */
-    PyObject *kwds = NULL;
-    if (kwnames != NULL) {
-        kwds = PyDict_New();
-        if (kwds == NULL) { Py_DECREF(init_args); Py_DECREF(enc); return NULL; }
-        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
-        for (Py_ssize_t i = 0; i < nkwargs; i++) {
-            PyObject *key = PyTuple_GET_ITEM(kwnames, i);
-            PyObject *val = args[nargs + i];
-            if (PyDict_SetItem(kwds, key, val) < 0) {
-                Py_DECREF(kwds); Py_DECREF(init_args); Py_DECREF(enc); return NULL;
-            }
-        }
-    }
-
-    if (Encoder_init(enc, init_args, kwds) < 0) {
-        Py_XDECREF(kwds); Py_DECREF(init_args); Py_DECREF(enc); return NULL;
-    }
-    Py_XDECREF(kwds);
-    Py_DECREF(init_args);
-
-    PyObject *el_args[1] = {args[0]};
-    PyObject *result = JSONEncoder_encode_lines(enc, el_args, 1);
-    Py_DECREF(enc);
-    return result;
 }
 
 /* Recursive helper for struct_check — validates each field against its type

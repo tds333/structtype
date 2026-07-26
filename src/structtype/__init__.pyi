@@ -150,24 +150,6 @@ class Struct(metaclass=StructMeta):
         from_attributes: bool = False,
         dec_hook: Callable[[type[Any], Any], Any] | None = None,
     ) -> _T: ...
-    @classmethod
-    def struct_validate_jsonln(
-        cls: type[_T],
-        buf: str | Buffer,
-        *,
-        strict: bool = True,
-        dec_hook: Callable[[type[Any], Any], Any] | None = None,
-    ) -> list[_T]: ...
-    @classmethod
-    def struct_dump_jsonln(
-        cls,
-        items: Iterable[Any],
-        *,
-        enc_hook: Callable[[Any], Any] | None = None,
-        decimal_format: Literal["string", "number"] | Callable[[Any], Any] | None = None,
-        uuid_format: Literal["canonical", "hex"] | None = None,
-        order: Literal["deterministic", "sorted"] | None = None,
-    ) -> bytes: ...
 
 # Lie and say `Raw` is a subclass of `bytes`, so mypy will accept it in most
 # places where an object that implements the buffer protocol is valid

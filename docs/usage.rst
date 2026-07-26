@@ -92,28 +92,6 @@ For cases where you'd like a more lax set of conversion rules, pass
 
 See :doc:`supported-types` for how lax mode affects individual types.
 
-Newline-Delimited JSON (NDJSON)
--------------------------------
-
-Multiple structs can be encoded/decoded as newline-delimited JSON:
-
-.. code-block:: python
-
-    >>> User.struct_dump_jsonln([User("alice"), User("bob")])
-    b'{"name":"alice","groups":[],"email":null}\n{"name":"bob","groups":[],"email":null}\n'
-
-    >>> User.struct_validate_jsonln(
-    ...     b'{"name":"alice","groups":[],"email":null}\n{"name":"bob","groups":[],"email":null}\n'
-    ... )
-    [User(name='alice', groups=set(), email=None), User(name='bob', groups=set(), email=None)]
-
-The encoder also accepts generators:
-
-.. code-block:: python
-
-    >>> User.struct_dump_jsonln(User(name=n) for n in ["alice", "bob"])
-    b'{"name":"alice","groups":[],"email":null}\n{"name":"bob","groups":[],"email":null}\n'
-
 .. _to-builtins-vs-asdict:
 
 Converting to and from Builtin Types

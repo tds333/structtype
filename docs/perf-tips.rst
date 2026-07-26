@@ -67,33 +67,6 @@ Of course there are downsides to defining smaller "view" types, but if decoding
 performance is a bottleneck in your workflow, you may benefit from this
 technique.
 
-Line-Delimited JSON
-^^^^^^^^^^^^^^^^^^^
-
-When working with newline-delimited JSON (NDJSON), use the class methods
-:meth:`Struct.struct_validate_jsonln` and :meth:`Struct.struct_dump_jsonln`
-to avoid per-line loop overhead:
-
-.. code-block:: python
-
-    >>> from structtype import Struct
-
-    >>> class Item(Struct):
-    ...     name: str
-    ...     price: float
-
-    >>> data = b'{"name":"a","price":1.0}\n{"name":"b","price":2.0}\n'
-    >>> items = Item.struct_validate_jsonln(data)
-
-    >>> for item in items:
-    ...     print(item.name)
-    a
-    b
-
-    >>> encoded = Item.struct_dump_jsonln(items)
-    >>> encoded
-    b'{"name":"a","price":1.0}\n{"name":"b","price":2.0}\n'
-
 Use ``gc=False``
 -----------------
 
