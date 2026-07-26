@@ -20,14 +20,6 @@ functions*: `struct_dump` and `struct_validate`.
 These functions are designed to be paired with a Python serialization library as
 pre/post processors for typical ``dumps`` and ``loads`` functions.
 
-.. image:: _static/converters-light.svg
-   :align: center
-   :class: only-light
-
-.. image:: _static/converters-dark.svg
-   :align: center
-   :class: only-dark
-
 For example, if ``structtype`` didn't already provide support for ``json``, you
 could add support by wrapping the standard library's `json` module as follows:
 
