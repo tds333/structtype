@@ -1,7 +1,7 @@
 Installation
 ============
 
-``structtype`` may be installed via ``pip`` or ``conda``. Note that Python >= 3.10
+``structtype`` may be installed via ``pip`` or ``uv``. Note that Python >= 3.10
 is required. The basic install has no required dependencies.
 
 **pip**
@@ -10,11 +10,11 @@ is required. The basic install has no required dependencies.
 
     pip install structtype
 
-**conda**
+**uv**
 
 .. code-block:: shell
 
-    conda install structtype -c conda-forge
+    uv add structtype
 
 
 Installing from GitHub

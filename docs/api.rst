@@ -61,49 +61,6 @@ StructAdapter
 .. autoclass:: StructAdapter
     :members:
 
-.. _inspect-api:
-
-Inspect
--------
-
-.. currentmodule:: structtype._inspect
-
-.. autoclass:: Type
-.. autoclass:: Metadata
-.. autoclass:: AnyType
-.. autoclass:: NoneType
-.. autoclass:: BoolType
-.. autoclass:: IntType
-.. autoclass:: FloatType
-.. autoclass:: StrType
-.. autoclass:: BytesType
-.. autoclass:: ByteArrayType
-.. autoclass:: MemoryViewType
-.. autoclass:: DateTimeType
-.. autoclass:: TimeType
-.. autoclass:: DateType
-.. autoclass:: TimeDeltaType
-.. autoclass:: UUIDType
-.. autoclass:: DecimalType
-.. autoclass:: RawType
-.. autoclass:: EnumType
-.. autoclass:: LiteralType
-.. autoclass:: CustomType
-.. autoclass:: UnionType
-    :members:
-.. autoclass:: CollectionType
-.. autoclass:: ListType
-.. autoclass:: SetType
-.. autoclass:: FrozenSetType
-.. autoclass:: DictType
-.. autoclass:: TypedDictType
-.. autoclass:: FrozenDictType
-.. autoclass:: VarTupleType
-.. autoclass:: TupleType
-.. autoclass:: NamedTupleType
-.. autoclass:: DataclassType
-.. autoclass:: StructType
-
 
 Exceptions
 ----------

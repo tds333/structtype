@@ -7,6 +7,8 @@ specifications from structtype-compatible :doc:`types <supported-types>` and
 
 - `json_schema()`: a function that generates a complete JSON Schema as a Python dict.
 - `json_schema_dump()`: a convenience wrapper that returns the schema as JSON bytes.
+- `json_schema_components()`: generates schemas for multiple types at once, returning
+  per-type schemas and shared component definitions. Usable in other frameworks.
 
 
 The generated schemas are compatible with `JSON Schema`_ 2020-12 and OpenAPI_
@@ -89,20 +91,35 @@ Schema Components
 -----------------
 
 If you need to generate schemas for multiple related types, use
-`json_schema_components()`. This is more efficient than calling `json_schema()` in
-a loop, and returns separate definitions and the root-level schema as a tuple:
+`json_schema_components()`. This is more efficient than calling `json_schema()`
+in a loop, and returns separate per-type schemas together with shared component
+definitions:
 
 .. code-block:: python
 
-    >>> from structtype import json_schema, json_schema_dump, json_schema_components
+    >>> from structtype import json_schema_components
 
-    >>> schemas, root = json_schema_components([Dimensions, Product])
+    >>> schemas, components = json_schema_components([Dimensions, Product])
 
-    >>> root
-    {'$ref': '#/$defs/Dimensions', '$defs': {'Dimensions': ..., 'Product': ...}}
+    >>> len(schemas)
+    2
 
-    >>> # Encode any of these to JSON via json_schema_dump
-    ... json_bytes = json_schema_dump(Product)
+    >>> # schemas[0] corresponds to the Dimensions type
+    ... schemas[0]
+    {'$ref': '#/$defs/Dimensions', ...}
+
+    >>> # schemas[1] corresponds to the Product type
+    ... schemas[1]
+    {'$ref': '#/$defs/Product', ...}
+
+    >>> # components is a dict mapping type names to their sub-schemas
+    ... list(components.keys())
+    ['Dimensions', 'Product']
+
+    >>> # For a single type, json_schema_dump is a convenience shortcut
+    ... from structtype import json_schema_dump
+    ... json_schema_dump(Product)
+    b'...'
 
 Both functions accept the following keyword arguments:
 

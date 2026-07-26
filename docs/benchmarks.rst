@@ -16,8 +16,8 @@ Benchmarks
     you choose different serialization formats. I encourage you to write your
     own benchmarks before making these decisions.
 
-    In all cases benchmarks were run on my local development machine (a ~2020
-    x86 Linux laptop) using CPython 3.11.
+    In all cases benchmarks were run on my local development machine (~2020
+    x86 Linux desktop) using CPython 3.14.
 
 
 .. _library-comparison:

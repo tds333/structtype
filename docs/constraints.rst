@@ -7,15 +7,18 @@ from JSON:
 
 .. code-block:: python
 
-    >>> from structtype import StructAdapter
+    >>> from structtype import Struct
 
-    >>> StructAdapter(list[int]).struct_validate_json(b"[1, 2, 3]")
-    [1, 2, 3]
+    >>> class IntList(Struct):
+    ...     items: list[int]
 
-    >>> StructAdapter(list[int]).struct_validate_json(b'[1, 2, "oops"]')
+    >>> IntList.struct_validate_json(b'{"items": [1, 2, 3]}')
+    IntList(items=[1, 2, 3])
+
+    >>> IntList.struct_validate_json(b'{"items": [1, 2, "oops"]}')
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `int`, got `str` - at `$[2]`
+    structtype.ValidationError: Expected `int`, got `str` - at `$.items[2]`
 
 Often this is sufficient, but sometimes you also need to impose constraints on
 the *values* (rather than the *types*) found in the message.
@@ -29,17 +32,20 @@ use of the ``gt`` (greater-than) constraint:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Field, StructAdapter
+    >>> from structtype import Field, Struct
 
     >>> PositiveInt = Annotated[int, Field(gt=0)]
 
-    >>> StructAdapter(list[PositiveInt]).struct_validate_json(b'[1, 2, 3]')
-    [1, 2, 3]
+    >>> class PosList(Struct):
+    ...     items: list[PositiveInt]
 
-    >>> StructAdapter(list[PositiveInt]).struct_validate_json(b'[1, 2, -1]')
+    >>> PosList.struct_validate_json(b'{"items": [1, 2, 3]}')
+    PosList(items=[1, 2, 3])
+
+    >>> PosList.struct_validate_json(b'{"items": [1, 2, -1]}')
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `int` >= 1 - at `$[2]`
+    structtype.ValidationError: Expected `int` >= 1 - at `$.items[2]`
 
 Constraints can be combined to enforce complex requirements. Here's a more
 complete example enforcing the following constraints on a ``User`` struct:
@@ -86,15 +92,16 @@ These constraints are valid on `int` or `float` types:
 
 .. code-block:: python
 
-    >>> from structtype import StructAdapter
-
     >>> from typing import Annotated
-    >>> from structtype import Field
+    >>> from structtype import Struct, Field
 
-    >>> StructAdapter(Annotated[int, Field(ge=0)]).struct_validate_json(b'-1')
+    >>> class Value(Struct):
+    ...     val: Annotated[int, Field(ge=0)]
+
+    >>> Value.struct_validate_json(b'{"val": -1}')
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `int` >= 0
+    structtype.ValidationError: Expected `int` >= 0 - at `$.val`
 
 .. warning::
 
@@ -121,17 +128,18 @@ These constraints are valid on `str` types:
 
 .. code-block:: python
 
-    >>> from structtype import StructAdapter
-
     >>> from typing import Annotated
-    >>> from structtype import Field
+    >>> from structtype import Struct, Field
 
-    >>> StructAdapter(Annotated[str, Field(pattern="^[a-z0-9_]*$")]).struct_validate_json(
-    ...     b'"invalid username"',
+    >>> class UserName(Struct):
+    ...     name: Annotated[str, Field(pattern="^[a-z0-9_]*$")]
+
+    >>> UserName.struct_validate_json(
+    ...     b'{"name": "invalid username"}',
     ... )
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `str` matching regex '^[a-z0-9_]*$'
+    structtype.ValidationError: Expected `str` matching regex '^[a-z0-9_]*$' - at `$.name`
 
 .. _datetime-constraints:
 
@@ -147,26 +155,30 @@ These constraints are valid on `datetime.datetime` and `datetime.time` types:
 
 .. code-block:: python
 
-    >>> from structtype import StructAdapter
+    >>> from typing import Annotated
+    >>> from structtype import Struct, Field
 
     >>> from datetime import datetime
 
-    >>> from typing import Annotated
-    >>> from structtype import Field
+    >>> class EventTZ(Struct):
+    ...     at: Annotated[datetime, Field(tz=True)]
 
-    >>> StructAdapter(Annotated[datetime, Field(tz=True)]).struct_validate_json(
-    ...     b'"2022-04-02T18:18:10"',
+    >>> EventTZ.struct_validate_json(
+    ...     b'{"at": "2022-04-02T18:18:10"}',
     ... )  # require timezone aware
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `datetime` with a timezone component
+    structtype.ValidationError: Expected `datetime` with a timezone component - at `$.at`
 
-    >>> StructAdapter(Annotated[datetime, Field(tz=False)]).struct_validate_json(
-    ...     b'"2022-04-02T18:18:10-06:00"',
+    >>> class EventNaive(Struct):
+    ...     at: Annotated[datetime, Field(tz=False)]
+
+    >>> EventNaive.struct_validate_json(
+    ...     b'{"at": "2022-04-02T18:18:10-06:00"}',
     ... )  # require timezone naive
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `datetime` with no timezone component
+    structtype.ValidationError: Expected `datetime` with no timezone component - at `$.at`
 
 Bytes Constraints
 -----------------
@@ -178,17 +190,18 @@ These constraints are valid on `bytes` and `bytearray` types:
 
 .. code-block:: python
 
-    >>> from structtype import StructAdapter
-
     >>> from typing import Annotated
-    >>> from structtype import Field
+    >>> from structtype import Struct, Field
 
-    >>> StructAdapter(Annotated[bytes, Field(min_length=10)]).struct_validate_json(
-    ...     b'"ZXhhbXBsZQ=="',
+    >>> class Payload(Struct):
+    ...     data: Annotated[bytes, Field(min_length=10)]
+
+    >>> Payload.struct_validate_json(
+    ...     b'{"data": "ZXhhbXBsZQ=="}',
     ... )
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `bytes` of length >= 10
+    structtype.ValidationError: Expected `bytes` of length >= 10 - at `$.data`
 
 Sequence Constraints
 --------------------
@@ -200,17 +213,18 @@ These constraints are valid on `list`, `tuple`, `set`, and `frozenset` types:
 
 .. code-block:: python
 
-    >>> from structtype import StructAdapter
-
     >>> from typing import Annotated
-    >>> from structtype import Field
+    >>> from structtype import Struct, Field
 
-    >>> StructAdapter(Annotated[list[int], Field(max_length=3)]).struct_validate_json(
-    ...     b'[1, 2, 3, 4]',
+    >>> class SmallList(Struct):
+    ...     items: Annotated[list[int], Field(max_length=3)]
+
+    >>> SmallList.struct_validate_json(
+    ...     b'{"items": [1, 2, 3, 4]}',
     ... )
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `array` of length <= 3
+    structtype.ValidationError: Expected `array` of length <= 3 - at `$.items`
 
 Mapping Constraints
 -------------------
@@ -222,16 +236,17 @@ These constraints are valid on `dict` types:
 
 .. code-block:: python
 
-    >>> from structtype import StructAdapter
-
     >>> from typing import Annotated
-    >>> from structtype import Field
+    >>> from structtype import Struct, Field
 
-    >>> StructAdapter(Annotated[dict[str, int], Field(max_length=3)]).struct_validate_json(
-    ...     b'{"a": 1, "b": 2, "c": 3, "d": 4}',
+    >>> class SmallDict(Struct):
+    ...     items: Annotated[dict[str, int], Field(max_length=3)]
+
+    >>> SmallDict.struct_validate_json(
+    ...     b'{"items": {"a": 1, "b": 2, "c": 3, "d": 4}}',
     ... )
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    structtype.ValidationError: Expected `object` of length <= 3
+    structtype.ValidationError: Expected `object` of length <= 3 - at `$.items`
 
 .. _timezone-aware: https://docs.python.org/3/library/datetime.html#aware-and-naive-objects

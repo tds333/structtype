@@ -3,8 +3,9 @@ Converters
 
 .. currentmodule:: structtype
 
-``structtype`` provides builtin support for several common protocols (``json``,
-``json``). Support for additional protocols may be
+``structtype.Struct`` provides builtin support for ``Python`` and ``Json``
+validating and dumping.
+Support for additional protocols may be
 added by combining a serialization library with structtype's *converter
 functions*: `struct_dump` and `struct_validate`.
 

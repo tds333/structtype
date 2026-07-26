@@ -3,8 +3,8 @@ Extending
 
 To allow encoding/decoding types other than those :doc:`natively supported
 <supported-types>`, ``structtype`` provides a few callbacks. These may be
-passed to ``struct_dump_json`` / ``struct_validate_json`` as keyword arguments,
-or to the ``Encoder`` / ``Decoder`` classes for reuse.
+passed to ``struct_dump_json`` / ``struct_validate_json``
+or to the ``struct_dump`` / ``struct_validate`` as keyword arguments.
 
 - ``enc_hook``, for transforming custom types into values
   that ``structtype``:doc:`natively supports <supported-types>`.
@@ -58,9 +58,9 @@ This method works best for types that are similar to a natively supported type
 (e.g. a `collections.deque` is similar to a `list`).  This can be accomplished
 by defining two callback functions:
 
-- ``enc_hook`` in ``Encoder``, for transforming custom types into values
+- ``enc_hook`` in ``struct_dump``, for transforming custom types into values
   that ``structtype`` already knows how to serialize.
-- ``dec_hook`` in ``Decoder``, for converting natively supported types back
+- ``dec_hook`` in ``struct_validate``, for converting natively supported types back
   into a custom type when using :ref:`typed decoding <typed-decoding>`.
 
 Here we define ``enc_hook`` and ``dec_hook`` callbacks to convert `complex`
