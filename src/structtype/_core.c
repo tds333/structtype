@@ -18784,7 +18784,7 @@ PyDoc_STRVAR(structtype_convert__doc__,
 "    An optional callback for handling decoding custom types. Should have the\n"
 "    signature ``dec_hook(type: Type, obj: Any) -> Any``, where ``type`` is the\n"
 "    expected message type, and ``obj`` is the decoded representation composed\n"
-"    of only basic MessagePack types. This hook should transform ``obj`` into\n"
+"    of only basic JSON types. This hook should transform ``obj`` into\n"
 "    type ``type``, or raise a ``NotImplementedError`` if unsupported.\n"
 "builtin_types: Iterable[type], optional\n"
 "    Useful for wrapping other serialization protocols. An iterable of types to\n"

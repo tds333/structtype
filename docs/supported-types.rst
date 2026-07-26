@@ -1552,7 +1552,6 @@ JSON_ types are decoded to Python types as follows:
    exponent components (e.g. ``1`` but not ``1.0`` or ``1e10``). All other
    numbers decode as floats.
 
-<!-- MessagePack, YAML, and TOML type mappings removed -->
 
 
 .. _type annotations: https://docs.python.org/3/library/typing.html
