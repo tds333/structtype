@@ -19442,8 +19442,8 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
 static struct PyMethodDef structtype_methods[] = {
     {"json_encode", (PyCFunction) structtype_json_encode, METH_FASTCALL | METH_KEYWORDS, ""},
     {"json_decode", (PyCFunction) structtype_json_decode, METH_FASTCALL | METH_KEYWORDS, ""},
-    {"_to_builtins", structtype_to_builtins, METH_VARARGS | METH_KEYWORDS, ""},
-    {"_convert", structtype_convert, METH_VARARGS | METH_KEYWORDS, ""},
+    {"_to_builtins", (PyCFunction) structtype_to_builtins, METH_VARARGS | METH_KEYWORDS, ""},
+    {"_convert", (PyCFunction) structtype_convert, METH_VARARGS | METH_KEYWORDS, ""},
     {NULL, NULL} /* sentinel */
 };
 
