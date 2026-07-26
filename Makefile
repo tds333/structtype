@@ -10,6 +10,7 @@ build: ## Build
 
 .PHONY: docs
 docs: ## build docs
+	rm -rf .doctrees site
 	uv run --group docs sphinx-build -d .doctrees -b html docs site --fail-on-warning
 
 ##@ Quality
