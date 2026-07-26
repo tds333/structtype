@@ -9967,6 +9967,25 @@ ms_decode_custom(PyObject *obj, PyObject *dec_hook, TypeNode* type, PathNode *pa
         custom_cls = custom_obj;
     }
 
+    /* Custom type — struct_validate(dict) */
+    if (PyObject_HasAttrString(custom_cls, "struct_validate") && out != Py_None) {
+        int is_inst = PyObject_IsInstance(out, custom_cls);
+        if (is_inst < 0) {
+            Py_DECREF(out);
+            return NULL;
+        }
+        if (!is_inst) {
+            PyObject *temp = PyObject_CallMethod(custom_cls, "struct_validate", "O", out);
+            if (temp == NULL) {
+                Py_DECREF(out);
+                ms_maybe_wrap_validation_error(path);
+                return NULL;
+            }
+            Py_DECREF(out);
+            out = temp;
+        }
+    }
+
     /* Pydantic BaseModel — model_validate(dict) */
     if (PyObject_HasAttrString(custom_cls, "model_validate") && out != Py_None) {
         int is_inst = PyObject_IsInstance(out, custom_cls);
@@ -9994,8 +10013,28 @@ ms_decode_custom(PyObject *obj, PyObject *dec_hook, TypeNode* type, PathNode *pa
         out = temp;
     }
 
-    /* Check that the decoded value matches the expected type */
+    /* Auto-coerce subclasses of built-in types.
+     * e.g. OrderedDict(dict), Counter(dict), deque(list), IPv4Address(str) */
     status = PyObject_IsInstance(out, custom_cls);
+    if (status == 0 && PyType_IsSubtype((PyTypeObject *)custom_cls, Py_TYPE(out))) {
+        PyObject *temp = PyObject_CallOneArg(custom_cls, out);
+        if (temp == NULL) {
+            Py_DECREF(out);
+            ms_maybe_wrap_validation_error(path);
+            if (generic) { Py_DECREF(custom_cls); }
+            return NULL;
+        }
+        Py_DECREF(out);
+        out = temp;
+        status = 1;
+    }
+    else if (status < 0) {
+        Py_DECREF(out);
+        if (generic) { Py_DECREF(custom_cls); }
+        return NULL;
+    }
+
+    /* Check that the decoded value matches the expected type */
     if (status == 0) {
         ms_raise_validation_error(
             path,
@@ -10003,9 +10042,6 @@ ms_decode_custom(PyObject *obj, PyObject *dec_hook, TypeNode* type, PathNode *pa
             ((PyTypeObject *)custom_cls)->tp_name,
             Py_TYPE(out)->tp_name
         );
-        Py_CLEAR(out);
-    }
-    else if (status == -1) {
         Py_CLEAR(out);
     }
 
@@ -13374,6 +13410,14 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     else if (PyAnySet_Check(obj)) {
         return json_encode_set(self, obj);
     }
+    else if (PyObject_HasAttrString(obj, "struct_dump")) {
+        /* Custom type — struct_dump() to a base type, then re-encode */
+        PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
+        if (dumped == NULL) return -1;
+        int status = json_encode_inline(self, dumped);
+        Py_DECREF(dumped);
+        return status;
+    }
     else if (PyObject_HasAttrString(obj, "model_dump")) {
         /* Pydantic BaseModel — model_dump() to dict, then encode */
         PyObject *dict = PyObject_CallMethod(obj, "model_dump", NULL);
@@ -13453,7 +13497,7 @@ json_encode_inline(EncoderState *self, PyObject *obj)
 {
     PyTypeObject *type = Py_TYPE(obj);
 
-    if (type == &PyUnicode_Type) {
+    if (PyUnicode_Check(obj)) {
         return json_encode_str(self, obj);
     }
     else if (type == &PyLong_Type) {
@@ -16787,7 +16831,7 @@ to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
         type == &PyBool_Type ||
         type == &PyLong_Type ||
         type == &PyFloat_Type ||
-        type == &PyUnicode_Type
+        PyUnicode_Check(obj)
     ) {
         goto builtin;
     }
@@ -16865,6 +16909,14 @@ to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
     }
     else if (PyAnySet_Check(obj)) {
         return to_builtins_set(self, obj, is_key);
+    }
+    else if (PyObject_HasAttrString(obj, "struct_dump")) {
+        /* Custom type — struct_dump() to a base type, then re-process */
+        PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
+        if (dumped == NULL) return NULL;
+        PyObject *result = to_builtins(self, dumped, is_key);
+        Py_DECREF(dumped);
+        return result;
     }
     else if (PyObject_HasAttrString(obj, "model_dump")) {
         /* Pydantic BaseModel — model_dump() to dict, then process */

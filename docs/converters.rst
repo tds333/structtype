@@ -88,3 +88,60 @@ several configuration options:
 
 - ``enc_hook`` / ``dec_hook``: the standard keyword arguments used for
   :doc:`extending` structtype to support additional types.
+
+
+StructAdapter
+-------------
+
+For encoding and validating plain types without defining a full ``Struct``
+subclass, use :class:`StructAdapter`. It wraps any supported type and
+provides `struct_dump_json`, `struct_validate_json`,
+`struct_dump`, and `struct_validate` methods:
+
+.. code-block:: python
+
+    >>> from structtype import StructAdapter
+
+    >>> adapter = StructAdapter(list[int])
+    >>> adapter.struct_validate_json(b"[1, 2, 3]")
+    [1, 2, 3]
+
+    >>> adapter.struct_validate_json(b'[1, 2, "oops"]')
+    Traceback (most recent call last):
+        ...
+    structtype.ValidationError: Expected `int`, got `str` - at `$[2]`
+
+    >>> StructAdapter(dict[str, int]).struct_dump_json({"a": 1})
+    b'{"a":1}'
+
+This is used throughout the :doc:`supported-types <supported-types>`
+documentation to demonstrate structtype's type handling without
+creating named ``Struct`` subclasses for every example.
+
+
+StrAdapter
+----------
+
+For types that validate from and serialize to strings, :class:`StrAdapter`
+provides a simpler alternative to ``enc_hook`` / ``dec_hook``. It creates a
+``str`` subclass that validates values via the wrapped type's constructor:
+
+.. code-block:: python
+
+    >>> from structtype import StrAdapter, Struct
+    >>> from pydantic import HttpUrl
+    >>> from ipaddress import IPv4Address
+
+    >>> class Config(Struct):
+    ...     url: StrAdapter(HttpUrl)
+    ...     ip: StrAdapter(IPv4Address)
+
+    >>> Config.struct_validate_json(
+    ...     b'{"url": "https://example.com", "ip": "10.0.0.1"}'
+    ... )
+    Config(url='https://example.com/', ip='10.0.0.1')
+
+The wrapped type must accept a single string argument in its constructor
+and raise an error if the value is invalid. Compatible with pydantic's
+``HttpUrl``, ``PostgresDsn``, ``AnyUrl``, and stdlib's ``IPv4Address``,
+``IPv6Address``.
