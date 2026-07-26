@@ -46,17 +46,6 @@ dev = [
   "pytest>=9",
   "pytest-coverage>=0.0",
 ]
-bench = [
-  "cattrs==25.3.0",
-  "mashumaro==3.17",
-  "msgspec",
-  "orjson==3.11.4",
-  "pydantic==2.12.4",
-  "pysimdjson==7.0.2",
-  "python-rapidjson==1.22",
-  "requests",
-  "ujson==5.11.0",
-]
 docs = [
   "furo",
   "ipython",
@@ -64,11 +53,6 @@ docs = [
   "sphinx",
   "sphinx-copybutton",
   "sphinx-design",
-]
-hooks = [
-  "codespell==2.4.1",
-  "prek>=0.2.13",
-  "ruff==0.15.16",
 ]
 
 [build-system]

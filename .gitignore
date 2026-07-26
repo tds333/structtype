@@ -22,7 +22,7 @@ __pycache__/
 venv*/
 
 # Version file
-/src/structtype/_version.py
+src/structtype/_version.py
 
 # uv dependency lock file
 uv.lock

@@ -49,8 +49,7 @@ format: ## Format files using ruff format
 ##@ Benchmark
 .PHONY: bench
 bench: ## run benchmarks
-	uv run --group bench benchmarks/bench_compare.py
-	uv run --group bench benchmarks/bench_libs.py
+	uv run benchmarks/bench_libs.py
 
 ##@ Utility
 .PHONY: clean

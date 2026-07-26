@@ -20,170 +20,99 @@ Benchmarks
     x86 Linux laptop) using CPython 3.11.
 
 
-JSON Serialization & Validation
--------------------------------
+Library Comparison
+------------------
 
-This benchmark covers the common case when working with ``structtype`` or other
-validation libraries. It measures two things:
+This benchmark compares ``structtype`` against ``msgspec`` and ``pydantic``
+across two common data shapes:
 
-- Decoding some JSON input, validating it against a schema, and converting it
-  into user-friendly python objects.
-- Encoding these same python objects back into JSON.
-
-The data we're working with has the following schema (defined here using
-`structtype.Struct` types):
+**E-commerce data** — flat structs with lists and optional fields (``Item`` /
+``Order``):
 
 .. code-block:: python
 
-    import enum
-    import datetime
-    from structtype import Struct
-
-    class Permissions(enum.Enum):
-        READ = "READ"
-        WRITE = "WRITE"
-        READ_WRITE = "READ_WRITE"
-
-
-    class File(Struct, kw_only=True, tag="file"):
+    class Item(Struct):
         name: str
-        created_by: str
-        created_at: datetime.datetime
-        updated_by: str | None = None
-        updated_at: datetime.datetime | None = None
-        nbytes: int
-        permissions: Permissions
+        price: float
+        tags: list[str] = []
+        metadata: dict[str, str] | None = None
 
+    class Order(Struct, kw_only=True):
+        id: int
+        customer: str
+        items: list[Item]
+        created_at: str
+        status: str = "pending"
 
-    class Directory(Struct, kw_only=True, tag="directory"):
+A set of 500 randomized orders is used to measure:
+
+- ``struct → dict`` serialization
+- ``dict → struct`` validation
+- ``struct → JSON`` encoding
+- ``JSON → struct`` decoding
+
+**Tagged union data** — recursively nested ``File`` / ``Dir`` tree:
+
+.. code-block:: python
+
+    class File(Struct, tag="file", kw_only=True):
         name: str
-        created_by: str
-        created_at: datetime.datetime
-        updated_by: str | None = None
-        updated_at: datetime.datetime | None = None
-        contents: list[File | Directory]
+        size: int
 
+    class Dir(Struct, tag="dir", kw_only=True):
+        name: str
+        contents: list[File | Dir]
 
-The libraries we're comparing are the following:
-
-- structtype_ (0.18.5)
-- mashumaro_ (3.11)
-- pydantic_ (both 1.10.13 and 2.5.2)
-- cattrs_ (23.2.3)
-
-Each benchmark creates a message containing one or more ``File`` / ``Directory``
-instances, then serializes, deserializes, and validates it in a loop.
+A single deeply nested tree (depth 4, branching up to 5) is used to measure
+JSON encode/decode performance specifically.
 
 The full benchmark source can be found
-`here <https://github.com/tds333/structtype/tree/main/benchmarks/bench_validation>`__.
+`here <https://github.com/tds333/structtype/blob/main/benchmarks/bench_libs.py>`__.
 
-.. raw:: html
+.. code-block:: text
+    :caption: Python 3.14, structtype 0.1.1, msgspec 0.21.1, pydantic 2.13.4
 
-    <div id="bench-validate" style="width:75%"></div>
+    Dump (struct → dict)
+    -------------------------------------------------------
+      structtype           1257.3 μs   (1.00x)
+      msgspec              1302.6 μs   (1.04x)
+      pydantic             4247.2 μs   (3.38x)
 
-In this benchmark ``structtype`` is ~6x faster than ``mashumaro``, ~10x faster
-than ``cattrs``, and ~12x faster than ``pydantic`` V2, and ~85x faster than
-``pydantic`` V1.
+    Load (dict → struct)
+    -------------------------------------------------------
+      structtype           1237.3 μs   (1.00x)
+      msgspec              1333.2 μs   (1.08x)
+      pydantic             6483.4 μs   (5.24x)
 
-This plot shows the performance benefit of performing type validation during
-message decoding (as done by ``structtype``) rather than as a secondary step with
-a third-party library like cattrs_ or pydantic_ V1. Validating after decoding
-is slower for two reasons:
+    Dump JSON (struct → bytes)
+    -------------------------------------------------------
+      structtype           1025.1 μs   (1.00x)
+      msgspec              1039.8 μs   (1.01x)
+      pydantic             4136.8 μs   (4.04x)
 
-- It requires traversing over the entire output structure a second time (which
-  can be slow due to pointer chasing)
+    Load JSON (bytes → struct)
+    -------------------------------------------------------
+      structtype           2330.7 μs   (1.00x)
+      msgspec              2445.7 μs   (1.05x)
+      pydantic             8064.7 μs   (3.46x)
 
-- It may require converting some python objects to their desired output types
-  (e.g. converting a decoded `dict` to a pydantic_ model), resulting in
-  allocating many temporary python objects.
+    Dump JSON (tagged union)
+    -------------------------------------------------------
+      structtype              1.6 μs   (1.05x)
+      msgspec                 1.6 μs   (1.00x)
+      pydantic               21.1 μs   (13.61x)
 
-In contrast, libraries like ``structtype`` that validate during decoding have none
-of these issues. Only a single pass over the decoded data is taken, and the
-specified output types are created correctly the first time, avoiding the need
-for additional unnecessary allocations.
+    Load JSON (tagged union)
+    -------------------------------------------------------
+      structtype              4.3 μs   (1.02x)
+      msgspec                 4.2 μs   (1.00x)
+      pydantic               22.4 μs   (5.32x)
 
-This benefit also shows up in the memory usage for the same benchmark:
+For flat data, ``structtype`` and ``msgspec`` perform within ~5% of each other
+across all operations, while ``pydantic`` is 3–5x slower. The tagged union
+benchmark tells the same story: both libraries are essentially tied,
+with ``pydantic`` 5–14x behind across all measurement types.
 
-.. raw:: html
-
-    <div id="bench-validate-memory" style="width:75%"></div>
-
-Here we compare the peak increase in memory usage (RSS) after loading the
-schemas and data. ``structtype``'s small library size, schema representation, and
-in-memory state means it uses a fraction of the memory of other tools.
-
-.. _json-benchmark:
-
-JSON Serialization
-------------------
-
-``structtype`` includes its own high performance JSON library, which may be used
-by itself as a replacement for the standard library's `json.dumps` / `json.loads`
-functions. Here we compare structtype's JSON implementation against several other
-popular Python JSON libraries.
-
-- structtype_ (0.18.5)
-- orjson_ (3.9.10)
-- ujson_ (5.9.0)
-- rapidjson_ (1.13)
-- simdjson_ (5.0.2)
-- json_ (standard library)
-
-The full benchmark source can be found
-`here <https://github.com/tds333/structtype/blob/main/benchmarks/bench_encodings.py>`__.
-
-.. raw:: html
-
-    <div id="bench-json" style="width:75%"></div>
-
-In this case ``structtype structs`` (which measures ``structtype`` with
-``structtype.Struct`` schemas pre-defined) is the fastest. When used without
-schemas, ``structtype`` is on-par with ``orjson`` (the next fastest JSON library).
-
-This shows that ``structtype`` is able to decode JSON faster when a schema is
-provided. Due to a more efficient in memory representation, JSON decoding AND
-schema validation with ``structtype`` than just JSON decoding alone.
-
-
-JSON Serialization - Large Data
--------------------------------
-
-Here we benchmark loading a `large JSON file
-<https://conda.anaconda.org/conda-forge/noarch/repodata.json>`__ (~77 MiB)
-containing information on all the ``noarch`` packages in conda-forge_. We
-compare the following libraries:
-
-- structtype_ (0.18.5)
-- orjson_ (3.9.10)
-- ujson_ (5.9.0)
-- rapidjson_ (1.13)
-- simdjson_ (5.0.2)
-- json_ (standard library)
-
-For each library, we measure both the peak increase in memory usage (RSS) and
-the time to JSON decode the file.
-
-The full benchmark source can be found `here
-<https://github.com/tds333/structtype/blob/main/benchmarks/bench_large_json.py>`__.
-
-- ``structtype`` decoding into :doc:`Struct <structs>` types uses the least amount of
-  memory, and is also the fastest to decode. This makes sense; ``Struct`` types
-  are cheaper to allocate and more memory efficient than ``dict`` types, and for
-  large messages these differences can really add up.
-
-- ``structtype`` decoding without a schema is the second best option for both
-  memory usage and speed. When decoding without a schema, ``structtype`` makes the
-  assumption that the underlying message probably still has some structure;
-  short dict keys are temporarily cached to be reused later on, rather than
-  reallocated every time. This means that instead of allocating 10,000 copies
-  of the string ``"name"``, only a single copy is allocated and reused. For
-  large messages this can lead to significant memory savings. ``json`` and
-  ``orjson`` also use similar optimizations, but not as effectively.
-
-- ``orjson`` and ``simdjson`` use 6-9x more memory than ``structtype`` in this
-  benchmark. In addition to the reasons above, both of these decoders require
-  copying the original message into a temporary buffer. In this case, the extra
-  copy adds an extra 77 MiB of overhead!
 
 .. _struct-benchmark:
 
@@ -259,200 +188,8 @@ The full benchmark source can be found `here
   lowest GC pause (75x faster than standard classes!) since the entire
   composing dict can be skipped during GC traversal.
 
-
-.. _benchmark-library-size:
-
-Library Size
-------------
-
-Here we compare the on-disk size of ``structtype`` and ``pydantic``, its closest
-equivalent.
-
-The full benchmark source can be found `here
-<https://github.com/tds333/structtype/blob/main/benchmarks/bench_library_size.py>`__.
-
-For applications where dependency size matters, ``structtype`` is roughly 15x
-smaller on disk.
-
-.. raw:: html
-
-    <script src="https://cdn.jsdelivr.net/npm/vega@5.22.1"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vega-lite@5.5.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vega-embed@6.21.0"></script>
-
-.. raw:: html
-
-    <script type="text/javascript">
-
-    function buildPlot(div, rows, title) {
-        var i, time_unit, scale, max_time = 0;
-        for (i = 0; i < rows.length; i++) {
-            var total = rows[i].encode + rows[i].decode;
-            if (total > max_time) {
-                max_time = total;
-            }
-        }
-        if (max_time < 1e-6) {
-            time_unit = "ns";
-            scale = 1e9;
-        }
-        else if (max_time < 1e-3) {
-            time_unit = "μs";
-            scale = 1e6;
-        }
-        else {
-            time_unit = "ms";
-            scale = 1e3;
-        }
-
-        var columns = ["encode", "decode", "total"];
-        var data = [];
-        for (i = 0; i < rows.length; i++) {
-            var label = rows[i].label;
-            var et = rows[i].encode * scale;
-            var dt = rows[i].decode * scale;
-            var tt = et + dt;
-            data.push({library: label, method: "encode", time: et});
-            data.push({library: label, method: "decode", time: dt});
-            data.push({library: label, method: "total", time: tt});
-        }
-
-        var spec = {
-            "$schema": "https://vega.github.io/schema/vega-lite/v5.2.0.json",
-            "title": title,
-            "config": {
-                "view": {"stroke": null},
-                "legend": {"title": null, "labelFontSize": 12},
-                "title": {"fontSize": 14, "offset": 10},
-                "axis": {"titleFontSize": 12, "titlePadding": 10}
-            },
-            "width": "container",
-            "data": {"values": data},
-            "transform": [
-                {
-                    "calculate": `join([format(datum.time, '.3'), ' ${time_unit}'], '')`,
-                    "as": "tooltip",
-                }
-            ],
-            "mark": "bar",
-            "encoding": {
-                "color": {
-                    "field": "method",
-                    "type": "nominal",
-                    "scale": {"scheme": "tableau20"},
-                    "sort": columns,
-                },
-                "row": {
-                    "field": "library",
-                    "header": {
-                        "orient": "left",
-                        "labelAngle": 0,
-                        "labelAlign": "left",
-                        "labelFontSize": 12
-                    },
-                    "sort": {"field": "time", "op": "sum", "order": "ascending"},
-                    "title": null,
-                    "type": "nominal",
-                },
-                "tooltip": {"field": "tooltip", "type": "nominal"},
-                "x": {
-                    "axis": {"grid": false, "title": `Time (${time_unit})`},
-                    "field": "time",
-                    "type": "quantitative",
-                },
-                "y": {
-                    "axis": {"labels": false, "ticks": false, "title": null},
-                    "field": "method",
-                    "type": "nominal",
-                    "sort": columns,
-                },
-            },
-        };
-        vegaEmbed(div, spec);
-    }
-
-    function buildMemPlot(div, rows, title) {
-        var data = [];
-        for (i = 0; i < rows.length; i++) {
-            data.push({library: rows[i].label, memory: rows[i].memory});
-        }
-
-        var spec = {
-            "$schema": "https://vega.github.io/schema/vega-lite/v5.2.0.json",
-            "title": title,
-            "config": {
-                "view": {"stroke": null},
-                "legend": {"title": null, "labelFontSize": 12},
-                "title": {"fontSize": 14, "offset": 10},
-                "axis": {"titleFontSize": 12, "titlePadding": 10}
-            },
-            "width": "container",
-            "data": {"values": data},
-            "transform": [
-                {
-                    "calculate": "join([format(datum.memory, '.3'), ' MiB'], '')",
-                    "as": "tooltip",
-                }
-            ],
-            "mark": "bar",
-            "encoding": {
-                "row": {
-                    "field": "library",
-                    "header": {
-                        "orient": "left",
-                        "labelAngle": 0,
-                        "labelAlign": "left",
-                        "labelFontSize": 12
-                    },
-                    "sort": {"field": "memory", "order": "ascending"},
-                    "title": null,
-                    "type": "nominal",
-                },
-                "tooltip": {"field": "tooltip", "type": "nominal"},
-                "x": {
-                    "axis": {"grid": false, "title": "Memory (MiB)"},
-                    "field": "memory",
-                    "type": "quantitative",
-                },
-            },
-        };
-        vegaEmbed(div, spec);
-    }
-
-    var results_valid = [
-        {"label": "structtype", "encode": 0.00016727479400015, "decode": 0.0004222057979986857, "memory": 0.640625},
-        {"label": "mashumaro", "encode": 0.000797896412001137, "decode": 0.0026786830099990765, "memory": 7.1171875},
-        {"label": "cattrs", "encode": 0.002065396289999626, "decode": 0.0033923348699954657, "memory": 3.25390625},
-        {"label": "pydantic v2", "encode": 0.0034702956599994648, "decode": 0.0038069566000012854, "memory": 16.26171875},
-        {"label": "pydantic v1", "encode": 0.01961492505001843, "decode": 0.02528851079996457, "memory": 10.03125},
-    ];
-    var results_json = [
-        {"label": "structtype structs", "encode": 0.00014051752349996606, "decode": 0.00036725287499939443},
-        {"label": "structtype", "encode": 0.00018274705249996258, "decode": 0.00048175174399875685},
-        {"label": "json", "encode": 0.0012280583099982323, "decode": 0.0009195450700008223},
-        {"label": "orjson", "encode": 0.00017935967999983403, "decode": 0.0004634268540012272},
-        {"label": "ujson", "encode": 0.0006279176680000091, "decode": 0.0008554406740004197},
-        {"label": "rapidjson", "encode": 0.000513588076000815, "decode": 0.0011320363100003306},
-        {"label": "simdjson", "encode": 0.00123421613499886, "decode": 0.0007710835699999734},
-    ];
-        {"label": "structtype structs", "encode": 0.00011157811949942698, "decode": 0.000347989668000082},
-        {"label": "structtype", "encode": 0.00012483930500002316, "decode": 0.000487175850001222},
-    ];
-    buildPlot('#bench-validate', results_valid, "Benchmark - JSON Serialization & Validation");
-    buildMemPlot('#bench-validate-memory', results_valid, "Benchmark - Serialization & Validation");
-    buildPlot('#bench-json', results_json, "Benchmark - JSON Serialization");
-    </script>
-
-
 .. _structtype: https://structtype.dev
-.. _orjson: https://github.com/ijl/orjson
-.. _json: https://docs.python.org/3/library/json.html
-.. _simdjson: https://github.com/TkTech/pysimdjson
-.. _ujson: https://github.com/ultrajson/ultrajson
-.. _rapidjson: https://github.com/python-rapidjson/python-rapidjson
+.. _msgspec: https://jcristharif.com/msgspec/
 .. _attrs: https://www.attrs.org/en/stable/
 .. _dataclasses: https://docs.python.org/3/library/dataclasses.html
 .. _pydantic: https://pydantic.dev/docs/validation/latest/get-started/
-.. _cattrs: https://catt.rs/en/latest/
-.. _mashumaro: https://github.com/Fatal1ty/mashumaro
-.. _conda-forge: https://conda-forge.org/
