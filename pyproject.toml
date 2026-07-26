@@ -1,0 +1,98 @@
+[project]
+name = "structtype"
+description = "Fast Struct type with validation and JSON serialization for Python."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+license-files = [
+  "LICENSE",
+]
+maintainers = [
+  { name = "Wolfgang Langner", email = "tds333@mailbox.org" },
+]
+keywords = [
+  "JSON",
+  "schema",
+  "serialization",
+  "struct",
+  "validation",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: WebAssembly :: Emscripten",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+]
+dependencies = []
+dynamic = [
+  "version",
+]
+
+[project.urls]
+Homepage = "https://github.com/tds333/structtype"
+"Issue Tracker" = "https://github.com/tds333/structtype/issues"
+Source = "https://github.com/tds333/structtype"
+
+[dependency-groups]
+dev = [
+  "attrs",
+  "coverage",
+  "msgspec",
+  "pydantic; python_version < '3.15'",
+  "pytest>=9",
+  "pytest-coverage>=0.0",
+]
+bench = [
+  "cattrs==25.3.0",
+  "mashumaro==3.17",
+  "msgspec",
+  "orjson==3.11.4",
+  "pydantic==2.12.4",
+  "pysimdjson==7.0.2",
+  "python-rapidjson==1.22",
+  "requests",
+  "ujson==5.11.0",
+]
+docs = [
+  "furo",
+  "ipython",
+  "myst-parser",
+  "sphinx",
+  "sphinx-copybutton",
+  "sphinx-design",
+]
+hooks = [
+  "codespell==2.4.1",
+  "prek>=0.2.13",
+  "ruff==0.15.16",
+]
+
+[build-system]
+requires = [
+  "setuptools>=80",
+  "setuptools-scm>=8",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["structtype"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.exclude-package-data]
+structtype = [
+  "*.c",
+  "*.h",
+]
+
+[tool.setuptools_scm]
+version_file = "src/structtype/_version.py"
+parentdir_prefix_version = "structtype-"
+
+[tool.uv.config-settings]
+editable_mode = "compat"

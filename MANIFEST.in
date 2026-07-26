@@ -1,0 +1,8 @@
+prune .devcontainer
+prune .github
+prune benchmarks
+prune docs
+prune examples
+prune scripts
+exclude .*
+include .cibuildwheel.toml

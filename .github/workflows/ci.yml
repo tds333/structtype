@@ -1,0 +1,145 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sdist-name: ${{ steps.build.outputs.sdist-name }}
+    steps:
+    - uses: actions/checkout@v4.2.2
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - uses: actions/setup-python@v5.5.0
+      with:
+        python-version-file: pyproject.toml
+
+    - uses: astral-sh/setup-uv@v5.3.0
+      with:
+        enable-cache: false
+
+    - name: Build source distribution
+      id: build
+      run: |
+        uv build --sdist
+        sdists=(dist/*.tar.gz)
+        echo "sdist-name=${sdists[0]##*/}" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/upload-artifact@v4.6.1
+      with:
+        name: artifact-sdist
+        path: dist/*.tar.gz
+        if-no-files-found: error
+
+  build-wheels:
+    name: Build ${{ matrix.target }}
+    needs: build-sdist
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - target: "Linux (aarch64)"
+          os: ubuntu-24.04-arm
+          archs: aarch64
+        - target: "Linux (x86_64)"
+          os: ubuntu-latest
+          archs: x86_64
+        - target: "Linux (riscv64)"
+          os: ubuntu-24.04-riscv
+          archs: riscv64
+        - target: "macOS (arm64)"
+          os: macos-latest
+          archs: arm64
+        - target: "macOS (x86_64)"
+          os: macos-13
+          archs: x86_64
+        - target: "Windows (ARM64)"
+          os: windows-11-arm
+          archs: ARM64
+        - target: "Windows (AMD64)"
+          os: windows-latest
+          archs: AMD64
+        - target: "Pyodide (wasm32)"
+          os: ubuntu-latest
+          archs: wasm32
+          platform: pyodide
+    env:
+      CIBW_ARCHS: "${{ matrix.archs }}"
+      CIBW_PLATFORM: "${{ matrix.platform || 'auto' }}"
+      CIBW_SKIP: "${{ github.event_name != 'release' && '*-musllinux_*' || '' }}"
+    steps:
+    - uses: actions/checkout@v4.2.2
+      with:
+        persist-credentials: false
+
+    - uses: actions/download-artifact@v4.2.0
+      with:
+        name: artifact-sdist
+        path: dist
+
+    - uses: actions/setup-python@v5.5.0
+      with:
+        python-version-file: pyproject.toml
+
+    - uses: astral-sh/setup-uv@v5.3.0
+      with:
+        enable-cache: false
+
+    - name: Build wheels
+      if: runner.os != 'Windows'
+      run: >-
+        uvx --from cibuildwheel==4.1.0
+        cibuildwheel
+        --config-file .cibuildwheel.toml
+        --output-dir wheelhouse
+        dist/${{ needs.build-sdist.outputs.sdist-name }}
+
+    - name: Build wheels
+      if: runner.os == 'Windows'
+      run: >-
+        uvx --from cibuildwheel==4.1.0
+        cibuildwheel
+        --config-file .cibuildwheel.toml
+        --output-dir wheelhouse
+        $env:SDIST_NAME
+      env:
+        SDIST_NAME: dist/${{ needs.build-sdist.outputs.sdist-name }}
+
+    - uses: actions/upload-artifact@v4.6.1
+      with:
+        name: artifact-wheels-${{ matrix.os }}-${{ matrix.archs }}
+        path: wheelhouse/*.whl
+        if-no-files-found: error
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: [build-sdist, build-wheels]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/download-artifact@v4.2.0
+      with:
+        pattern: artifact-*
+        merge-multiple: true
+        path: dist
+
+    - uses: pypa/gh-action-pypi-publish@v1.14.0

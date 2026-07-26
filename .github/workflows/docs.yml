@@ -1,0 +1,30 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v5.3.0
+      - run: make docs
+      - uses: actions/upload-pages-artifact@v3.0.1
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4.0.5

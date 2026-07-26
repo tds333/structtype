@@ -1,0 +1,68 @@
+# Editor config folders
+## Vscode
+.settings/
+.project
+.vscode/
+.vs/
+## PyCharm/IntelliJ-generated files
+*.iml
+.idea/
+
+# Dotenv files meant for local use or those containing secrets
+.env
+.env.local
+.env.*.local
+
+# Python cached sources
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv*/
+venv*/
+
+# Version file
+/src/structtype/_version.py
+
+# uv dependency lock file
+uv.lock
+
+# Pytest and coverage
+.coverage
+.pytest/
+.pytest_cache/
+htmlcov/
+
+# Ruff Cache
+.ruff_cache/
+
+# Mypy Cache
+.mypy_cache/
+
+# Docs build
+site/
+/.doctrees/
+/.wrangler/
+
+# Docs link check cache
+/.lycheecache
+
+# Benchmark outputs
+benchmarks/*.html
+benchmarks/*.json
+
+# Setuptools/twine-generated files, compiled sources.
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+*.so
+*.o
+*.pyd
+
+# Misc
+*.pem
+out/
+.cache/
+.DS_Store
+graphify-out/cache
