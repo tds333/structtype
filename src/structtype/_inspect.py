@@ -624,6 +624,33 @@ class FieldInfo(structtype.Struct):
 
 
 def fields(type_or_instance: Struct | type[Struct]) -> tuple[FieldInfo, ...]:
+    """Get introspection information about a struct's fields.
+
+    Returns a tuple of :class:`FieldInfo` objects describing each field in
+    declaration order.
+
+    Parameters
+    ----------
+    type_or_instance : Struct or type[Struct]
+        A struct type or struct instance.
+
+    Returns
+    -------
+    tuple[FieldInfo, ...]
+        A tuple of FieldInfo objects, one per field in declaration order.
+
+    Examples
+    --------
+    >>> from structtype import Struct, fields
+
+    >>> class Point(Struct):
+    ...     x: float
+    ...     y: float
+
+    >>> fields(Point)
+    (FieldInfo(name='x', encode_name='x', type=<class 'float'>, required=True),
+     FieldInfo(name='y', encode_name='y', type=<class 'float'>, required=True))
+    """
     obj = type_or_instance
     if isinstance(obj, StructMeta):
         annotated_cls = cls = obj

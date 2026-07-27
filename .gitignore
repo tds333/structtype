@@ -66,3 +66,4 @@ out/
 .cache/
 .DS_Store
 graphify-out/cache
+docs/superpowers
