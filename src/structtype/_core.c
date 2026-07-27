@@ -7594,7 +7594,7 @@ Struct_build_abstract_error(PyTypeObject *cls) {
     Py_DECREF(joined);
 }
 
-static int struct_check_recursive(PyObject *, StructspecState *, int, PyObject *);
+static int struct_check_recursive(PyObject *, StructspecState *);
 
 static PyObject *
 Struct_vectorcall(PyTypeObject *cls, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
@@ -7715,7 +7715,7 @@ kw_found:
     if (st_type->validate_on_init == OPT_TRUE) {
         StructspecState *mod = structtype_get_global_state();
         if (mod == NULL) goto error;
-        if (struct_check_recursive(self, mod, 1, NULL) < 0) goto error;
+        if (struct_check_recursive(self, mod) < 0) goto error;
     }
 
     if (Struct_post_init(st_type, self) < 0) goto error;
@@ -19073,9 +19073,7 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
 static int
 struct_check_recursive(
     PyObject *self,
-    StructspecState *mod,
-    int strict,
-    PyObject *dec_hook
+    StructspecState *mod
 ) {
     StructMetaObject *st_type = (StructMetaObject *)Py_TYPE(self);
 
@@ -19084,14 +19082,6 @@ struct_check_recursive(
     StructInfo *info = (StructInfo *)info_obj;
 
     Py_ssize_t nfields = PyTuple_GET_SIZE(st_type->struct_fields);
-
-    ConvertState state;
-    state.mod = mod;
-    state.strict = strict;
-    state.from_attributes = 0;
-    state.dec_hook = dec_hook;
-    state.str_keys = strict ? 0 : 1;
-    state.builtin_types = 0;
 
     int ret = 0;
     for (Py_ssize_t i = 0; i < nfields && ret == 0; i++) {
@@ -19105,7 +19095,7 @@ struct_check_recursive(
         if (field_type->types & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
             StructInfo *nested_info = TypeNode_get_struct_info(field_type);
             if (Py_TYPE(val) == (PyTypeObject *)nested_info->class) {
-                ret = struct_check_recursive(val, mod, strict, dec_hook);
+                ret = struct_check_recursive(val, mod);
                 continue;
             }
         }
@@ -19114,12 +19104,19 @@ struct_check_recursive(
             field_type->types & (MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION)
         ) {
             if (ms_is_struct_inst(val)) {
-                ret = struct_check_recursive(val, mod, strict, dec_hook);
+                ret = struct_check_recursive(val, mod);
                 continue;
             }
         }
 
         /* All other types: validate via convert() */
+        ConvertState state;
+        state.mod = mod;
+        state.strict = 1;
+        state.from_attributes = 0;
+        state.dec_hook = NULL;
+        state.str_keys = 0;
+        state.builtin_types = 0;
         PyObject *out = convert(&state, val, field_type, NULL);
         if (out == NULL) {
             ret = -1;
@@ -19139,38 +19136,24 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
         return PyErr_Format(PyExc_TypeError,
             "struct_validate_self() takes no positional arguments (%zd given)", nargs);
     }
+    if (kwnames != NULL) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
+        if (nkwargs > 0) {
+            PyObject *name = PyTuple_GET_ITEM(kwnames, 0);
+            return PyErr_Format(PyExc_TypeError,
+                "struct_validate_self() got an unexpected keyword argument '%U'", name);
+        }
+    }
 
     StructspecState *mod = structtype_get_global_state();
     if (mod == NULL) return NULL;
-
-    /* Parse optional kwargs */
-    PyObject *dec_hook = NULL;
-    int strict = 1;
-    if (kwnames != NULL) {
-        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
-        for (Py_ssize_t i = 0; i < nkwargs; i++) {
-            PyObject *name = PyTuple_GET_ITEM(kwnames, i);
-            PyObject *val = args[nargs + i];
-            if (PyUnicode_CompareWithASCIIString(name, "strict") == 0) {
-                strict = PyObject_IsTrue(val);
-            } else if (PyUnicode_CompareWithASCIIString(name, "dec_hook") == 0) {
-                if (val != Py_None && !PyCallable_Check(val)) {
-                    return PyErr_Format(PyExc_TypeError, "dec_hook must be callable");
-                }
-                dec_hook = (val == Py_None) ? NULL : val;
-            } else {
-                return PyErr_Format(PyExc_TypeError,
-                    "struct_validate_self() got an unexpected keyword argument '%U'", name);
-            }
-        }
-    }
 
     if (!ms_is_struct_inst(self)) {
         PyErr_SetString(PyExc_TypeError, "struct_validate_self() requires a Struct instance");
         return NULL;
     }
 
-    if (struct_check_recursive(self, mod, strict, dec_hook) < 0)
+    if (struct_check_recursive(self, mod) < 0)
         return NULL;
 
     Py_RETURN_NONE;

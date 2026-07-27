@@ -112,52 +112,21 @@ def test_invalid_nested():
 # ── no mutation ──
 
 
-def test_no_mutation_lax():
-    p = Point(1, 2)
-    Struct.struct_force_setattr(p, "x", "99")
-    p.struct_validate_self(strict=False)
-    assert p.x == "99"
-
-
-def test_no_mutation_strict():
+def test_no_mutation():
     p = Point(1, 2)
     orig_x = p.x
     p.struct_validate_self()
     assert p.x == orig_x
 
 
-# ── strict vs lax ──
+# ── strict validation ──
 
 
 def test_strict_rejects_mismatch():
     p = Point(1, 2)
     Struct.struct_force_setattr(p, "x", "123")
     with pytest.raises(ValidationError):
-        p.struct_validate_self(strict=True)
-
-
-def test_lax_accepts_coercion():
-    p = Point(1, 2)
-    Struct.struct_force_setattr(p, "x", "123")
-    assert p.struct_validate_self(strict=False) is None
-
-
-# ── dec_hook ──
-
-
-def test_dec_hook_called():
-    class Ex(Struct):
-        val: object
-
-    e = Ex(42)
-    called = []
-
-    def hook(typ, obj):
-        called.append(obj)
-        return obj
-
-    e.struct_validate_self(dec_hook=hook)
-    assert called == [42]
+        p.struct_validate_self()
 
 
 # ── error handling ──
@@ -178,12 +147,6 @@ def test_bad_kwarg_raises():
     p = Point(1, 2)
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         p.struct_validate_self(bad=True)
-
-
-def test_bad_dec_hook_raises():
-    p = Point(1, 2)
-    with pytest.raises(TypeError, match="dec_hook must be callable"):
-        p.struct_validate_self(dec_hook="not callable")
 
 
 # ── frozen struct with force_setattr ──
