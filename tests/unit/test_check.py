@@ -36,14 +36,14 @@ class Nested(Struct):
 
 def test_valid_struct_passes():
     p = Point(1, 2)
-    assert p.struct_check() is None
+    assert p.struct_validate_self() is None
 
 
 def test_type_mismatch_raises():
     p = Point(1, 2)
     Struct.struct_force_setattr(p, "x", "hello")
     with pytest.raises(ValidationError, match="Expected `int`, got `str`"):
-        p.struct_check()
+        p.struct_validate_self()
 
 
 # ── constraint validation ──
@@ -52,46 +52,46 @@ def test_type_mismatch_raises():
 def test_ge_constraint_violation():
     p = Ranged(-1)
     with pytest.raises(ValidationError):
-        p.struct_check()
+        p.struct_validate_self()
 
 
 def test_le_constraint_violation():
     p = Ranged(999)
     with pytest.raises(ValidationError):
-        p.struct_check()
+        p.struct_validate_self()
 
 
 def test_valid_constraint_passes():
     p = Ranged(50)
-    assert p.struct_check() is None
+    assert p.struct_validate_self() is None
 
 
 def test_multiple_of_violation():
     p = WithMultiple(3)
     with pytest.raises(ValidationError):
-        p.struct_check()
+        p.struct_validate_self()
 
 
 def test_valid_multiple_of():
     p = WithMultiple(4)
-    assert p.struct_check() is None
+    assert p.struct_validate_self() is None
 
 
 def test_min_length_violation():
     p = Named("")
     with pytest.raises(ValidationError):
-        p.struct_check()
+        p.struct_validate_self()
 
 
 def test_max_length_violation():
     p = Named("a" * 200)
     with pytest.raises(ValidationError):
-        p.struct_check()
+        p.struct_validate_self()
 
 
 def test_valid_length():
     p = Named("hello")
-    assert p.struct_check() is None
+    assert p.struct_validate_self() is None
 
 
 # ── nested structs ──
@@ -99,14 +99,14 @@ def test_valid_length():
 
 def test_valid_nested():
     p = Nested(inner=Point(1, 2))
-    assert p.struct_check() is None
+    assert p.struct_validate_self() is None
 
 
 def test_invalid_nested():
     p = Nested(inner=Point(1, 2))
     Struct.struct_force_setattr(p.inner, "x", "bad")
     with pytest.raises(ValidationError, match="Expected `int`, got `str`"):
-        p.struct_check()
+        p.struct_validate_self()
 
 
 # ── no mutation ──
@@ -115,14 +115,14 @@ def test_invalid_nested():
 def test_no_mutation_lax():
     p = Point(1, 2)
     Struct.struct_force_setattr(p, "x", "99")
-    p.struct_check(strict=False)
+    p.struct_validate_self(strict=False)
     assert p.x == "99"
 
 
 def test_no_mutation_strict():
     p = Point(1, 2)
     orig_x = p.x
-    p.struct_check()
+    p.struct_validate_self()
     assert p.x == orig_x
 
 
@@ -133,13 +133,13 @@ def test_strict_rejects_mismatch():
     p = Point(1, 2)
     Struct.struct_force_setattr(p, "x", "123")
     with pytest.raises(ValidationError):
-        p.struct_check(strict=True)
+        p.struct_validate_self(strict=True)
 
 
 def test_lax_accepts_coercion():
     p = Point(1, 2)
     Struct.struct_force_setattr(p, "x", "123")
-    assert p.struct_check(strict=False) is None
+    assert p.struct_validate_self(strict=False) is None
 
 
 # ── dec_hook ──
@@ -156,7 +156,7 @@ def test_dec_hook_called():
         called.append(obj)
         return obj
 
-    e.struct_check(dec_hook=hook)
+    e.struct_validate_self(dec_hook=hook)
     assert called == [42]
 
 
@@ -165,25 +165,25 @@ def test_dec_hook_called():
 
 def test_error_on_non_struct():
     with pytest.raises(TypeError, match="doesn't apply to"):
-        Point.struct_check("not a struct")
+        Point.struct_validate_self("not a struct")
 
 
 def test_extra_positional_args_raises():
     p = Point(1, 2)
     with pytest.raises(TypeError, match="takes no positional arguments"):
-        p.struct_check(99)
+        p.struct_validate_self(99)
 
 
 def test_bad_kwarg_raises():
     p = Point(1, 2)
     with pytest.raises(TypeError, match="unexpected keyword argument"):
-        p.struct_check(bad=True)
+        p.struct_validate_self(bad=True)
 
 
 def test_bad_dec_hook_raises():
     p = Point(1, 2)
     with pytest.raises(TypeError, match="dec_hook must be callable"):
-        p.struct_check(dec_hook="not callable")
+        p.struct_validate_self(dec_hook="not callable")
 
 
 # ── frozen struct with force_setattr ──
@@ -196,7 +196,7 @@ def test_frozen_with_force_setattr():
     f = Frozen(1)
     Struct.struct_force_setattr(f, "x", "bad")
     with pytest.raises(ValidationError):
-        f.struct_check()
+        f.struct_validate_self()
 
 
 def test_frozen_valid():
@@ -204,4 +204,4 @@ def test_frozen_valid():
         x: int
 
     f = Frozen(1)
-    assert f.struct_check() is None
+    assert f.struct_validate_self() is None

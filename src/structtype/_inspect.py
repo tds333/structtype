@@ -13,59 +13,70 @@ except Exception:
     _TypeAliasType = type("TypeAliasType", (), {})  # type: ignore
 
 import structtype
-from structtype import NODEFAULT, UNSET, UnsetType as _UnsetType
+from structtype import NODEFAULT, UNSET
+from structtype import UnsetType as _UnsetType
 
 from ._core import (  # type: ignore
     Factory as _Factory,
+)
+from ._core import (
     Struct,
     StructMeta,
+)
+from ._core import (
     _to_builtins as _to_builtins,
 )
 from ._utils import (  # type: ignore
     _CONCRETE_TYPES,
     _AnnotatedAlias,
+)
+from ._utils import (
     get_class_annotations as _get_class_annotations,
+)
+from ._utils import (
     get_dataclass_info as _get_dataclass_info,
+)
+from ._utils import (
     get_typeddict_info as _get_typeddict_info,
 )
 
 __all__ = (
-    "Type",
-    "Metadata",
     "AnyType",
-    "NoneType",
     "BoolType",
-    "IntType",
-    "FloatType",
-    "StrType",
-    "BytesType",
     "ByteArrayType",
-    "MemoryViewType",
-    "DateTimeType",
-    "TimeType",
-    "DateType",
-    "TimeDeltaType",
-    "UUIDType",
-    "DecimalType",
-    "RawType",
-    "EnumType",
-    "LiteralType",
-    "CustomType",
-    "UnionType",
+    "BytesType",
     "CollectionType",
-    "ListType",
-    "SetType",
-    "FrozenSetType",
-    "VarTupleType",
-    "TupleType",
-    "DictType",
-    "FieldNode",
-    "FieldInfo",
-    "TypedDictType",
-    "NamedTupleType",
+    "CustomType",
     "DataclassType",
-    "StructType",
+    "DateTimeType",
+    "DateType",
+    "DecimalType",
+    "DictType",
+    "EnumType",
+    "FieldInfo",
+    "FieldNode",
+    "FloatType",
     "FrozenDictType",
+    "FrozenSetType",
+    "IntType",
+    "ListType",
+    "LiteralType",
+    "MemoryViewType",
+    "Metadata",
+    "NamedTupleType",
+    "NoneType",
+    "RawType",
+    "SetType",
+    "StrType",
+    "StructType",
+    "TimeDeltaType",
+    "TimeType",
+    "TupleType",
+    "Type",
+    "TypedDictType",
+    "UUIDType",
+    "UnionType",
+    "VarTupleType",
 )
 
 _PY315_PLUS = sys.version_info >= (3, 15)
@@ -862,9 +873,7 @@ class _Translator:
         if extra_json_schema:
             # If extra metadata is present, wrap the output type in a Metadata
             # wrapper object
-            return Metadata(
-                out, json_schema_extra=extra_json_schema or None
-            )
+            return Metadata(out, json_schema_extra=extra_json_schema or None)
         return out
 
     def _translate_inner(

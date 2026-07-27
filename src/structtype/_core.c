@@ -8374,7 +8374,7 @@ static PyMethodDef Struct_methods[] = {
     {"struct_force_setattr", (PyCFunction) Struct_force_setattr_wrapper, METH_FASTCALL, "Force set an attribute on a frozen struct"},
     {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, "Convert this struct to built-in Python types"},
     {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Convert built-in types to this struct type"},
-    {"struct_check", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, "Validate this struct's fields against their declared types"},
+    {"struct_validate_self", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, "Validate this struct's fields against their declared types"},
     {NULL, NULL},
 };
 
@@ -19116,7 +19116,7 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
     return out;
 }
 
-/* Recursive helper for struct_check — validates each field against its type
+/* Recursive helper for struct_validate_self — validates each field against its type
  * annotation, recursing into nested struct fields without creating intermediate
  * objects (no to_builtins roundtrip). */
 static int
@@ -19186,7 +19186,7 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
 {
     if (nargs > 0) {
         return PyErr_Format(PyExc_TypeError,
-            "struct_check() takes no positional arguments (%zd given)", nargs);
+            "struct_validate_self() takes no positional arguments (%zd given)", nargs);
     }
 
     StructspecState *mod = structtype_get_global_state();
@@ -19209,13 +19209,13 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
                 dec_hook = (val == Py_None) ? NULL : val;
             } else {
                 return PyErr_Format(PyExc_TypeError,
-                    "struct_check() got an unexpected keyword argument '%U'", name);
+                    "struct_validate_self() got an unexpected keyword argument '%U'", name);
             }
         }
     }
 
     if (!ms_is_struct_inst(self)) {
-        PyErr_SetString(PyExc_TypeError, "struct_check() requires a Struct instance");
+        PyErr_SetString(PyExc_TypeError, "struct_validate_self() requires a Struct instance");
         return NULL;
     }
 

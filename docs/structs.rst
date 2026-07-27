@@ -352,17 +352,17 @@ decode a message into a type validated `structtype.Struct` than into an untyped
 `dict`.
 
 You can also validate an existing struct instance at any time using
-``struct_check``:
+``struct_validate_self``:
 
 .. code-block:: python
 
     >>> p = Point(1.0, 2.0)
     >>> p.x = "bad"               # silently accepted at runtime
-    >>> p.struct_check()          # → ValidationError: Expected `float`, got `str`
+    >>> p.struct_validate_self()          # → ValidationError: Expected `float`, got `str`
 
 .. note::
 
-    ``struct_check`` never modifies the struct — it only validates. In lax mode
+    ``struct_validate_self`` never modifies the struct — it only validates. In lax mode
     (``strict=False``), conversions are allowed but the result is discarded.
 
 
@@ -1152,7 +1152,7 @@ definition enables type and constraint checking during ``__init__``:
     structtype.ValidationError: Expected `float`, got `str`
 
 While convenient, this adds overhead to every ``__init__`` call. Prefer static
-type checking with mypy_/pyright_ when possible, and use ``struct_check`` for
+type checking with mypy_/pyright_ when possible, and use ``struct_validate_self`` for
 explicit runtime validation.
 
 ``repr_omit_defaults``
