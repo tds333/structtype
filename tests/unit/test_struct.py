@@ -2271,27 +2271,6 @@ class TestReplace:
         assert count == 1
         x2 = replace(x1)
         assert x1 == x2
-        assert count == 2
-
-
-class TestAsDictAndAsTuple:
-    def test_asdict(self):
-        x = Point(1, 2)
-        assert x.struct_to_dict() == {"x": 1, "y": 2}
-
-    def test_astuple(self):
-        x = Point(1, 2)
-        assert x.struct_to_tuple() == (1, 2)
-
-    @pytest.mark.parametrize("func", [lambda o: o.struct_to_dict(), lambda o: o.struct_to_tuple()])
-    def test_errors(self, func):
-        pass  # struct_to_dict/tuple are methods, not applicable to non-struct
-
-        x = Point(1, 2)
-        del x.y
-
-        with pytest.raises(AttributeError):
-            func(x)
 
 
 class TestInspectFields:

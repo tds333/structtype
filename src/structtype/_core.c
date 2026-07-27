@@ -8107,12 +8107,11 @@ PyDoc_STRVAR(struct_asdict__doc__,
 "...     x: int\n"
 "...     y: int\n"
 ">>> obj = Point(x=1, y=2)\n"
-">>> obj.struct_to_dict()\n"
+">>> dict(obj)\n"
 "{'x': 1, 'y': 2}\n"
 "\n"
 "See Also\n"
 "--------\n"
-"struct_to_tuple\n"
 "struct_dump"
 );
 static PyObject*
@@ -8175,7 +8174,7 @@ PyDoc_STRVAR(struct_astuple__doc__,
 "...     x: int\n"
 "...     y: int\n"
 ">>> obj = Point(x=1, y=2)\n"
-">>> obj.struct_to_tuple(obj)\n"
+">>> structtype.structs.astuple(obj)\n"
 "(1, 2)\n"
 "\n"
 "See Also\n"
@@ -8351,11 +8350,49 @@ StructMixin_config(StructMetaObject *self, void *closure) {
     return StructConfig_New((StructMetaObject *)Py_TYPE(self));
 }
 
+static PyObject *
+Struct_iter(PyObject *self) {
+    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(self);
+    return PyObject_GetIter(struct_type->struct_fields);
+}
+
+static PyObject *
+Struct_keys(PyObject *self, PyObject *Py_UNUSED(ignored)) {
+    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(self);
+    return PyObject_GetIter(struct_type->struct_fields);
+}
+
+static PyObject *
+Struct_subscript(PyObject *self, PyObject *key) {
+    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(self);
+    PyObject *fields = struct_type->struct_fields;
+    Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
+    for (Py_ssize_t i = 0; i < nfields; i++) {
+        PyObject *field = PyTuple_GET_ITEM(fields, i);
+        if (PyObject_RichCompareBool(key, field, Py_EQ) == 1) {
+            PyObject *val = Struct_get_index_noerror(self, i);
+            if (val == NULL) {
+                PyErr_Format(PyExc_AttributeError,
+                    "Struct field %R is unset", field);
+                return NULL;
+            }
+            Py_INCREF(val);
+            return val;
+        }
+    }
+    PyErr_SetObject(PyExc_KeyError, key);
+    return NULL;
+}
+
+static PyMappingMethods Struct_as_mapping = {
+    .mp_length = NULL,
+    .mp_subscript = (binaryfunc)Struct_subscript,
+    .mp_ass_subscript = NULL,
+};
+
 /* Forward declarations for struct methods */
 static PyObject *Struct_dump_json(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_validate_json(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
-static PyObject *Struct_to_dict(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
-static PyObject *Struct_to_tuple(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_replace_wrapper(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_force_setattr_wrapper(PyObject *, PyObject *const *, Py_ssize_t);
 static PyObject *Struct_dump(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
@@ -8369,12 +8406,11 @@ static PyMethodDef Struct_methods[] = {
     {"__rich_repr__", Struct_rich_repr, METH_NOARGS, "rich repr"},
     {"struct_dump_json", (PyCFunction) Struct_dump_json, METH_FASTCALL | METH_KEYWORDS, "Serialize this struct to JSON bytes"},
     {"struct_validate_json", (PyCFunction) Struct_validate_json, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Deserialize JSON bytes to this struct type"},
-    {"struct_to_dict", (PyCFunction) Struct_to_dict, METH_FASTCALL | METH_KEYWORDS, "Convert this struct to a dict"},
-    {"struct_to_tuple", (PyCFunction) Struct_to_tuple, METH_FASTCALL | METH_KEYWORDS, "Convert this struct to a tuple"},
     {"struct_force_setattr", (PyCFunction) Struct_force_setattr_wrapper, METH_FASTCALL, "Force set an attribute on a frozen struct"},
     {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, "Convert this struct to built-in Python types"},
     {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Convert built-in types to this struct type"},
     {"struct_validate_self", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, "Validate this struct's fields against their declared types"},
+    {"keys", Struct_keys, METH_NOARGS, "Return an iterator over field names"},
     {NULL, NULL},
 };
 
@@ -8396,6 +8432,8 @@ static PyTypeObject StructMixinType = {
     .tp_repr = Struct_repr,
     .tp_richcompare = Struct_richcompare,
     .tp_hash = Struct_hash,
+    .tp_iter = (getiterfunc)Struct_iter,
+    .tp_as_mapping = &Struct_as_mapping,
     .tp_methods = Struct_methods,
     .tp_getset = StructMixin_getset,
 };
@@ -17072,7 +17110,7 @@ PyDoc_STRVAR(structtype_to_builtins__doc__,
 "  serializable representations. See :ref:`to-builtins-vs-asdict` for the\n"
 "  full list.\n"
 "\n"
-"In contrast, `struct_to_dict` and `struct_to_tuple`\n"
+"In contrast, `dict()` and manual value extraction\n"
 "perform a plain one-to-one conversion, applying none of the above.\n"
 "\n"
 "Parameters\n"
@@ -17132,7 +17170,7 @@ PyDoc_STRVAR(structtype_to_builtins__doc__,
 "\n"
 "See Also\n"
 "--------\n"
-"struct_load_json, struct_validate, struct_to_dict, struct_to_tuple"
+"struct_load_json, struct_validate"
 );
 static PyObject*
 structtype_to_builtins(PyObject *self, PyObject *args, PyObject *kwargs)
@@ -18953,69 +18991,6 @@ Struct_validate_json(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyO
     Py_DECREF(new_kwnames);
     PyMem_Free(new_args);
     return result;
-}
-
-static PyObject *
-Struct_to_dict(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
-{
-    if (nargs > 0) {
-        return PyErr_Format(PyExc_TypeError,
-            "struct_to_dict() takes no positional arguments (%zd given)", nargs);
-    }
-    if (kwnames != NULL && PyTuple_GET_SIZE(kwnames) > 0) {
-        return PyErr_Format(PyExc_TypeError,
-            "struct_to_dict() takes no keyword arguments");
-    }
-    if (!ms_is_struct_inst(self)) {
-        PyErr_SetString(PyExc_TypeError, "struct_to_dict() requires a Struct instance");
-        return NULL;
-    }
-    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(self);
-    PyObject *fields = struct_type->struct_fields;
-    Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
-    PyObject *out = PyDict_New();
-    if (out == NULL) return NULL;
-    for (Py_ssize_t i = 0; i < nfields; i++) {
-        PyObject *key = PyTuple_GET_ITEM(fields, i);
-        PyObject *val = Struct_get_index(self, i);
-        if (val == NULL) goto error;
-        if (PyDict_SetItem(out, key, val) < 0) goto error;
-    }
-    return out;
-error:
-    Py_DECREF(out);
-    return NULL;
-}
-
-static PyObject *
-Struct_to_tuple(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
-{
-    if (nargs > 0) {
-        return PyErr_Format(PyExc_TypeError,
-            "struct_to_tuple() takes no positional arguments (%zd given)", nargs);
-    }
-    if (kwnames != NULL && PyTuple_GET_SIZE(kwnames) > 0) {
-        return PyErr_Format(PyExc_TypeError,
-            "struct_to_tuple() takes no keyword arguments");
-    }
-    if (!ms_is_struct_inst(self)) {
-        PyErr_SetString(PyExc_TypeError, "struct_to_tuple() requires a Struct instance");
-        return NULL;
-    }
-    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(self);
-    Py_ssize_t nfields = PyTuple_GET_SIZE(struct_type->struct_fields);
-    PyObject *out = PyTuple_New(nfields);
-    if (out == NULL) return NULL;
-    for (Py_ssize_t i = 0; i < nfields; i++) {
-        PyObject *val = Struct_get_index(self, i);
-        if (val == NULL) goto error;
-        Py_INCREF(val);
-        PyTuple_SET_ITEM(out, i, val);
-    }
-    return out;
-error:
-    Py_DECREF(out);
-    return NULL;
 }
 static PyObject *
 Struct_force_setattr_wrapper(PyObject *self, PyObject *const *args, Py_ssize_t nargs)

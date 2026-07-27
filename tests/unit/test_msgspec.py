@@ -57,7 +57,7 @@ def test_decode_msgspec_direct():
     assert u.age == 25
 
 
-def test_struct_to_dict_msgspec_field():
+def test_struct_dump_msgspec_field():
     """struct_dump converts msgspec struct fields to dicts."""
     c = Container(owner=MsgspecUser(name="Alice"), items=[])
     d = c.struct_dump()

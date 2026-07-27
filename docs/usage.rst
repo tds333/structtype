@@ -144,9 +144,10 @@ representation.
 See :doc:`converters` for a more detailed guide, including how to use these
 functions to add ``structtype`` support for additional serialization protocols.
 
-Note that ``struct_to_dict`` and ``struct_to_tuple`` are *not* equivalent to
-``struct_dump``. They perform a one-to-one conversion of a single struct
-instance to a `dict` or `tuple`, using the raw attribute names.
+Note that ``dict(struct_instance)`` is *not* equivalent to
+``struct_dump``. It performs a one-to-one conversion of a single struct
+instance to a `dict` using the raw attribute names. Fields can also be
+extracted as a tuple via ``tuple(s[name] for name in s)``.
 
 None of the semantics listed above apply. Every field is included regardless
 of ``omit_defaults`` or `structtype.UNSET`, ``rename`` and ``tag`` are ignored,

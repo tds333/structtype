@@ -1046,7 +1046,7 @@ types. It is an error to use `structtype.UNSET` or `structtype.UnsetType` anywhe
 other than a field for one of these types.
 
 Omission of ``UNSET`` fields applies to `struct_dump_json` and
-`struct_dump`. `struct_to_dict` and `struct_to_tuple`
+`struct_dump`. `dict()`
 always include every field, so ``UNSET`` values appear in their output
 unchanged.
 

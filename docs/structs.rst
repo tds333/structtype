@@ -671,8 +671,7 @@ Omitting defaults reduces the size of the encoded message, and often also
 improves encoding and decoding performance (since there's less work to do).
 
 ``omit_defaults`` affects `struct_dump_json`
-and `struct_dump`. It has no effect on `struct_to_dict` or
-`struct_to_tuple`,
+and `struct_dump`. It has no effect on `dict()` or manual value extraction,
 which always include every field.
 
 Note that detection of default values is optimized for performance; in certain

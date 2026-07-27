@@ -47,8 +47,6 @@ All commands go through `make`.
 
 - `obj.struct_dump_json()` — serialize to JSON bytes
 - `obj.struct_dump()` — convert to built-in Python types
-- `obj.struct_to_dict()` — shallow field dict
-- `obj.struct_to_tuple()` — shallow field tuple
 - `obj.struct_force_setattr(name, value)` — set attr on frozen struct
 - `obj.struct_validate_self()` — validate field values against types + constraints
 - `cls.struct_validate_json(buf)` — deserialize from JSON

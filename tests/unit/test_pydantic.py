@@ -54,7 +54,7 @@ def test_decode_pydantic_direct():
     assert u.age == 25
 
 
-def test_struct_to_dict_pydantic_field():
+def test_struct_dump_pydantic_field():
     """struct_dump converts pydantic fields to dicts."""
     c = Container(owner=User(name="Alice"), items=[])
     d = c.struct_dump()
