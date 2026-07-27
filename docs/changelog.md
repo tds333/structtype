@@ -1,13 +1,13 @@
 # Changelog
 
-## 0.2.0 (upcoming)
+## 0.2.0 (2026-07-27)
 
 - Improve and cleanup documentation.
 - Cleanup interface of Struct to be minimal and more pythonic.
 - Remove jsonln support on Struct.
 - Add support for types with ducktyping Structs struct_validate and struct_dump.
 - Add StrAdapter, allow str like types to be handled.
-- Add support for __iter__ and __getitem__ on Struct.
+- Add support for __iter__ on Struct, supports dict(Struct).
 - Remove struct_as_dict and struct_as_tuple.
 
 ## 0.1.0 (2026-07-26)
