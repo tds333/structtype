@@ -146,8 +146,7 @@ functions to add ``structtype`` support for additional serialization protocols.
 
 Note that ``dict(struct_instance)`` is *not* equivalent to
 ``struct_dump``. It performs a one-to-one conversion of a single struct
-instance to a `dict` using the raw attribute names. Fields can also be
-extracted as a tuple via ``tuple(s[name] for name in s)``.
+instance to a `dict` using the raw attribute names.
 
 None of the semantics listed above apply. Every field is included regardless
 of ``omit_defaults`` or `structtype.UNSET`, ``rename`` and ``tag`` are ignored,

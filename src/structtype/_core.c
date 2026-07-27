@@ -8353,42 +8353,20 @@ StructMixin_config(StructMetaObject *self, void *closure) {
 static PyObject *
 Struct_iter(PyObject *self) {
     StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(self);
-    return PyObject_GetIter(struct_type->struct_fields);
-}
-
-static PyObject *
-Struct_keys(PyObject *self, PyObject *Py_UNUSED(ignored)) {
-    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(self);
-    return PyObject_GetIter(struct_type->struct_fields);
-}
-
-static PyObject *
-Struct_subscript(PyObject *self, PyObject *key) {
-    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(self);
     PyObject *fields = struct_type->struct_fields;
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
+    PyObject *pairs = PyList_New(nfields);
+    if (pairs == NULL) return NULL;
     for (Py_ssize_t i = 0; i < nfields; i++) {
-        PyObject *field = PyTuple_GET_ITEM(fields, i);
-        if (PyObject_RichCompareBool(key, field, Py_EQ) == 1) {
-            PyObject *val = Struct_get_index_noerror(self, i);
-            if (val == NULL) {
-                PyErr_Format(PyExc_AttributeError,
-                    "Struct field %R is unset", field);
-                return NULL;
-            }
-            Py_INCREF(val);
-            return val;
-        }
+        PyObject *key = PyTuple_GET_ITEM(fields, i);
+        PyObject *val = Struct_get_index(self, i);
+        if (val == NULL) { Py_DECREF(pairs); return NULL; }
+        PyObject *pair = PyTuple_Pack(2, key, val);
+        if (pair == NULL) { Py_DECREF(pairs); return NULL; }
+        PyList_SET_ITEM(pairs, i, pair);
     }
-    PyErr_SetObject(PyExc_KeyError, key);
-    return NULL;
+    return PyObject_GetIter(pairs);
 }
-
-static PyMappingMethods Struct_as_mapping = {
-    .mp_length = NULL,
-    .mp_subscript = (binaryfunc)Struct_subscript,
-    .mp_ass_subscript = NULL,
-};
 
 /* Forward declarations for struct methods */
 static PyObject *Struct_dump_json(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
@@ -8410,7 +8388,6 @@ static PyMethodDef Struct_methods[] = {
     {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, "Convert this struct to built-in Python types"},
     {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Convert built-in types to this struct type"},
     {"struct_validate_self", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, "Validate this struct's fields against their declared types"},
-    {"keys", Struct_keys, METH_NOARGS, "Return an iterator over field names"},
     {NULL, NULL},
 };
 
@@ -8433,7 +8410,6 @@ static PyTypeObject StructMixinType = {
     .tp_richcompare = Struct_richcompare,
     .tp_hash = Struct_hash,
     .tp_iter = (getiterfunc)Struct_iter,
-    .tp_as_mapping = &Struct_as_mapping,
     .tp_methods = Struct_methods,
     .tp_getset = StructMixin_getset,
 };

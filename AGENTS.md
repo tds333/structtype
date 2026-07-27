@@ -41,20 +41,24 @@ All commands go through `make`.
 - `structtype.Struct` — base class with config options (frozen, tag, rename, etc.)
 - `structtype.Field` — field constraints (gt, ge, lt, le, min_length, etc.)
 - `structtype.Raw` — lazy JSON passthrough
+- `structtype.fields(type_or_instance)` — get FieldInfo tuple for a struct type/instance
 - `structtype._inspect.type_info()` / `multi_type_info()` — type introspection
 
 ### Struct Methods
 
-- `obj.struct_dump_json()` — serialize to JSON bytes
-- `obj.struct_dump()` — convert to built-in Python types
+- `obj.struct_dump_json(*, enc_hook=None, decimal_format=None, uuid_format=None, order=None)` — serialize to JSON bytes
+- `obj.struct_dump()` — convert to built-in Python types (uses `encode_name` for keys)
 - `obj.struct_force_setattr(name, value)` — set attr on frozen struct
-- `obj.struct_validate_self()` — validate field values against types + constraints
-- `cls.struct_validate_json(buf)` — deserialize from JSON
-- `cls.struct_validate_jsonln(buf)` — deserialize newline-delimited JSON to a list of structs
-- `cls.struct_dump_jsonln(items)` — serialize a list of structs as newline-delimited JSON
-- `cls.struct_validate(obj)` — convert built-in types to struct
+- `obj.struct_validate_self(*, strict=True, dec_hook=None)` — validate field values against types + constraints
+- `cls.struct_validate_json(buf, *, strict=True, dec_hook=None)` — deserialize from JSON
+- `cls.struct_validate(obj, *, strict=True, from_attributes=False, dec_hook=None)` — convert built-in types to struct
+
+### Dict & Iteration Protocol
+
+Struct instances support the mapping protocol:
+- `dict(p)` — shallow dict of Python field names to values (iterates `(name, value)` pairs)
+- `list(p)` / `iter(p)` — iterate `(name, value)` 2-tuples in declaration order
 
 ## Gotchas
 
-- `pytest-randomly` shuffles test order
 - `make test-lf` reinstalls the C extension before running (last-failed first)
