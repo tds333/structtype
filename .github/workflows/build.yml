@@ -25,16 +25,12 @@ jobs:
     outputs:
       sdist-name: ${{ steps.build.outputs.sdist-name }}
     steps:
-    - uses: actions/checkout@v4.2.2
+    - uses: actions/checkout@v7.0.1
       with:
         fetch-depth: 0
         persist-credentials: false
 
-    # - uses: actions/setup-python@v5.5.0
-    #   with:
-    #     python-version-file: pyproject.toml
-
-    - uses: astral-sh/setup-uv@v5.3.0
+    - uses: astral-sh/setup-uv@v9.0.0
       with:
         enable-cache: false
 
@@ -47,7 +43,7 @@ jobs:
         sdists=(dist/*.tar.gz)
         echo "sdist-name=${sdists[0]##*/}" >> "$GITHUB_OUTPUT"
 
-    - uses: actions/upload-artifact@v4.6.1
+    - uses: actions/upload-artifact@v7.0.1
       with:
         name: artifact-sdist
         path: dist/*.tar.gz
@@ -87,27 +83,23 @@ jobs:
       CIBW_PLATFORM: "${{ matrix.platform || 'auto' }}"
       CIBW_SKIP: "${{ !inputs.build-musllinux && '*-musllinux_*' || '' }}"
     steps:
-    - uses: actions/checkout@v4.2.2
+    - uses: actions/checkout@v7.0.1
       with:
         persist-credentials: false
 
-    - uses: actions/download-artifact@v4.2.0
+    - uses: actions/download-artifact@v8.0.1
       with:
         name: artifact-sdist
         path: dist
 
-    # - uses: actions/setup-python@v5.5.0
-    #   with:
-    #     python-version-file: pyproject.toml
-
-    - uses: astral-sh/setup-uv@v5.3.0
+    - uses: astral-sh/setup-uv@v9.0.0
       with:
         enable-cache: false
 
     - name: Build wheels
       if: runner.os != 'Windows'
       run: >-
-        uvx --from cibuildwheel==4.1.0
+        uvx --from cibuildwheel==4.1.1
         cibuildwheel
         --config-file .cibuildwheel.toml
         --output-dir wheelhouse
@@ -116,7 +108,7 @@ jobs:
     - name: Build wheels
       if: runner.os == 'Windows'
       run: >-
-        uvx --from cibuildwheel==4.1.0
+        uvx --from cibuildwheel==4.1.1
         cibuildwheel
         --config-file .cibuildwheel.toml
         --output-dir wheelhouse
@@ -124,7 +116,7 @@ jobs:
       env:
         SDIST_NAME: dist/${{ needs.build-sdist.outputs.sdist-name }}
 
-    - uses: actions/upload-artifact@v4.6.1
+    - uses: actions/upload-artifact@v7.0.1
       with:
         name: artifact-wheels-${{ matrix.os }}-${{ matrix.archs }}
         path: wheelhouse/*.whl
