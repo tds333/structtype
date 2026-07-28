@@ -13,6 +13,10 @@ docs: ## build docs
 	rm -rf .doctrees site
 	uv run --group docs sphinx-build -d .doctrees -b html docs site --fail-on-warning
 
+.PHONY: wheels
+wheels: ## build wheels
+	uvx --from cibuildwheel==4.1.0 cibuildwheel --config-file .cibuildwheel.toml
+
 ##@ Quality
 .PHONY: test-cov
 test-cov: ## Run tests with coverage
