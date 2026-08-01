@@ -10547,7 +10547,7 @@ datetime_from_epoch(
     int qc_cycles, c_cycles, q_cycles;
 
     /* Round nanos to nearest microsecond, adjusting seconds as needed */
-    micros = DIV_ROUND_CLOSEST(epoch_nanos, 1000);
+    micros = (int)DIV_ROUND_CLOSEST(epoch_nanos, 1000);
     if (micros == 1000000) {
         micros = 0;
         epoch_secs++;
