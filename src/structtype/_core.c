@@ -6064,7 +6064,6 @@ structmeta_process_default(StructMetaInfo *info, StructspecState *mod, PyObject 
         default_val = obj;
     }
 
-done:
     if (dict_discard(info->namespace, name) < 0) {
         Py_DECREF(default_val);
         return -1;
@@ -8076,162 +8075,6 @@ cleanup:
     }
     return out;
 }
-PyDoc_STRVAR(struct_asdict__doc__,
-"asdict(struct)\n"
-"--\n"
-"\n"
-"Convert a struct to a dict.\n"
-"\n"
-"This is a one-to-one conversion of the struct instance, modeled after\n"
-"`dataclasses.asdict`. Every field is included unchanged using its raw\n"
-"attribute name. Struct-level settings (``rename``, ``omit_defaults``,\n"
-"``array_like``, ``tag``) are ignored, `structtype.UNSET` values are kept,\n"
-"nested `structtype.Struct` / `dataclasses.dataclass` / attrs fields are\n"
-"not recursively converted, and no value-level conversions are applied\n"
-"(e.g. `bytes` is not base64-encoded, `datetime.datetime` is not\n"
-"converted to a string). Use `struct_dump` instead when the\n"
-"output is intended for serialization.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"struct: Struct\n"
-"    The struct instance.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"dict\n"
-"\n"
-"Examples\n"
-"--------\n"
-">>> class Point(structtype.Struct):\n"
-"...     x: int\n"
-"...     y: int\n"
-">>> obj = Point(x=1, y=2)\n"
-">>> dict(obj)\n"
-"{'x': 1, 'y': 2}\n"
-"\n"
-"See Also\n"
-"--------\n"
-"struct_dump"
-);
-static PyObject*
-struct_asdict(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
-{
-    if (!check_positional_nargs(nargs, 1, 1)) return NULL;
-    PyObject *obj = args[0];
-    if (!ms_is_struct_inst(obj)) {
-        PyErr_SetString(PyExc_TypeError, "`struct` must be a `structtype.Struct`");
-        return NULL;
-    }
-
-    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(obj);
-    PyObject *fields = struct_type->struct_fields;
-    Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
-
-    PyObject *out = PyDict_New();
-    if (out == NULL) return NULL;
-
-    for (Py_ssize_t i = 0; i < nfields; i++) {
-        PyObject *key = PyTuple_GET_ITEM(fields, i);
-        PyObject *val = Struct_get_index(obj, i);
-        if (val == NULL) goto error;
-        if (PyDict_SetItem(out, key, val) < 0) goto error;
-    }
-    return out;
-error:
-    Py_DECREF(out);
-    return NULL;
-}
-
-PyDoc_STRVAR(struct_astuple__doc__,
-"astuple(struct)\n"
-"--\n"
-"\n"
-"Convert a struct to a tuple.\n"
-"\n"
-"This is a one-to-one conversion of the struct instance, modeled after\n"
-"`dataclasses.astuple`. Every field value is included unchanged.\n"
-"Struct-level settings (``rename``, ``omit_defaults``, ``array_like``,\n"
-"``tag``) are ignored, `structtype.UNSET` values are kept, nested\n"
-"`structtype.Struct` / `dataclasses.dataclass` / attrs fields are not\n"
-"recursively converted, and no value-level conversions are applied\n"
-"(e.g. `bytes` is not base64-encoded, `datetime.datetime` is not\n"
-"converted to a string). Use `struct_dump` instead when the\n"
-"output is intended for serialization.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"struct: Struct\n"
-"    The struct instance.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"tuple\n"
-"\n"
-"Examples\n"
-"--------\n"
-">>> class Point(structtype.Struct):\n"
-"...     x: int\n"
-"...     y: int\n"
-">>> obj = Point(x=1, y=2)\n"
-">>> structtype.structs.astuple(obj)\n"
-"(1, 2)\n"
-"\n"
-"See Also\n"
-"--------\n"
-"structtype.structs.asdict\n"
-"structtype.to_builtins"
-);
-static PyObject*
-struct_astuple(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
-{
-    if (!check_positional_nargs(nargs, 1, 1)) return NULL;
-    PyObject *obj = args[0];
-    if (!ms_is_struct_inst(obj)) {
-        PyErr_SetString(PyExc_TypeError, "`struct` must be a `structtype.Struct`");
-        return NULL;
-    }
-
-    StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(obj);
-    Py_ssize_t nfields = PyTuple_GET_SIZE(struct_type->struct_fields);
-
-    PyObject *out = PyTuple_New(nfields);
-    if (out == NULL) return NULL;
-
-    for (Py_ssize_t i = 0; i < nfields; i++) {
-        PyObject *val = Struct_get_index(obj, i);
-        if (val == NULL) goto error;
-        Py_INCREF(val);
-        PyTuple_SET_ITEM(out, i, val);
-    }
-    return out;
-error:
-    Py_DECREF(out);
-    return NULL;
-}
-
-PyDoc_STRVAR(struct_force_setattr__doc__,
-"force_setattr(struct, name, value)\n"
-"--\n"
-"\n"
-"Set an attribute on a struct, even if the struct is frozen.\n"
-"\n"
-"The main use case for this is modifying a frozen struct in a ``__post_init__``\n"
-"method before returning.\n"
-"\n"
-".. warning::\n\n"
-"  This function violates the guarantees of a frozen struct, and is potentially\n"
-"  unsafe. Only use it if you know what you're doing!\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"struct: Struct\n"
-"    The struct instance.\n"
-"name: str\n"
-"    The attribute name.\n"
-"value: Any\n"
-"    The attribute value."
-);
 static PyObject*
 struct_force_setattr(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -8371,7 +8214,6 @@ Struct_iter(PyObject *self) {
 /* Forward declarations for struct methods */
 static PyObject *Struct_dump_json(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_validate_json(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
-static PyObject *Struct_replace_wrapper(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_force_setattr_wrapper(PyObject *, PyObject *const *, Py_ssize_t);
 static PyObject *Struct_dump(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_validate(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
@@ -10673,41 +10515,6 @@ time_round_up_micros(
             }
         }
     }
-}
-
-/* Days since 0001-01-01, the min value for python's datetime objects */
-static int
-days_since_min_datetime(int year, int month, int day)
-{
-    int out = day;
-    static const int _days_before_month[] = {
-        0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
-    };
-    out += _days_before_month[month - 1];
-    if (month > 2 && is_leap_year(year)) out++;
-
-    year--; /* makes math easier */
-    out += year*365 + year/4 - year/100 + year/400;
-
-    return out;
-}
-
-static void
-datetime_to_epoch(PyObject *obj, int64_t *seconds, int32_t *nanoseconds) {
-    int64_t d = days_since_min_datetime(
-        PyDateTime_GET_YEAR(obj),
-        PyDateTime_GET_MONTH(obj),
-        PyDateTime_GET_DAY(obj)
-    ) - 719163;  /* days_since_min_datetime(1970, 1, 1) */
-    int64_t s = (
-        PyDateTime_DATE_GET_HOUR(obj) * 3600
-        + PyDateTime_DATE_GET_MINUTE(obj) * 60
-        + PyDateTime_DATE_GET_SECOND(obj)
-    );
-    int64_t us = PyDateTime_DATE_GET_MICROSECOND(obj);
-
-    *seconds = 86400 * d + s;
-    *nanoseconds = us * 1000;
 }
 
 /* Python datetimes bounded between (inclusive)
@@ -13583,49 +13390,12 @@ static PyTypeObject JSONEncoder_Type = {
     .tp_getset = Encoder_getset,
 };
 
-PyDoc_STRVAR(structtype_json_encode__doc__,
-"json_encode(obj, *, enc_hook=None, order=None)\n"
-"--\n"
-"\n"
-"Serialize an object as JSON.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"obj : Any\n"
-"    The object to serialize.\n"
-"enc_hook : callable, optional\n"
-"    A callable to call for objects that aren't supported structtype types. Takes\n"
-"    the unsupported object and should return a supported object, or raise a\n"
-"    ``NotImplementedError`` if unsupported.\n"
-"order : {None, 'deterministic', 'sorted'}, optional\n"
-"    The ordering to use when encoding unordered compound types.\n"
-"\n"
-"    - ``None``: All objects are encoded in the most efficient manner matching\n"
-"      their in-memory representations. The default.\n"
-"    - `'deterministic'`: Dict keys and set elements are sorted so that values\n"
-"      which compare equal produce identical encoded output, regardless of\n"
-"      insertion or iteration order. Useful when comparison/hashing of the\n"
-"      encoded binary output is necessary.\n"
-"    - `'sorted'`: Like `'deterministic'`, but *all* object-like types (structs,\n"
-"      dataclasses, ...) are also sorted by field name before encoding. This is\n"
-"      slower than `'deterministic'`, but may produce more human-readable output.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"data : bytes\n"
-"    The serialized object.\n"
-"\n"
-"See Also\n"
-"--------\n"
-"Encoder.encode"
-);
 static PyObject*
 structtype_json_encode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
 {
     return encode_common(self, args, nargs, kwnames, &json_encode);
 }
 
-/*************************************************************************
 /*************************************************************************
  * JSON Decoder                                                          *
  *************************************************************************/
@@ -16193,41 +15963,6 @@ static PyTypeObject JSONDecoder_Type = {
     .tp_members = JSONDecoder_members,
 };
 
-PyDoc_STRVAR(structtype_json_decode__doc__,
-"json_decode(buf, *, type='Any', strict=True, dec_hook=None)\n"
-"--\n"
-"\n"
-"Deserialize an object from JSON.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"buf : bytes-like or str\n"
-"    The message to decode.\n"
-"type : type, optional\n"
-"    A Python type (in type annotation form) to decode the object as. If\n"
-"    provided, the message will be type checked and decoded as the specified\n"
-"    type. Defaults to `Any`, in which case the message will be decoded using\n"
-"    the default JSON types.\n"
-"strict : bool, optional\n"
-"    Whether type coercion rules should be strict. Setting to False enables a\n"
-"    wider set of coercion rules from string to non-string types for all values.\n"
-"    Default is True.\n"
-"dec_hook : callable, optional\n"
-"    An optional callback for handling decoding custom types. Should have the\n"
-"    signature ``dec_hook(type: Type, obj: Any) -> Any``, where ``type`` is the\n"
-"    expected message type, and ``obj`` is the decoded representation composed\n"
-"    of only basic JSON types. This hook should transform ``obj`` into type\n"
-"    ``type``, or raise a ``NotImplementedError`` if unsupported.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"obj : Any\n"
-"    The deserialized object.\n"
-"\n"
-"See Also\n"
-"--------\n"
-"Decoder.decode"
-);
 static PyObject*
 structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
 {
@@ -17064,90 +16799,6 @@ error:
 }
 
 
-PyDoc_STRVAR(structtype_to_builtins__doc__,
-"_to_builtins(obj, *, str_keys=False, builtin_types=None, enc_hook=None, order=None)\n"
-"--\n"
-"\n"
-"Convert a complex object to one composed only of simpler builtin types\n"
-"commonly supported by Python serialization libraries.\n"
-"\n"
-"This is mainly useful for adding structtype support for other protocols, or\n"
-"for cases where structtype is only processing part of a message. The\n"
-    "conversion applies the same semantics as `struct_dump_json`:\n"
-"\n"
-"- Struct-level settings are honored: ``rename``, ``omit_defaults``,\n"
-"  ``array_like``, and ``tag`` for tagged unions.\n"
-"- Fields containing `structtype.UNSET` are omitted from the output.\n"
-"- Nested `structtype.Struct` / `dataclasses.dataclass` / attrs /\n"
-"  `typing.TypedDict` / `typing.NamedTuple` values are recursively\n"
-"  expanded.\n"
-"- Types without a direct builtin equivalent (`bytes`, `datetime.datetime`,\n"
-"  `uuid.UUID`, `decimal.Decimal`, `enum.Enum`, ...) are converted to their\n"
-"  serializable representations. See :ref:`to-builtins-vs-asdict` for the\n"
-"  full list.\n"
-"\n"
-"In contrast, `dict()` and manual value extraction\n"
-"perform a plain one-to-one conversion, applying none of the above.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"obj: Any\n"
-"    The object to convert.\n"
-"builtin_types: Iterable[type], optional\n"
-"    An iterable of types to treat as additional builtin types. These types will\n"
-"    be passed through ``to_builtins`` unchanged. Currently supports `bytes`,\n"
-"    `bytearray`, `memoryview`, `frozendict`, `datetime.datetime`, `datetime.time`,\n"
-"    `datetime.date`, `datetime.timedelta`, `uuid.UUID`, `decimal.Decimal`,\n"
-"    and custom types.\n"
-"str_keys: bool, optional\n"
-"    Whether to convert all object keys to strings. Default is False.\n"
-"enc_hook : callable, optional\n"
-"    A callable to call for objects that aren't supported structtype types. Takes\n"
-"    the unsupported object and should return a supported object, or raise a\n"
-"    ``NotImplementedError`` if unsupported.\n"
-"order : {None, 'deterministic', 'sorted'}, optional\n"
-"    The ordering to use when converting unordered compound types.\n"
-"\n"
-"    - ``None``: All objects are converted in the most efficient manner matching\n"
-"      their in-memory representations. The default.\n"
-"    - `'deterministic'`: Dict keys and set elements are sorted so that values\n"
-"      which compare equal produce identical converted output, regardless of\n"
-"      insertion or iteration order. Useful when comparison/hashing of the\n"
-"      converted output is necessary.\n"
-"    - `'sorted'`: Like `'deterministic'`, but *all* object-like types (structs,\n"
-"      dataclasses, ...) are also sorted by field name before encoding. This is\n"
-"      slower than `'deterministic'`, but may produce more human-readable output.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"Any\n"
-"    The converted object.\n"
-"\n"
-"Examples\n"
-"--------\n"
-">>> import structtype\n"
-">>> class Example(structtype.Struct):\n"
-"...     x: set[int]\n"
-"...     y: bytes\n"
-">>> msg = Example({1, 2, 3}, b'\\x01\\x02')\n"
-"\n"
-"Convert the message to a simpler set of builtin types. Note that by default\n"
-"all bytes-like objects are base64-encoded and converted to strings.\n"
-"\n"
-">>> msg.struct_dump()\n"
-"{'x': [1, 2, 3], 'y': 'AQI='}\n"
-"\n"
-"If the downstream code supports binary objects natively, you can\n"
-"disable conversion by passing in the types to ``builtin_types``.\n"
-"\n"
-">>> from structtype._core import _to_builtins\n"
-">>> _to_builtins(msg, builtin_types=(bytes, bytearray, memoryview))\n"
-"{'x': [1, 2, 3], 'y': b'\\x01\\x02'}\n"
-"\n"
-"See Also\n"
-"--------\n"
-"struct_load_json, struct_validate"
-);
 static PyObject*
 structtype_to_builtins(PyObject *self, PyObject *args, PyObject *kwargs)
 {
@@ -18772,72 +18423,6 @@ convert(
     }
 }
 
-PyDoc_STRVAR(structtype_convert__doc__,
-"convert(obj, type, *, strict=True, from_attributes=False, dec_hook=None, str_keys=False, builtin_types=None)\n"
-"--\n"
-"\n"
-"Convert the input object to the specified type, or error accordingly.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"obj: Any\n"
-"    The object to convert.\n"
-"type: Type\n"
-"    A Python type (in type annotation form) to convert the object to.\n"
-"strict: bool, optional\n"
-"    Whether type coercion rules should be strict. Setting to False enables a\n"
-"    wider set of coercion rules from string to non-string types for all values.\n"
-"    Setting ``strict=False`` implies ``str_keys=True, builtin_types=None``.\n"
-"    Default is True.\n"
-"from_attributes: bool, optional\n"
-"    If True, input objects may be coerced to ``Struct``/``dataclass``/``attrs``\n"
-"    types by extracting attributes from the input matching fields in the output\n"
-"    type. One use case is converting database query results (ORM or otherwise)\n"
-"    to structtype structured types. Default is False.\n"
-"dec_hook: callable, optional\n"
-"    An optional callback for handling decoding custom types. Should have the\n"
-"    signature ``dec_hook(type: Type, obj: Any) -> Any``, where ``type`` is the\n"
-"    expected message type, and ``obj`` is the decoded representation composed\n"
-"    of only basic JSON types. This hook should transform ``obj`` into\n"
-"    type ``type``, or raise a ``NotImplementedError`` if unsupported.\n"
-"builtin_types: Iterable[type], optional\n"
-"    Useful for wrapping other serialization protocols. An iterable of types to\n"
-"    treat as additional builtin types. Passing a type here indicates that the\n"
-"    wrapped protocol natively supports that type, disabling any coercion to\n"
-"    that type provided by `convert`. For example, passing\n"
-"    ``builtin_types=(datetime,)`` disables the default ``str`` to ``datetime``\n"
-"    conversion; the wrapped protocol must provide a ``datetime`` object\n"
-"    directly. Currently supports `bytes`, `bytearray`, `datetime.datetime`,\n"
-"    `datetime.time`, `datetime.date`, `datetime.timedelta`, `uuid.UUID`, and\n"
-"    `decimal.Decimal`.\n"
-"str_keys: bool, optional\n"
-"    Useful for wrapping other serialization protocols. Indicates whether the\n"
-"    wrapped protocol only supports string keys. Setting to True enables a wider\n"
-"    set of coercion rules from string to non-string types for dict keys.\n"
-"    Default is False.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"Any\n"
-"    The converted object of the specified ``type``.\n"
-"\n"
-"Examples\n"
-"--------\n"
-">>> import structtype\n"
-">>> class Example(structtype.Struct):\n"
-"...     x: set[int]\n"
-"...     y: bytes\n"
-">>> msg = {'x': [1, 2, 3], 'y': 'AQI='}\n"
-"\n"
-"Construct the message from a simpler set of builtin types.\n"
-"\n"
-">>> Example.struct_validate(msg)\n"
-"Example({1, 2, 3}, b'\\x01\\x02')\n"
-"\n"
-"See Also\n"
-"--------\n"
-"struct_dump"
-);
 static PyObject*
 structtype_convert(PyObject *self, PyObject *args, PyObject *kwargs)
 {
