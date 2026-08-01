@@ -53,15 +53,15 @@ libraries = []
 if sys.platform != "win32":
     libraries.append("m")
 
-    ext_modules = [
-        Extension(
-            "structtype._core",
-            [os.path.join("src", "structtype", "_core.c")],
-            libraries=libraries,
-            extra_compile_args=extra_compile_args,
-            extra_link_args=extra_link_args,
-        )
-    ]
+ext_modules = [
+    Extension(
+        "structtype._core",
+        [os.path.join("src", "structtype", "_core.c")],
+        libraries=libraries,
+        extra_compile_args=extra_compile_args,
+        extra_link_args=extra_link_args,
+    )
+]
 
 setup(
     ext_modules=ext_modules,
