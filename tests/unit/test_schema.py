@@ -1537,7 +1537,8 @@ def test_pydantic_with_alias():
 
     class Example(pydantic.BaseModel):
         first_name: str = pydantic.Field(alias="firstName")
-        last_name: str = pydantic.Field(alias="lastName")
+        last_name: str = pydantic.Field(serialization_alias="lastName")
+        email: str
 
     assert make_schema(Example) == {
         "$ref": "#/$defs/Example",
@@ -1548,8 +1549,9 @@ def test_pydantic_with_alias():
                 "properties": {
                     "firstName": {"type": "string"},
                     "lastName": {"type": "string"},
+                    "email": {"type": "string"},
                 },
-                "required": ["firstName", "lastName"],
+                "required": ["firstName", "lastName", "email"],
             },
         },
     }

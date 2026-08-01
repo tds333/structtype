@@ -1167,8 +1167,8 @@ class _Translator:
                 else:
                     default = default_obj
                     default_factory = NODEFAULT
-                alias = getattr(cls.model_fields[name], 'alias', None)
-                encode_name = alias if alias else name
+                field_info = cls.model_fields[name]
+                encode_name = field_info.alias or field_info.serialization_alias or name
                 fields.append(
                     FieldNode(
                         name=name,
