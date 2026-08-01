@@ -68,12 +68,12 @@ jobs:
         - target: "macOS (arm64)"
           os: macos-latest
           archs: arm64
-      - target: "Windows (ARM64)"
-        os: windows-11-arm
-        archs: ARM64
-      - target: "Windows (AMD64)"
-        os: windows-latest
-        archs: AMD64
+        - target: "Windows (ARM64)"
+          os: windows-11-arm
+          archs: ARM64
+        - target: "Windows (AMD64)"
+          os: windows-latest
+          archs: AMD64
         - target: "Pyodide (wasm32)"
           os: ubuntu-latest
           archs: wasm32
