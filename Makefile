@@ -15,7 +15,7 @@ docs: ## build docs
 
 .PHONY: wheels
 wheels: ## build wheels
-	uvx --from cibuildwheel==4.1.0 cibuildwheel --config-file .cibuildwheel.toml
+	uvx --from cibuildwheel==4.1.0 cibuildwheel
 
 ##@ Quality
 .PHONY: test-cov

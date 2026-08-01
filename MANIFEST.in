@@ -5,4 +5,3 @@ prune docs
 prune examples
 prune scripts
 exclude .*
-include .cibuildwheel.toml

@@ -101,7 +101,6 @@ jobs:
       run: >-
         uvx --from cibuildwheel==4.1.1
         cibuildwheel
-        --config-file .cibuildwheel.toml
         --output-dir wheelhouse
         dist/${{ needs.build-sdist.outputs.sdist-name }}
 
@@ -110,7 +109,6 @@ jobs:
       run: >-
         uvx --from cibuildwheel==4.1.1
         cibuildwheel
-        --config-file .cibuildwheel.toml
         --output-dir wheelhouse
         $env:SDIST_NAME
       env:
