@@ -36,6 +36,12 @@ if DEBUG:
     extra_compile_args.extend(["-O0", "-g", "-UNDEBUG"])
 elif sys.platform != "win32":
     extra_compile_args.extend(["-g0"])
+    extra_compile_args.extend([
+        "-Wextra",
+        "-Wno-unused-parameter",
+        "-Wno-missing-field-initializers",
+        "-Wno-cast-function-type",
+    ])
     if sys.platform == "darwin" and platform.machine().lower() == "arm64":
         extra_compile_args.extend(["-flto=thin"])
         extra_link_args.extend(["-flto=thin"])

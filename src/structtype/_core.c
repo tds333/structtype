@@ -153,7 +153,7 @@ _PyFrozenDict_NewSteal(PyObject *dict) {
 #  define Py_END_CRITICAL_SECTION2() }
 #endif // PY_VERSION_HEX < 0x030D00B3
 
-#define DIV_ROUND_CLOSEST(n, d) ((((n) < 0) == ((d) < 0)) ? (((n) + (d)/2)/(d)) : (((n) - (d)/2)/(d)))
+#define DIV_ROUND_CLOSEST(n, d) (((int64_t)(n) < 0) ? (((n) - (d)/2)/(d)) : (((n) + (d)/2)/(d)))
 
 /* These macros are used to manually unroll some loops */
 #define repeat8(x) { x(0) x(1) x(2) x(3) x(4) x(5) x(6) x(7) }
@@ -359,7 +359,7 @@ unaligned_load(const unsigned char *p) {
 static inline uint32_t
 murmur2(const char *p, Py_ssize_t len) {
     const unsigned char *buf = (unsigned char *)p;
-    const size_t m = 0x5bd1e995;
+    const uint32_t m = 0x5bd1e995;
     uint32_t hash = (uint32_t)len;
 
     while(len >= 4) {
@@ -376,8 +376,10 @@ murmur2(const char *p, Py_ssize_t len) {
     switch(len) {
         case 3:
             hash ^= buf[2] << 16;
+            MS_FALLTHROUGH;
         case 2:
             hash ^= buf[1] << 8;
+            MS_FALLTHROUGH;
         case 1:
             hash ^= buf[0];
             hash *= m;
@@ -632,7 +634,7 @@ static bool strbuilder_extend(strbuilder *self, const char *buf, Py_ssize_t nbyt
     Py_ssize_t required = self->size + nbytes + self->sep_size;
 
     if (required > self->capacity) {
-        self->capacity = required * 1.5;
+        self->capacity = (Py_ssize_t)(required * 1.5);
         char *new_buf = PyMem_Realloc(self->buffer, self->capacity);
         if (new_buf == NULL) {
             PyErr_NoMemory();
@@ -789,7 +791,7 @@ PathNode_ErrSuffix(PathNode *path) {
                 memcpy(p, DIGIT_TABLE + (x << 1), 2);
             }
             else {
-                *--p = x + '0';
+                *--p = (char)(x + '0');
             }
             if (!strbuilder_extend(&parts, p, &buf[20] - p)) goto cleanup;
             if (!strbuilder_extend_literal(&parts, "]")) goto cleanup;
@@ -9233,7 +9235,7 @@ ms_resize_bytearray(PyObject** output_buffer, Py_ssize_t size)
 static MS_NOINLINE int
 ms_resize(EncoderState *self, Py_ssize_t size)
 {
-    self->max_output_len = Py_MAX(8, 1.5 * size);
+    self->max_output_len = (Py_ssize_t)Py_MAX(8, 1.5 * size);
     char *new_buf = self->resize_buffer(&self->output_buffer, self->max_output_len);
     if (new_buf == NULL) return -1;
     self->output_buffer_raw = new_buf;
@@ -9431,7 +9433,7 @@ encoder_encode_into_common(
         }
 
         if (offset < buf_size) {
-            buf_size = Py_MAX(8, 1.5 * offset);
+            buf_size = (Py_ssize_t)Py_MAX(8, 1.5 * offset);
             if (PyByteArray_Resize(buf, buf_size) < 0) return NULL;
         }
     }
@@ -10532,7 +10534,7 @@ time_round_up_micros(
  * license.  */
 static PyObject *
 datetime_from_epoch(
-    int64_t epoch_secs, uint32_t epoch_nanos, TypeNode *type, PathNode *path
+    int64_t epoch_secs, int64_t epoch_nanos, TypeNode *type, PathNode *path
 ) {
     /* Error on out-of-bounds datetimes. This leaves ample space in an int, so
      * no need to check for overflow later. */
@@ -10563,7 +10565,7 @@ datetime_from_epoch(
         days--;
     }
 
-    qc_cycles = days / MS_DAYS_PER_400Y;
+    qc_cycles = (int)(days / MS_DAYS_PER_400Y);
     remdays = days % MS_DAYS_PER_400Y;
     if (remdays < 0) {
         remdays += MS_DAYS_PER_400Y;
@@ -10594,7 +10596,7 @@ datetime_from_epoch(
 
     if (!ms_passes_tz_constraint(PyDateTime_TimeZone_UTC, type, path)) return NULL;
     return PyDateTimeAPI->DateTime_FromDateAndTime(
-        years + 2000,
+        (int)(years + 2000),
         months + 3,
         remdays + 1,
         remsecs / 3600,
@@ -10723,7 +10725,7 @@ ms_encode_time_parts(
     }
 
 done:
-    return p - out;
+    return (int)(p - out);
 }
 
 /* Requires 21 bytes of scratch space max.
@@ -10927,8 +10929,8 @@ ms_decode_datetime_from_float(
     if (MS_UNLIKELY(!isfinite(timestamp))) {
         return ms_error_with_path("Invalid epoch timestamp%U", path);
     }
-    int64_t secs = trunc(timestamp);
-    int32_t nanos = 1000000000 * (timestamp - secs);
+    int64_t secs = (int64_t)trunc(timestamp);
+    int32_t nanos = (int32_t)(1000000000 * (timestamp - secs));
     if (nanos && timestamp < 0) {
         secs--;
         nanos += 1000000000;
@@ -11130,7 +11132,7 @@ ms_encode_timedelta(PyObject *obj, char *out) {
         *out++ = '0';
         *out++ = 'D';
     }
-    return out - start;
+    return (int)(out - start);
 }
 
 #define MS_TIMEDELTA_MAX_SECONDS (86399999999999LL)
@@ -11140,7 +11142,7 @@ static PyObject *
 ms_timedelta_from_parts(int64_t secs, int micros) {
     int64_t days = secs / (24 * 60 * 60);
     secs -= days * (24 * 60 * 60);
-    return PyDelta_FromDSU(days, secs, micros);
+    return PyDelta_FromDSU((int)days, (int)secs, micros);
 }
 
 static PyObject *
@@ -11168,7 +11170,7 @@ ms_decode_timedelta_from_float(double x, PathNode *path) {
     ) {
         return ms_error_with_path("Duration is out of range%U", path);
     }
-    int64_t secs = trunc(x);
+    int64_t secs = (int64_t)trunc(x);
     long micros = lround(1000000 * (x - secs));
     return ms_timedelta_from_parts(secs, micros);
 }
@@ -11362,8 +11364,8 @@ ms_decode_timedelta(
         if (has_frac) {
             /* Apply fractional part */
             frac_num *= scale;
-            int64_t extra_secs = frac_num / frac_den;
-            int extra_micros = DIV_ROUND_CLOSEST(1000000 * (frac_num - (extra_secs * frac_den)), frac_den);
+            int64_t extra_secs = (int64_t)(frac_num / frac_den);
+            int extra_micros = (int)DIV_ROUND_CLOSEST(1000000 * (frac_num - (extra_secs * frac_den)), frac_den);
             micros += extra_micros;
             if (micros >= 1000000) {
                 extra_secs++;
@@ -11393,7 +11395,7 @@ ms_decode_timedelta(
     }
     int64_t days = seconds / (24 * 60 * 60);
     seconds -= days * (24 * 60 * 60);
-    return PyDelta_FromDSU(days, seconds, micros);
+    return PyDelta_FromDSU((int)days, (int)seconds, micros);
 
 invalid:
     return ms_error_with_path("Invalid ISO8601 duration%U", path);
@@ -11730,7 +11732,7 @@ ms_post_decode_int64(
         return ms_decode_int_enum_or_literal_int64(x, type, path);
     }
     else if (type->types & MS_TYPE_FLOAT) {
-        return ms_decode_float(x, type, path);
+        return ms_decode_float((double)x, type, path);
     }
     else if (type->types & MS_TYPE_DECIMAL) {
         return ms_decode_decimal_from_int64(x, path);
@@ -11761,7 +11763,7 @@ ms_post_decode_uint64(
         return ms_decode_int_enum_or_literal_uint64(x, type, path);
     }
     else if (type->types & MS_TYPE_FLOAT) {
-        return ms_decode_float(x, type, path);
+        return ms_decode_float((double)x, type, path);
     }
     else if (type->types & MS_TYPE_DECIMAL) {
         return ms_decode_decimal_from_uint64(x, path);
@@ -12204,10 +12206,10 @@ end_parsing:
             val = 0.0;
         }
         else {
-            int64_t r1 = eisel_lemire(mantissa, exponent);
+            int64_t r1 = eisel_lemire(mantissa, (int32_t)exponent);
             if (MS_UNLIKELY(r1 < 0)) goto fallback;
             if (MS_UNLIKELY(is_truncated)) {
-                int64_t r2 = eisel_lemire(mantissa + 1, exponent);
+                int64_t r2 = eisel_lemire(mantissa + 1, (int32_t)exponent);
                 if (r1 != r2) goto fallback;
             }
             uint64_t bits = ((uint64_t)r1);
@@ -13713,7 +13715,7 @@ json_scratch_resize(JSONDecoderState *state, Py_ssize_t size) {
 
 static MS_NOINLINE int
 json_scratch_expand(JSONDecoderState *state, Py_ssize_t required) {
-    size_t new_size = Py_MAX(8, 1.5 * required);
+    size_t new_size = (size_t)Py_MAX(8, 1.5 * required);
     return json_scratch_resize(state, new_size);
 }
 

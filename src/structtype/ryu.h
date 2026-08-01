@@ -956,7 +956,7 @@ write_f64(double f, char* buf, bool allow_nonfinite) {
 
     floating_decimal_64 v = d2d(ieee_mantissa, ieee_exponent);
 
-    int length = write_u64(v.mantissa, buf) - buf;
+    int length = (int)(write_u64(v.mantissa, buf) - buf);
     int32_t k = v.exponent;
     int32_t kk = length + k;
 

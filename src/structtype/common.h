@@ -4,9 +4,11 @@
 #ifdef __GNUC__
 #define MS_LIKELY(pred) __builtin_expect(!!(pred), 1)
 #define MS_UNLIKELY(pred) __builtin_expect(!!(pred), 0)
+#define MS_FALLTHROUGH __attribute__((fallthrough))
 #else
 #define MS_LIKELY(pred) (pred)
 #define MS_UNLIKELY(pred) (pred)
+#define MS_FALLTHROUGH
 #endif
 
 #ifdef __GNUC__
