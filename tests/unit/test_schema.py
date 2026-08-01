@@ -1432,3 +1432,124 @@ def test_multiline_docstring():
             }
         },
     }
+
+
+# Pydantic v2 schema tests
+def test_pydantic_simple():
+    pydantic = pytest.importorskip("pydantic")
+
+    class Point(pydantic.BaseModel):
+        x: int
+        y: int
+
+    assert make_schema(Point) == {
+        "$ref": "#/$defs/Point",
+        "$defs": {
+            "Point": {
+                "title": "Point",
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                },
+                "required": ["x", "y"],
+            },
+        },
+    }
+
+
+def test_pydantic_with_defaults():
+    pydantic = pytest.importorskip("pydantic")
+
+    class User(pydantic.BaseModel):
+        name: str
+        age: int = 0
+        active: bool = True
+        tags: list[str] = pydantic.Field(default_factory=list)
+
+    assert make_schema(User) == {
+        "$ref": "#/$defs/User",
+        "$defs": {
+            "User": {
+                "title": "User",
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer", "default": 0},
+                    "active": {"type": "boolean", "default": True},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["name"],
+            },
+        },
+    }
+
+
+def test_pydantic_nested():
+    pydantic = pytest.importorskip("pydantic")
+
+    class Point(pydantic.BaseModel):
+        x: float
+        y: float
+
+    class Polygon(pydantic.BaseModel):
+        """An example docstring"""
+        vertices: list[Point]
+        name: str | None = None
+
+    assert make_schema(Polygon) == {
+        "$ref": "#/$defs/Polygon",
+        "$defs": {
+            "Polygon": {
+                "title": "Polygon",
+                "description": "An example docstring",
+                "type": "object",
+                "properties": {
+                    "vertices": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/Point"},
+                    },
+                    "name": {
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
+                        "default": None,
+                    },
+                },
+                "required": ["vertices"],
+            },
+            "Point": {
+                "title": "Point",
+                "type": "object",
+                "properties": {
+                    "x": {"type": "number"},
+                    "y": {"type": "number"},
+                },
+                "required": ["x", "y"],
+            },
+        },
+    }
+
+
+def test_pydantic_with_alias():
+    pydantic = pytest.importorskip("pydantic")
+
+    class Example(pydantic.BaseModel):
+        first_name: str = pydantic.Field(alias="firstName")
+        last_name: str = pydantic.Field(alias="lastName")
+
+    assert make_schema(Example) == {
+        "$ref": "#/$defs/Example",
+        "$defs": {
+            "Example": {
+                "title": "Example",
+                "type": "object",
+                "properties": {
+                    "firstName": {"type": "string"},
+                    "lastName": {"type": "string"},
+                },
+                "required": ["firstName", "lastName"],
+            },
+        },
+    }

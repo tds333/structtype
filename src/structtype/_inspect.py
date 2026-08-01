@@ -37,6 +37,9 @@ from ._utils import (
     get_dataclass_info as _get_dataclass_info,
 )
 from ._utils import (
+    get_pydantic_info as _get_pydantic_info,
+)
+from ._utils import (
     get_typeddict_info as _get_typeddict_info,
 )
 
@@ -65,6 +68,7 @@ __all__ = (
     "Metadata",
     "NamedTupleType",
     "NoneType",
+    "PydanticType",
     "RawType",
     "SetType",
     "StrType",
@@ -575,6 +579,21 @@ class DataclassType(Type):
     fields: tuple[FieldNode, ...]
 
 
+class PydanticType(Type):
+    """A type corresponding to a Pydantic v2 BaseModel type.
+
+    Parameters
+    ----------
+    cls: type
+        The corresponding Pydantic model type.
+    fields: tuple[FieldNode, ...]
+        A tuple of fields in the Pydantic model.
+    """
+
+    cls: type
+    fields: tuple[FieldNode, ...]
+
+
 class StructType(Type):
     """A type corresponding to a `structtype.Struct` type.
 
@@ -811,6 +830,10 @@ def _is_dataclass(t):
 
 def _is_attrs(t):
     return hasattr(t, "__attrs_attrs__")
+
+
+def _is_pydantic(t):
+    return hasattr(t, "model_fields") and hasattr(t, "model_validate")
 
 
 def _is_typeddict(t):
@@ -1125,6 +1148,38 @@ class _Translator:
                 )
                 for name in t._fields
             )
+            return out
+        elif _is_pydantic(t):
+            cls = t[args] if args else t
+            if cls in self.cache:
+                return self.cache[cls]
+            self.cache[cls] = out = PydanticType(cls, ())
+            _, info, defaults = _get_pydantic_info(cls)
+            defaults = ((NODEFAULT,) * (len(info) - len(defaults))) + defaults
+            fields = []
+            for (name, typ, is_factory), default_obj in zip(info, defaults):
+                is_required = default_obj is NODEFAULT
+                if is_required:
+                    default = default_factory = NODEFAULT
+                elif is_factory:
+                    default = NODEFAULT
+                    default_factory = default_obj
+                else:
+                    default = default_obj
+                    default_factory = NODEFAULT
+                alias = getattr(cls.model_fields[name], 'alias', None)
+                encode_name = alias if alias else name
+                fields.append(
+                    FieldNode(
+                        name=name,
+                        encode_name=encode_name,
+                        type=self.translate(typ),
+                        required=is_required,
+                        default=default,
+                        default_factory=default_factory,
+                    )
+                )
+            out.fields = tuple(fields)
             return out
         else:
             return CustomType(t)

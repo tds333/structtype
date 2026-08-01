@@ -26,6 +26,7 @@ from ._inspect import (
     Metadata,
     NamedTupleType,
     NoneType,
+    PydanticType,
     RawType,
     SetType,
     StrType,
@@ -185,7 +186,7 @@ def _collect_component_types(type_infos: Iterable[Type]) -> dict[Any, Type]:
     components = {}
 
     def collect(t):
-        if isinstance(t, (StructType, TypedDictType, DataclassType, NamedTupleType)):
+        if isinstance(t, (StructType, TypedDictType, DataclassType, NamedTupleType, PydanticType)):
             if t.cls not in components:
                 components[t.cls] = t
                 for f in t.fields:
@@ -234,7 +235,7 @@ def _get_doc(t: Type) -> str:
     if isinstance(t, EnumType):
         if doc == "An enumeration.":
             return ""
-    elif isinstance(t, (NamedTupleType, DataclassType)):
+    elif isinstance(t, (NamedTupleType, DataclassType, PydanticType)):
         if doc.startswith(f"{cls.__name__}(") and doc.endswith(")"):
             return ""
     return doc
@@ -482,7 +483,7 @@ class _SchemaGenerator:
                 schema["required"] = required
                 if t.forbid_unknown_fields:
                     schema["additionalProperties"] = False
-        elif isinstance(t, (TypedDictType, DataclassType, NamedTupleType)):
+        elif isinstance(t, (TypedDictType, DataclassType, NamedTupleType, PydanticType)):
             schema.setdefault("title", _get_class_name(t.cls))
             if doc := _get_doc(t):
                 schema.setdefault("description", doc)

@@ -896,3 +896,22 @@ def test_is_struct_type_runtime():
     assert isinstance(Custom, structtype.StructMeta)
     assert not isinstance(NotStruct, structtype.StructMeta)
     assert not isinstance(object, structtype.StructMeta)
+
+
+def test_pydantic():
+    pydantic = pytest.importorskip("pydantic")
+
+    class Example(pydantic.BaseModel):
+        x: int
+        y: int = 0
+        z: str = pydantic.Field(default_factory=str)
+
+    sol = mi.PydanticType(
+        Example,
+        fields=(
+            mi.FieldNode("x", "x", mi.IntType()),
+            mi.FieldNode("y", "y", mi.IntType(), required=False, default=0),
+            mi.FieldNode("z", "z", mi.StrType(), required=False, default_factory=str),
+        ),
+    )
+    assert mi.type_info(Example) == sol

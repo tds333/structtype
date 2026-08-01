@@ -3,7 +3,7 @@ import collections
 import sys
 import types
 import typing
-from typing import _AnnotatedAlias, _GenericAlias  # noqa: F401
+from typing import Any, _AnnotatedAlias, _GenericAlias  # noqa: F401
 
 try:
     from typing_extensions import get_type_hints as _get_type_hints
@@ -329,6 +329,34 @@ def get_dataclass_info(obj):
             post_init = _wrap_attrs_validators(fields_with_validators, post_init)
 
     return cls, tuple(required), tuple(defaults), pre_init, post_init
+
+
+def get_pydantic_info(obj):
+    """Extract field info from a Pydantic v2 BaseModel."""
+    if isinstance(obj, type):
+        cls = obj
+    else:
+        cls = obj.__origin__
+    hints = get_class_annotations(obj)
+    required = []
+    optional = []
+    defaults = []
+
+    for name, field_info in cls.model_fields.items():
+        typ = hints.get(name, Any)
+        if field_info.is_required():
+            required.append((name, typ, False))
+        else:
+            df = field_info.default_factory
+            if df is not None:
+                defaults.append(df)
+                optional.append((name, typ, True))
+            else:
+                defaults.append(field_info.default)
+                optional.append((name, typ, False))
+
+    required.extend(optional)
+    return cls, tuple(required), tuple(defaults)
 
 
 def _wrap_attrs_validators(fields, post_init):
