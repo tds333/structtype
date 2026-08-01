@@ -85,6 +85,7 @@ class Struct(metaclass=StructMeta):
     __struct_fields__: ClassVar[tuple[str, ...]]
     __struct_config__: ClassVar[StructConfig]
     __struct_encode_fields__: ClassVar[tuple[str, ...]]
+    __struct_defaults__: ClassVar[tuple[Any, ...]]
     __match_args__: ClassVar[tuple[str, ...]]
     # A default __init__ so that Structs with unknown field types
     # won't error on every call to `__init__`
@@ -114,17 +115,28 @@ class Struct(metaclass=StructMeta):
         validate_on_init: bool = False,
     ) -> None: ...
     def __rich_repr__(self) -> list[tuple[str, Any]]: ...
+    def __copy__(self) -> Self: ...
+    def __reduce__(self) -> tuple: ...
     def __replace__(self, **changes: Any) -> Self: ...
     def __iter__(self) -> Iterator[tuple[str, Any]]: ...
     def struct_dump_json(
         self,
         *,
         enc_hook: Callable[[Any], Any] | None = None,
-        decimal_format: Literal["string", "number"] | Callable[[Any], Any] | None = None,
+        decimal_format: Literal["string", "number"]
+        | Callable[[Any], Any]
+        | None = None,
         uuid_format: Literal["canonical", "hex"] | None = None,
         order: Literal["deterministic", "sorted"] | None = None,
     ) -> bytes: ...
-    def struct_dump(self) -> dict[str, Any]: ...
+    def struct_dump(
+        self,
+        *,
+        enc_hook: Callable[[Any], Any] | None = None,
+        order: Literal["deterministic", "sorted"] | None = None,
+        str_keys: bool = False,
+        builtin_types: Iterable[type] | None = None,
+    ) -> dict[str, Any] | list[Any]: ...
     def struct_force_setattr(self, name: str, value: Any) -> None: ...
     def struct_validate_self(self) -> None: ...
     @classmethod
@@ -316,7 +328,9 @@ class StructAdapter:
         obj: Any,
         *,
         enc_hook: Callable[[Any], Any] | None = None,
-        decimal_format: Literal["string", "number"] | Callable[[Any], Any] | None = None,
+        decimal_format: Literal["string", "number"]
+        | Callable[[Any], Any]
+        | None = None,
         uuid_format: Literal["canonical", "hex"] | None = None,
         order: Literal["deterministic", "sorted"] | None = None,
     ) -> bytes: ...
@@ -328,7 +342,15 @@ class StructAdapter:
         dec_hook: Callable[[type[Any], Any], Any] | None = None,
         from_attributes: bool = False,
     ) -> Any: ...
-    def struct_dump(self, obj: Any) -> Any: ...
+    def struct_dump(
+        self,
+        obj: Any,
+        *,
+        enc_hook: Callable[[Any], Any] | None = None,
+        order: Literal["deterministic", "sorted"] | None = None,
+        str_keys: bool = False,
+        builtin_types: Iterable[type] | None = None,
+    ) -> Any: ...
 
 class StrAdapter:
     def __new__(cls, type: type[Any]) -> type[str]: ...

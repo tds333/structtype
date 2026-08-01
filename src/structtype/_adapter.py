@@ -76,10 +76,15 @@ class StructAdapter:
             from_attributes=from_attributes,
         )
 
-    def struct_dump(self, obj):
+    def struct_dump(self, obj, *, enc_hook=None, order=None, str_keys=False, builtin_types=None):
         """Convert a validated object to built-in Python types (``dict``, ``list``, etc.)."""
         if hasattr(obj, "struct_dump"):
-            return obj.struct_dump()
+            return obj.struct_dump(
+                enc_hook=enc_hook,
+                order=order,
+                str_keys=str_keys,
+                builtin_types=builtin_types,
+            )
         if hasattr(obj, "model_dump"):
             return obj.model_dump()
         return obj

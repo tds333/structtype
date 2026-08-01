@@ -8221,25 +8221,250 @@ static PyObject *Struct_dump(PyObject *, PyObject *const *, Py_ssize_t, PyObject
 static PyObject *Struct_validate(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_check(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 
+PyDoc_STRVAR(Struct_copy__doc__,
+"__copy__(self)\n"
+"--\n"
+"\n"
+"Return a shallow copy of the struct.\n"
+);
+
+PyDoc_STRVAR(Struct_replace__doc__,
+"__replace__(self, /, **changes: Any) -> Self\n"
+"--\n"
+"\n"
+"Create a new struct with the specified fields replaced.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"**changes : Any\n"
+"    Keyword arguments mapping field names to new values.\n"
+"\n"
+"Returns\n"
+"-------\n"
+"Self\n"
+"    A new struct instance with the same type and the given fields replaced.\n"
+);
+
+PyDoc_STRVAR(Struct_reduce__doc__,
+"__reduce__(self)\n"
+"--\n"
+"\n"
+"Return state information for pickling.\n"
+"\n"
+"This enables ``pickle.dump`` and ``copy.deepcopy`` support for struct\n"
+"instances.\n"
+);
+
+PyDoc_STRVAR(Struct_rich_repr__doc__,
+"__rich_repr__(self)\n"
+"--\n"
+"\n"
+"Return a list of ``(name, value)`` pairs for rich display.\n"
+"\n"
+"This is used by IPython and Jupyter to provide a structured representation\n"
+"of the struct.\n"
+);
+
+PyDoc_STRVAR(Struct_dump_json__doc__,
+"struct_dump_json(self, *, enc_hook=None, decimal_format=None, uuid_format=None, order=None)\n"
+"--\n"
+"\n"
+"Serialize this struct to JSON bytes.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"enc_hook : callable, optional\n"
+"    A callable to call for objects that aren't supported structtype types.\n"
+"    Takes the unsupported object and should return a supported object,\n"
+"    or raise a ``NotImplementedError`` if unsupported.\n"
+"decimal_format : str or callable, optional\n"
+"    Controls how ``decimal.Decimal`` values are encoded. If ``\"string\"``\n"
+"    (default), encodes as JSON strings. If ``\"number\"``, encodes as JSON\n"
+"    numbers. A callable is called with each decimal value and should return\n"
+"    an encodable type.\n"
+"uuid_format : str, optional\n"
+"    Controls how ``uuid.UUID`` values are encoded. If ``\"canonical\"``\n"
+"    (default), encodes in canonical form (``xxxxxxxx-xxxx-xxxx-xxxx-\n"
+"    xxxxxxxxxxxx``). If ``\"hex\"``, encodes as hex (``xxxxxxxxxxxxxxxxxxxx\n"
+"    xxxxxxxxxxxx``) .\n"
+"order : {None, 'deterministic', 'sorted'}, optional\n"
+"    The ordering to use when encoding unordered compound types.\n"
+"\n"
+"    - ``None`` (default): Objects are encoded in the most efficient order.\n"
+"    - ``'deterministic'``: Dict keys and set elements are sorted so that\n"
+"      equal values produce identical output.\n"
+"    - ``'sorted'``: Like ``'deterministic'``, but struct-like types are also\n"
+"      sorted by field name before encoding.\n"
+"\n"
+"Returns\n"
+"-------\n"
+"data : bytes\n"
+"    The serialized JSON.\n"
+);
+
+PyDoc_STRVAR(Struct_validate_json__doc__,
+"struct_validate_json(cls, buf, *, strict=True, dec_hook=None)\n"
+"--\n"
+"\n"
+"Deserialize JSON bytes to an instance of this struct type.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"buf : str or bytes-like\n"
+"    The JSON message to decode.\n"
+"strict : bool, optional\n"
+"    Whether type coercion rules should be strict. If ``False``, enables a\n"
+"    wider set of coercion rules from string to non-string types for all\n"
+"    values. Default is ``True``.\n"
+"dec_hook : callable, optional\n"
+"    A callable taking ``(type, obj)`` arguments. ``type`` is the type found\n"
+"    in the schema, and ``obj`` is the decoded representation. This hook\n"
+"    should transform ``obj`` into type ``type``, or raise\n"
+"    ``NotImplementedError`` if unsupported.\n"
+"\n"
+"Returns\n"
+"-------\n"
+"Self\n"
+"    A new struct instance.\n"
+);
+
+PyDoc_STRVAR(Struct_force_setattr__doc__,
+"struct_force_setattr(self, name: str, value: Any)\n"
+"--\n"
+"\n"
+"Set an attribute on a struct, even if the struct is frozen.\n"
+"\n"
+"The main use case for this is modifying a frozen struct in a\n"
+"``__post_init__`` method before returning.\n"
+"\n"
+".. warning::\n"
+"    This function violates the guarantees of a frozen struct, and is\n"
+"    potentially unsafe. Only use it if you know what you're doing!\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"name : str\n"
+"    The attribute name.\n"
+"value : Any\n"
+"    The attribute value.\n"
+);
+
+PyDoc_STRVAR(Struct_dump__doc__,
+"struct_dump(self, *, enc_hook=None, order=None, str_keys=False, builtin_types=None)\n"
+"--\n"
+"\n"
+"Convert this struct to built-in Python types.\n"
+"\n"
+"This applies the same semantics as ``struct_dump_json`` but produces\n"
+"Python objects instead of JSON bytes:\n"
+"\n"
+"- Struct-level settings are honored: ``rename``, ``omit_defaults``,\n"
+"  ``array_like``, and ``tag`` for tagged unions.\n"
+"- Fields containing ``UNSET`` are omitted from the output.\n"
+"- Nested structs, dataclasses, attrs, TypedDict, and NamedTuple values\n"
+"  are recursively expanded.\n"
+"- Types without a direct builtin equivalent are converted to their\n"
+"  serializable representations.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"enc_hook : callable, optional\n"
+"    A callable to call for objects that aren't supported structtype types.\n"
+"    Takes the unsupported object and should return a supported object,\n"
+"    or raise a ``NotImplementedError`` if unsupported.\n"
+"order : {None, 'deterministic', 'sorted'}, optional\n"
+"    The ordering to use when converting unordered compound types.\n"
+"\n"
+"    - ``None`` (default): Objects are converted in the most efficient\n"
+"      order.\n"
+"    - ``'deterministic'``: Dict keys and set elements are sorted so that\n"
+"      equal values produce identical output.\n"
+"    - ``'sorted'``: Like ``'deterministic'``, but struct-like types are\n"
+"      also sorted by field name before conversion.\n"
+"str_keys : bool, optional\n"
+"    Whether to convert all object keys to strings. Default is ``False``.\n"
+"builtin_types : Iterable[type], optional\n"
+"    An iterable of types to treat as additional builtin types. These\n"
+"    types will be passed through unchanged. Currently supports\n"
+"    ``bytes``, ``bytearray``, ``memoryview``, ``datetime.datetime``,\n"
+"    ``datetime.time``, ``datetime.date``, ``datetime.timedelta``,\n"
+"    ``uuid.UUID``, ``decimal.Decimal``, and custom types.\n"
+"\n"
+"Returns\n"
+"-------\n"
+"dict or list\n"
+"    The converted object. For ``array_like=False`` structs returns a\n"
+"    ``dict``. For ``array_like=True`` structs returns a ``list``.\n"
+);
+
+PyDoc_STRVAR(Struct_validate__doc__,
+"struct_validate(cls, obj, *, strict=True, from_attributes=False, dec_hook=None)\n"
+"--\n"
+"\n"
+"Convert built-in types to an instance of this struct type.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"obj : Any\n"
+"    The object to convert.\n"
+"strict : bool, optional\n"
+"    Whether type coercion rules should be strict. If ``False``, enables a\n"
+"    wider set of coercion rules from string to non-string types for all\n"
+"    values. Setting ``strict=False`` implies ``str_keys=True`` and\n"
+"    ``builtin_types=None``. Default is ``True``.\n"
+"from_attributes : bool, optional\n"
+"    If ``True``, input objects may be coerced to struct, dataclass, or\n"
+"    attrs types by extracting attributes matching output field names.\n"
+"    Default is ``False``.\n"
+"dec_hook : callable, optional\n"
+"    A callable taking ``(type, obj)`` arguments. ``type`` is the type found\n"
+"    in the schema, and ``obj`` is the decoded representation. This hook\n"
+"    should transform ``obj`` into type ``type``, or raise\n"
+"    ``NotImplementedError`` if unsupported.\n"
+"\n"
+"Returns\n"
+"-------\n"
+"Self\n"
+"    A validated struct instance.\n"
+);
+
+PyDoc_STRVAR(Struct_validate_self__doc__,
+"struct_validate_self(self)\n"
+"--\n"
+"\n"
+"Validate this struct's fields against their declared types.\n"
+"\n"
+"Raises a ``ValidationError`` if any field's value does not match its\n"
+"declared type.\n"
+);
+
 static PyMethodDef Struct_methods[] = {
-    {"__copy__", Struct_copy, METH_NOARGS, "copy a struct"},
-    {"__replace__", (PyCFunction) Struct_replace, METH_FASTCALL | METH_KEYWORDS, "create a new struct with replacements" },
-    {"__reduce__", Struct_reduce, METH_NOARGS, "reduce a struct"},
-    {"__rich_repr__", Struct_rich_repr, METH_NOARGS, "rich repr"},
-    {"struct_dump_json", (PyCFunction) Struct_dump_json, METH_FASTCALL | METH_KEYWORDS, "Serialize this struct to JSON bytes"},
-    {"struct_validate_json", (PyCFunction) Struct_validate_json, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Deserialize JSON bytes to this struct type"},
-    {"struct_force_setattr", (PyCFunction) Struct_force_setattr_wrapper, METH_FASTCALL, "Force set an attribute on a frozen struct"},
-    {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, "Convert this struct to built-in Python types"},
-    {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, "Convert built-in types to this struct type"},
-    {"struct_validate_self", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, "Validate this struct's fields against their declared types"},
+    {"__copy__", Struct_copy, METH_NOARGS, Struct_copy__doc__},
+    {"__replace__", (PyCFunction) Struct_replace, METH_FASTCALL | METH_KEYWORDS, Struct_replace__doc__},
+    {"__reduce__", Struct_reduce, METH_NOARGS, Struct_reduce__doc__},
+    {"__rich_repr__", Struct_rich_repr, METH_NOARGS, Struct_rich_repr__doc__},
+    {"struct_dump_json", (PyCFunction) Struct_dump_json, METH_FASTCALL | METH_KEYWORDS, Struct_dump_json__doc__},
+    {"struct_validate_json", (PyCFunction) Struct_validate_json, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate_json__doc__},
+    {"struct_force_setattr", (PyCFunction) Struct_force_setattr_wrapper, METH_FASTCALL, Struct_force_setattr__doc__},
+    {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, Struct_dump__doc__},
+    {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate__doc__},
+    {"struct_validate_self", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, Struct_validate_self__doc__},
     {NULL, NULL},
 };
 
 static PyGetSetDef StructMixin_getset[] = {
-    {"__struct_fields__", (getter) StructMixin_fields, NULL, "Struct fields", NULL},
-    {"__struct_encode_fields__", (getter) StructMixin_encode_fields, NULL, "Struct encoded field names", NULL},
-    {"__struct_defaults__", (getter) StructMixin_defaults, NULL, "Struct defaults", NULL},
-    {"__struct_config__", (getter) StructMixin_config, NULL, "Struct configuration", NULL},
+    {"__struct_fields__", (getter) StructMixin_fields, NULL,
+        "A tuple of field names in declaration order",
+        NULL},
+    {"__struct_encode_fields__", (getter) StructMixin_encode_fields, NULL,
+        "A tuple of field names used for serialization (after applying rename)",
+        NULL},
+    {"__struct_defaults__", (getter) StructMixin_defaults, NULL,
+        "A tuple of default values for each field, in declaration order",
+        NULL},
+    {"__struct_config__", (getter) StructMixin_config, NULL,
+        "The StructConfig for this struct type",
+        NULL},
     {NULL},
 };
 
@@ -18575,19 +18800,45 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
         return PyErr_Format(PyExc_TypeError,
             "struct_dump() takes no positional arguments (%zd given)", nargs);
     }
-    if (kwnames != NULL && PyTuple_GET_SIZE(kwnames) > 0) {
-        return PyErr_Format(PyExc_TypeError,
-            "struct_dump() takes no keyword arguments");
-    }
     StructspecState *mod = structtype_get_global_state();
     if (mod == NULL) return NULL;
+    PyObject *enc_hook = NULL, *order = NULL, *builtin_types = NULL;
+    int str_keys = 0;
+    if (kwnames != NULL) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < nkwargs; i++) {
+            PyObject *name = PyTuple_GET_ITEM(kwnames, i);
+            PyObject *val = args[nargs + i];
+            if (PyUnicode_CompareWithASCIIString(name, "enc_hook") == 0) {
+                if (val != Py_None && !PyCallable_Check(val)) {
+                    return PyErr_Format(PyExc_TypeError,
+                        "enc_hook must be callable");
+                }
+                enc_hook = (val == Py_None) ? NULL : val;
+            } else if (PyUnicode_CompareWithASCIIString(name, "order") == 0) {
+                order = val;
+            } else if (PyUnicode_CompareWithASCIIString(name, "str_keys") == 0) {
+                str_keys = PyObject_IsTrue(val);
+            } else if (PyUnicode_CompareWithASCIIString(name, "builtin_types") == 0) {
+                builtin_types = val;
+            } else {
+                return PyErr_Format(PyExc_TypeError,
+                    "struct_dump() got an unexpected keyword argument '%U'", name);
+            }
+        }
+    }
     ToBuiltinsState state;
     state.mod = mod;
-    state.str_keys = 0;
+    state.str_keys = str_keys;
     state.builtin_types = 0;
     state.builtin_types_seq = NULL;
-    state.order = ORDER_DEFAULT;
-    state.enc_hook = NULL;
+    state.order = parse_order_arg(order);
+    if (state.order == ORDER_INVALID) return NULL;
+    state.enc_hook = enc_hook;
+    if (ms_process_builtin_types(mod, builtin_types,
+            &(state.builtin_types), &(state.builtin_types_seq)) < 0) {
+        return NULL;
+    }
     PyObject *out = to_builtins(&state, self, false);
     Py_XDECREF(state.builtin_types_seq);
     return out;

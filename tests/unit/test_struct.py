@@ -14,8 +14,7 @@ from typing import Annotated, Any, Generic, TypeVar
 import pytest
 
 import structtype
-from structtype import NODEFAULT, UNSET, Struct, Field
-from structtype import StructConfig
+from structtype import NODEFAULT, UNSET, Field, Struct, StructConfig
 
 from .utils import temp_module
 
@@ -945,12 +944,14 @@ def test_struct_defaults_from_field_annotated():
 
 def test_field_outside_annotated_errors():
     with pytest.raises(TypeError, match="Annotated"):
+
         class Test(Struct):
             x: int = Field(default=0)
 
 
 def test_field_default_conflict_with_class_body():
     with pytest.raises(TypeError, match="Field default"):
+
         class Test(Struct):
             x: Annotated[int, Field(default=0)] = 5
 
@@ -1588,12 +1589,16 @@ class TestHash:
     def test_hash_includes_type(self):
         class Ex1(Struct, frozen=True):
             x: int
+
         class Ex2(Struct, frozen=True):
             x: int
+
         class Ex3(Struct, frozen=True):
             pass
+
         class Ex4(Struct, frozen=True):
             pass
+
         assert hash(Ex1(1)) == hash(Ex1(1))
         assert hash(Ex1(1)) != hash(Ex2(1))
         assert hash(Ex3()) == hash(Ex3())
