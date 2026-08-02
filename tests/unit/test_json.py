@@ -1868,7 +1868,7 @@ class TestDict:
         dec = JSONDecoder(dict[str, int])
         with pytest.raises(
             structtype.ValidationError,
-            match=r"Expected `int`, got `str` - at `\$\[...\]`",
+            match=r"Expected `int`, got `str` - at `\$\['a'\]`",
         ):
             dec.decode(b'{"a": "bad"}')
 

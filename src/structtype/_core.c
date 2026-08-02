@@ -707,6 +707,7 @@ ms_get_annotate_from_class_namespace(PyObject *namespace) {
 #define PATH_ELLIPSIS -1
 #define PATH_STR -2
 #define PATH_KEY -3
+#define PATH_STR_BRACKET -4
 
 typedef struct PathNode {
     struct PathNode *parent;
@@ -749,7 +750,23 @@ PathNode_ErrSuffix(PathNode *path) {
     if (!strbuilder_extend_literal(&parts, "`$")) goto cleanup;
 
     while (path != NULL) {
-        if (path->object != NULL) {
+        if (path->index == PATH_STR_BRACKET) {
+            if (!strbuilder_extend_literal(&parts, "['")) goto cleanup;
+            if (PyUnicode_Check(path->object)) {
+                if (!strbuilder_extend_unicode(&parts, path->object)) goto cleanup;
+            }
+            else {
+                PyObject *key_repr = PyObject_Repr(path->object);
+                if (key_repr == NULL) goto cleanup;
+                if (!strbuilder_extend_unicode(&parts, key_repr)) {
+                    Py_DECREF(key_repr);
+                    goto cleanup;
+                }
+                Py_DECREF(key_repr);
+            }
+            if (!strbuilder_extend_literal(&parts, "']")) goto cleanup;
+        }
+        else if (path->object != NULL) {
             PyObject *name;
             if (path->index == PATH_STR) {
                 name = path->object;
@@ -15331,7 +15348,7 @@ json_decode_dict(
     unsigned char c;
     bool first = true;
     PathNode key_path = {path, PATH_KEY, NULL};
-    PathNode val_path = {path, PATH_ELLIPSIS, NULL};
+    PathNode val_path = {path, PATH_STR_BRACKET, NULL};
 
     self->input_pos++; /* Skip '{' */
 
@@ -15385,6 +15402,7 @@ json_decode_dict(
         self->input_pos++;
 
         /* Parse value */
+        val_path.object = key;
         val = json_decode(self, val_type, &val_path);
         if (val == NULL) goto error;
 
@@ -17948,7 +17966,7 @@ validate_dict_to_dict(
     TypeNode_get_dict(type, &key_type, &val_type);
 
     PathNode key_path = {path, PATH_KEY, NULL};
-    PathNode val_path = {path, PATH_ELLIPSIS, NULL};
+    PathNode val_path = {path, PATH_STR_BRACKET, NULL};
 
     PyObject *out = PyDict_New();
     if (out == NULL) return NULL;
@@ -17969,6 +17987,7 @@ validate_dict_to_dict(
             key = validate_obj(self, key_obj, key_type, &key_path);
         }
         if (MS_UNLIKELY(key == NULL)) goto error;
+        val_path.object = key_obj;
         PyObject *val = validate_obj(self, val_obj, val_type, &val_path);
         if (MS_UNLIKELY(val == NULL)) {
             Py_DECREF(key);
