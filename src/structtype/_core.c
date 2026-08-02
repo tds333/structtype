@@ -8350,7 +8350,7 @@ PyDoc_STRVAR(Struct_force_setattr__doc__,
 );
 
 PyDoc_STRVAR(Struct_dump__doc__,
-"struct_dump_obj(self, *, enc_hook=None, order=None, str_keys=False, builtin_types=None)\n"
+"struct_dump(self, *, enc_hook=None, order=None, str_keys=False, builtin_types=None)\n"
 "--\n"
 "\n"
 "Convert this struct to built-in Python types.\n"
@@ -13459,7 +13459,7 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
         return json_encode_set(self, obj);
     }
     else if (PyObject_HasAttrString(obj, "struct_dump")) {
-        /* Custom type — struct_dump_obj() to a base type, then re-encode */
+        /* Custom type — struct_dump() to a base type, then re-encode */
         PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
         if (dumped == NULL) return -1;
         int status = json_encode_inline(self, dumped);
@@ -16887,7 +16887,7 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         return dump_set(self, obj, is_key);
     }
     else if (PyObject_HasAttrString(obj, "struct_dump")) {
-        /* Custom type — struct_dump_obj() to a base type, then re-process */
+        /* Custom type — struct_dump() to a base type, then re-process */
         PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
         if (dumped == NULL) return NULL;
         PyObject *result = dump_obj(self, dumped, is_key);
@@ -18798,7 +18798,7 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
 {
     if (nargs > 0) {
         return PyErr_Format(PyExc_TypeError,
-            "struct_dump_obj() takes no positional arguments (%zd given)", nargs);
+            "struct_dump() takes no positional arguments (%zd given)", nargs);
     }
     StructspecState *mod = structtype_get_global_state();
     if (mod == NULL) return NULL;
@@ -18823,7 +18823,7 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
                 builtin_types = val;
             } else {
                 return PyErr_Format(PyExc_TypeError,
-                    "struct_dump_obj() got an unexpected keyword argument '%U'", name);
+                    "struct_dump() got an unexpected keyword argument '%U'", name);
             }
         }
     }
