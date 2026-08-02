@@ -19,7 +19,7 @@ All commands go through `make`.
 | Task | Command |
 |---|---|
 | Unit tests (reinstall + last-failed) | `make test-lf` |
-| Targeted tests | `uv run --reinstall pytest tests/unit/test_json.py -k test_something` |
+| Targeted tests | `uv run --reinstall pytest tests/test_json.py -k test_something` |
 | Coverage | `make test-cov` |
 | Build docs | `make docs` |
 | Format | `make format` |
