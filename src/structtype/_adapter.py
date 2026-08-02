@@ -1,6 +1,6 @@
 from typing import Any
 
-from ._core import _convert, _to_builtins, json_decode, json_encode
+from ._core import _dump, _json_decode, _json_encode, _validate
 
 
 class StructAdapter:
@@ -32,9 +32,11 @@ class StructAdapter:
         dec_hook : callable, optional
             A callback for customizing decoding of specific types.
         """
-        return json_decode(buf, type=self._type, strict=strict, dec_hook=dec_hook)
+        return _json_decode(buf, type=self._type, strict=strict, dec_hook=dec_hook)
 
-    def struct_dump_json(self, obj, *, enc_hook=None, decimal_format=None, uuid_format=None, order=None):
+    def struct_dump_json(
+        self, obj, *, enc_hook=None, decimal_format=None, uuid_format=None, order=None
+    ):
         """Encode a validated object to JSON bytes.
 
         Parameters
@@ -50,7 +52,13 @@ class StructAdapter:
         order : str, optional
             Determines key ordering in JSON objects.
         """
-        return json_encode(obj, enc_hook=enc_hook, decimal_format=decimal_format, uuid_format=uuid_format, order=order)
+        return _json_encode(
+            obj,
+            enc_hook=enc_hook,
+            decimal_format=decimal_format,
+            uuid_format=uuid_format,
+            order=order,
+        )
 
     def struct_validate(
         self, obj, *, strict=True, dec_hook=None, from_attributes=False
@@ -68,7 +76,7 @@ class StructAdapter:
         from_attributes : bool, optional
             If True, accept objects with attributes instead of dict keys.
         """
-        return _convert(
+        return _validate(
             obj,
             self._type,
             strict=strict,
@@ -76,9 +84,11 @@ class StructAdapter:
             from_attributes=from_attributes,
         )
 
-    def struct_dump(self, obj, *, enc_hook=None, order=None, str_keys=False, builtin_types=None):
+    def struct_dump(
+        self, obj, *, enc_hook=None, order=None, str_keys=False, builtin_types=None
+    ):
         """Convert a validated object to built-in Python types (``dict``, ``list``, etc.)."""
-        return _to_builtins(
+        return _dump(
             obj,
             builtin_types=builtin_types,
             str_keys=str_keys,
@@ -108,7 +118,11 @@ class StrAdapter:
     __slots__ = ()
 
     def __new__(cls, typ):
-        return type(f"_Wrapped_{typ.__name__}", (str,), {
-            "__slots__": (),
-            "__new__": lambda self, v: str.__new__(self, str(typ(v))),
-        })
+        return type(
+            f"_Wrapped_{typ.__name__}",
+            (str,),
+            {
+                "__slots__": (),
+                "__new__": lambda self, v: str.__new__(self, str(typ(v))),
+            },
+        )

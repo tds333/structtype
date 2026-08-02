@@ -4483,7 +4483,7 @@ error:
 }
 
 static int
-typenode_collect_convert_literals(TypeNodeCollectState *state) {
+typenode_collect_validate_literals(TypeNodeCollectState *state) {
     if (state->literals == NULL) {
         /* Nothing to do */
         return 0;
@@ -4575,7 +4575,7 @@ typenode_collect_convert_literals(TypeNodeCollectState *state) {
 }
 
 static int
-typenode_collect_convert_structs_lock_held(TypeNodeCollectState *state) {
+typenode_collect_validate_structs_lock_held(TypeNodeCollectState *state) {
     if (state->struct_obj == NULL && state->structs_set == NULL) {
         return 0;
     }
@@ -4752,10 +4752,10 @@ cleanup:
 }
 
 static int
-typenode_collect_convert_structs(TypeNodeCollectState *state) {
+typenode_collect_validate_structs(TypeNodeCollectState *state) {
     int status;
     Py_BEGIN_CRITICAL_SECTION(state->mod->struct_lookup_cache);
-    status = typenode_collect_convert_structs_lock_held(state);
+    status = typenode_collect_validate_structs_lock_held(state);
     Py_END_CRITICAL_SECTION();
     return status;
 }
@@ -5262,9 +5262,9 @@ TypeNode_Convert(PyObject *obj) {
     /* Traverse `obj` to collect all type annotations at this level */
     if (typenode_collect_type(&state, obj) < 0) goto done;
     /* Handle structs in a second pass */
-    if (typenode_collect_convert_structs(&state) < 0) goto done;
+    if (typenode_collect_validate_structs(&state) < 0) goto done;
     /* Handle literals in a second pass */
-    if (typenode_collect_convert_literals(&state) < 0) goto done;
+    if (typenode_collect_validate_literals(&state) < 0) goto done;
     /* Check type invariants to ensure Union types are valid */
     if (typenode_collect_check_invariants(&state) < 0) goto done;
     /* Populate a new TypeNode, recursing into subtypes as needed */
@@ -8350,7 +8350,7 @@ PyDoc_STRVAR(Struct_force_setattr__doc__,
 );
 
 PyDoc_STRVAR(Struct_dump__doc__,
-"struct_dump(self, *, enc_hook=None, order=None, str_keys=False, builtin_types=None)\n"
+"struct_dump_obj(self, *, enc_hook=None, order=None, str_keys=False, builtin_types=None)\n"
 "--\n"
 "\n"
 "Convert this struct to built-in Python types.\n"
@@ -13459,7 +13459,7 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
         return json_encode_set(self, obj);
     }
     else if (PyObject_HasAttrString(obj, "struct_dump")) {
-        /* Custom type — struct_dump() to a base type, then re-encode */
+        /* Custom type — struct_dump_obj() to a base type, then re-encode */
         PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
         if (dumped == NULL) return -1;
         int status = json_encode_inline(self, dumped);
@@ -16290,7 +16290,7 @@ structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
 }
 
 /*************************************************************************
- * to_builtins                                                           *
+ * dump                                                           *
  *************************************************************************/
 
 #define MS_BUILTIN_BYTES      (1ull << 0)
@@ -16311,18 +16311,18 @@ typedef struct {
     enum order_mode order;
     uint32_t builtin_types;
     PyObject *builtin_types_seq;
-} ToBuiltinsState;
+} DumpState;
 
-static PyObject * to_builtins(ToBuiltinsState *, PyObject *, bool);
+static PyObject * dump_obj(DumpState *, PyObject *, bool);
 
 static PyObject *
-to_builtins_enum(ToBuiltinsState *self, PyObject *obj)
+dump_enum(DumpState *self, PyObject *obj)
 {
     return PyObject_GetAttr(obj, self->mod->str__value_);
 }
 
 static PyObject *
-to_builtins_binary(ToBuiltinsState *self, const char *buf, Py_ssize_t size) {
+dump_binary(DumpState *self, const char *buf, Py_ssize_t size) {
     Py_ssize_t output_size = ms_encode_base64_size(self->mod, size);
     if (output_size < 0) return NULL;
     PyObject *out = PyUnicode_New(output_size, 127);
@@ -16332,7 +16332,7 @@ to_builtins_binary(ToBuiltinsState *self, const char *buf, Py_ssize_t size) {
 }
 
 static PyObject *
-to_builtins_datetime(ToBuiltinsState *self, PyObject *obj) {
+dump_datetime(DumpState *self, PyObject *obj) {
     char buf[32];
     int size = ms_encode_datetime(self->mod, obj, buf);
     if (size < 0) return NULL;
@@ -16342,7 +16342,7 @@ to_builtins_datetime(ToBuiltinsState *self, PyObject *obj) {
 }
 
 static PyObject *
-to_builtins_date(ToBuiltinsState *self, PyObject *obj) {
+dump_date(DumpState *self, PyObject *obj) {
     PyObject *out = PyUnicode_New(10, 127);
     if (out == NULL) return NULL;
     ms_encode_date(obj, ascii_get_buffer(out));
@@ -16350,7 +16350,7 @@ to_builtins_date(ToBuiltinsState *self, PyObject *obj) {
 }
 
 static PyObject *
-to_builtins_time(ToBuiltinsState *self, PyObject *obj) {
+dump_time(DumpState *self, PyObject *obj) {
     char buf[21];
     int size = ms_encode_time(self->mod, obj, buf);
     if (size < 0) return NULL;
@@ -16360,7 +16360,7 @@ to_builtins_time(ToBuiltinsState *self, PyObject *obj) {
 }
 
 static PyObject *
-to_builtins_timedelta(ToBuiltinsState *self, PyObject *obj) {
+dump_timedelta(DumpState *self, PyObject *obj) {
     char buf[26];
     int size = ms_encode_timedelta(obj, buf);
     PyObject *out = PyUnicode_New(size, 127);
@@ -16369,7 +16369,7 @@ to_builtins_timedelta(ToBuiltinsState *self, PyObject *obj) {
 }
 
 static PyObject *
-to_builtins_uuid(ToBuiltinsState *self, PyObject *obj) {
+dump_uuid(DumpState *self, PyObject *obj) {
     PyObject *out = PyUnicode_New(36, 127);
     if (out == NULL) return NULL;
     if (ms_encode_uuid(self->mod, obj, ascii_get_buffer(out), true) < 0) {
@@ -16379,12 +16379,12 @@ to_builtins_uuid(ToBuiltinsState *self, PyObject *obj) {
 }
 
 static PyObject *
-to_builtins_decimal(ToBuiltinsState *self, PyObject *obj) {
+dump_decimal(DumpState *self, PyObject *obj) {
     return PyObject_Str(obj);
 }
 
 static PyObject *
-to_builtins_list(ToBuiltinsState *self, PyObject *obj) {
+dump_list(DumpState *self, PyObject *obj) {
     if (Py_EnterRecursiveCall(" while serializing an object")) return NULL;
 
     Py_ssize_t size = PyList_GET_SIZE(obj);
@@ -16392,7 +16392,7 @@ to_builtins_list(ToBuiltinsState *self, PyObject *obj) {
     if (out == NULL) goto cleanup;
     for (Py_ssize_t i = 0; i < size; i++) {
         PyObject *item = PyList_GET_ITEM(obj, i);
-        PyObject *new = to_builtins(self, item, false);
+        PyObject *new = dump_obj(self, item, false);
         if (new == NULL) {
             Py_CLEAR(out);
             goto cleanup;
@@ -16406,7 +16406,7 @@ cleanup:
 }
 
 static PyObject *
-to_builtins_tuple(ToBuiltinsState *self, PyObject *obj, bool is_key) {
+dump_tuple(DumpState *self, PyObject *obj, bool is_key) {
     if (Py_EnterRecursiveCall(" while serializing an object")) return NULL;
 
     Py_ssize_t size = PyTuple_GET_SIZE(obj);
@@ -16414,7 +16414,7 @@ to_builtins_tuple(ToBuiltinsState *self, PyObject *obj, bool is_key) {
     if (out == NULL) goto cleanup;
     for (Py_ssize_t i = 0; i < size; i++) {
         PyObject *item = PyTuple_GET_ITEM(obj, i);
-        PyObject *new = to_builtins(self, item, is_key);
+        PyObject *new = dump_obj(self, item, is_key);
         if (new == NULL) {
             Py_CLEAR(out);
             goto cleanup;
@@ -16427,7 +16427,7 @@ cleanup:
 }
 
 static PyObject *
-to_builtins_set(ToBuiltinsState *self, PyObject *obj, bool is_key) {
+dump_set(DumpState *self, PyObject *obj, bool is_key) {
     PyObject *out = NULL;
     if (Py_EnterRecursiveCall(" while serializing an object")) return NULL;
 
@@ -16440,7 +16440,7 @@ to_builtins_set(ToBuiltinsState *self, PyObject *obj, bool is_key) {
     Py_ssize_t size = PyList_GET_SIZE(list);
     for (Py_ssize_t i = 0; i < size; i++) {
         PyObject *orig_item = PyList_GET_ITEM(list, i);
-        PyObject *new_item = to_builtins(self, orig_item, is_key);
+        PyObject *new_item = dump_obj(self, orig_item, is_key);
         if (new_item == NULL) goto cleanup;
         PyList_SET_ITEM(list, i, new_item);
         Py_DECREF(orig_item);
@@ -16487,7 +16487,7 @@ error:
 }
 
 static PyObject *
-to_builtins_dict(ToBuiltinsState *self, PyObject *obj) {
+dump_dict(DumpState *self, PyObject *obj) {
     if (Py_EnterRecursiveCall(" while serializing an object")) return NULL;
 
     PyObject *new_key = NULL, *new_val = NULL, *key, *val;
@@ -16498,7 +16498,7 @@ to_builtins_dict(ToBuiltinsState *self, PyObject *obj) {
 
     Py_ssize_t pos = 0;
     while (PyDict_Next(obj, &pos, &key, &val)) {
-        new_key = to_builtins(self, key, true);
+        new_key = dump_obj(self, key, true);
         if (new_key == NULL) goto cleanup;
         if (self->str_keys) {
             if (PyLong_CheckExact(new_key) || PyFloat_CheckExact(new_key)) {
@@ -16515,7 +16515,7 @@ to_builtins_dict(ToBuiltinsState *self, PyObject *obj) {
                 goto cleanup;
             }
         }
-        new_val = to_builtins(self, val, false);
+        new_val = dump_obj(self, val, false);
         if (new_val == NULL) goto cleanup;
         if (PyDict_SetItem(out, new_key, new_val) < 0) goto cleanup;
         Py_CLEAR(new_key);
@@ -16539,8 +16539,8 @@ cleanup:;
 
 #if PY315_PLUS
 static PyObject *
-to_builtins_frozendict(ToBuiltinsState *self, PyObject *obj) {
-    PyObject *out = to_builtins_dict(self, obj);
+dump_frozendict(DumpState *self, PyObject *obj) {
+    PyObject *out = dump_dict(self, obj);
     if (self->builtin_types & MS_BUILTIN_FROZENDICT) {
         return _PyFrozenDict_NewSteal(out);
     }
@@ -16549,7 +16549,7 @@ to_builtins_frozendict(ToBuiltinsState *self, PyObject *obj) {
 #endif
 
 static PyObject *
-to_builtins_struct(ToBuiltinsState *self, PyObject *obj, bool is_key) {
+dump_struct(DumpState *self, PyObject *obj, bool is_key) {
     if (Py_EnterRecursiveCall(" while serializing an object")) return NULL;
 
     bool ok = false;
@@ -16586,7 +16586,7 @@ to_builtins_struct(ToBuiltinsState *self, PyObject *obj, bool is_key) {
         for (Py_ssize_t i = 0; i < nfields; i++) {
             PyObject *val = Struct_get_index(obj, i);
             if (val == NULL) goto cleanup;
-            PyObject *val2 = to_builtins(self, val, is_key);
+            PyObject *val2 = dump_obj(self, val, is_key);
             if (val2 == NULL) goto cleanup;
             Py_INCREF(val2);
             if (is_key) {
@@ -16613,7 +16613,7 @@ to_builtins_struct(ToBuiltinsState *self, PyObject *obj, bool is_key) {
                 i < npos ||
                 !is_default(val, PyTuple_GET_ITEM(defaults, i - npos))
             ) {
-                PyObject *val2 = to_builtins(self, val, false);
+                PyObject *val2 = dump_obj(self, val, false);
                 if (val2 == NULL) goto cleanup;
                 int status = PyDict_SetItem(out, key, val2);
                 Py_DECREF(val2);
@@ -16635,7 +16635,7 @@ cleanup:
 }
 
 static PyObject *
-to_builtins_external_struct(ToBuiltinsState *self, PyObject *obj) {
+dump_external_struct(DumpState *self, PyObject *obj) {
     /* External struct type (e.g. msgspec.Struct) — convert fields to dict
      * using Python-level attribute access (no C offset assumptions). */
     PyObject *fields = PyObject_GetAttrString(obj, "__struct_fields__");
@@ -16652,7 +16652,7 @@ to_builtins_external_struct(ToBuiltinsState *self, PyObject *obj) {
         PyObject *key = PyTuple_GET_ITEM(fields, i);
         PyObject *val = PyObject_GetAttr(obj, key);
         if (val == NULL) { PyErr_Clear(); continue; }
-        PyObject *val2 = to_builtins(self, val, false);
+        PyObject *val2 = dump_obj(self, val, false);
         if (val2 == NULL) { Py_DECREF(val); goto cleanup; }
         int status = PyDict_SetItem(out, key, val2);
         Py_DECREF(val2);
@@ -16669,7 +16669,7 @@ cleanup:
 }
 
 static PyObject *
-to_builtins_dataclass(ToBuiltinsState *self, PyObject *obj, PyObject *fields)
+dump_dataclass(DumpState *self, PyObject *obj, PyObject *fields)
 {
     if (Py_EnterRecursiveCall(" while serializing an object")) return NULL;
 
@@ -16683,7 +16683,7 @@ to_builtins_dataclass(ToBuiltinsState *self, PyObject *obj, PyObject *fields)
 
     PyObject *field, *val;
     while (dataclass_iter_next(&iter, &field, &val)) {
-        PyObject *val2 = to_builtins(self, val, false);
+        PyObject *val2 = dump_obj(self, val, false);
         int status = (
             (val2 == NULL) ? -1 : PyDict_SetItem(out, field, val2)
         );
@@ -16706,7 +16706,7 @@ cleanup:
 }
 
 static PyObject*
-to_builtins_object(ToBuiltinsState *self, PyObject *obj) {
+dump_object(DumpState *self, PyObject *obj) {
     bool ok = false;
     PyObject *dict = NULL, *out = NULL;
 
@@ -16737,7 +16737,7 @@ to_builtins_object(ToBuiltinsState *self, PyObject *obj) {
                 }
                 if (MS_UNLIKELY(*key_buf == '_')) continue;
 
-                PyObject *val2 = to_builtins(self, val, false);
+                PyObject *val2 = dump_obj(self, val, false);
                 if (val2 == NULL) {
                     err = 1;
                     break;
@@ -16771,7 +16771,7 @@ to_builtins_object(ToBuiltinsState *self, PyObject *obj) {
                     if (key == NULL) goto cleanup;
 
                     int status = -1;
-                    PyObject *val2 = to_builtins(self, val, false);
+                    PyObject *val2 = dump_obj(self, val, false);
                     if (val2 != NULL) {
                         status = PyDict_SetItem(out, key, val2);
                         Py_DECREF(val2);
@@ -16799,7 +16799,7 @@ cleanup:
 }
 
 static PyObject *
-to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
+dump_obj(DumpState *self, PyObject *obj, bool is_key) {
     PyTypeObject *type = Py_TYPE(obj);
 
     if (
@@ -16813,13 +16813,13 @@ to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
     }
     else if (type == &PyBytes_Type) {
         if (self->builtin_types & MS_BUILTIN_BYTES) goto builtin;
-        return to_builtins_binary(
+        return dump_binary(
             self, PyBytes_AS_STRING(obj), PyBytes_GET_SIZE(obj)
         );
     }
     else if (type == &PyByteArray_Type) {
         if (self->builtin_types & MS_BUILTIN_BYTEARRAY) goto builtin;
-        return to_builtins_binary(
+        return dump_binary(
             self, PyByteArray_AS_STRING(obj), PyByteArray_GET_SIZE(obj)
         );
     }
@@ -16828,69 +16828,69 @@ to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
         PyObject *out;
         Py_buffer buffer;
         if (PyObject_GetBuffer(obj, &buffer, PyBUF_CONTIG_RO) < 0) return NULL;
-        out = to_builtins_binary(self, buffer.buf, buffer.len);
+        out = dump_binary(self, buffer.buf, buffer.len);
         PyBuffer_Release(&buffer);
         return out;
     }
     else if (type == PyDateTimeAPI->DateTimeType) {
         if (self->builtin_types & MS_BUILTIN_DATETIME) goto builtin;
-        return to_builtins_datetime(self, obj);
+        return dump_datetime(self, obj);
     }
     else if (type == PyDateTimeAPI->DateType) {
         if (self->builtin_types & MS_BUILTIN_DATE) goto builtin;
-        return to_builtins_date(self, obj);
+        return dump_date(self, obj);
     }
     else if (type == PyDateTimeAPI->TimeType) {
         if (self->builtin_types & MS_BUILTIN_TIME) goto builtin;
-        return to_builtins_time(self, obj);
+        return dump_time(self, obj);
     }
     else if (type == PyDateTimeAPI->DeltaType) {
         if (self->builtin_types & MS_BUILTIN_TIMEDELTA) goto builtin;
-        return to_builtins_timedelta(self, obj);
+        return dump_timedelta(self, obj);
     }
     else if (type == (PyTypeObject *)(self->mod->DecimalType)) {
         if (self->builtin_types & MS_BUILTIN_DECIMAL) goto builtin;
-        return to_builtins_decimal(self, obj);
+        return dump_decimal(self, obj);
     }
     else if (PyList_Check(obj)) {
-        return to_builtins_list(self, obj);
+        return dump_list(self, obj);
     }
     else if (PyTuple_Check(obj)) {
-        return to_builtins_tuple(self, obj, is_key);
+        return dump_tuple(self, obj, is_key);
     }
     else if (PyDict_Check(obj)) {
-        return to_builtins_dict(self, obj);
+        return dump_dict(self, obj);
     }
 #if PY315_PLUS
     else if (PyFrozenDict_Check(obj)) {
-        return to_builtins_frozendict(self, obj);
+        return dump_frozendict(self, obj);
     }
 #endif
     else if (ms_is_struct_type(type)) {
-        return to_builtins_struct(self, obj, is_key);
+        return dump_struct(self, obj, is_key);
     }
     else if (!ms_is_struct_inst(obj) && PyObject_HasAttrString(obj, "__struct_fields__")) {
         /* External struct type (e.g. msgspec) — use Python-level attribute access */
-        return to_builtins_external_struct(self, obj);
+        return dump_external_struct(self, obj);
     }
     else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
-        return to_builtins_enum(self, obj);
+        return dump_enum(self, obj);
     }
     else if (is_key & PyUnicode_Check(obj)) {
         return PyObject_Str(obj);
     }
     else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
         if (self->builtin_types & MS_BUILTIN_UUID) goto builtin;
-        return to_builtins_uuid(self, obj);
+        return dump_uuid(self, obj);
     }
     else if (PyAnySet_Check(obj)) {
-        return to_builtins_set(self, obj, is_key);
+        return dump_set(self, obj, is_key);
     }
     else if (PyObject_HasAttrString(obj, "struct_dump")) {
-        /* Custom type — struct_dump() to a base type, then re-process */
+        /* Custom type — struct_dump_obj() to a base type, then re-process */
         PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
         if (dumped == NULL) return NULL;
-        PyObject *result = to_builtins(self, dumped, is_key);
+        PyObject *result = dump_obj(self, dumped, is_key);
         Py_DECREF(dumped);
         return result;
     }
@@ -16898,14 +16898,14 @@ to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
         /* Pydantic BaseModel — model_dump() to dict, then process */
         PyObject *dict = PyObject_CallMethod(obj, "model_dump", NULL);
         if (dict == NULL) return NULL;
-        PyObject *result = to_builtins_dict(self, dict);
+        PyObject *result = dump_dict(self, dict);
         Py_DECREF(dict);
         return result;
     }
     else if (!PyType_Check(obj) && type->tp_dict != NULL) {
         PyObject *fields = PyObject_GetAttr(obj, self->mod->str___dataclass_fields__);
         if (fields != NULL) {
-            PyObject *out = to_builtins_dataclass(self, obj, fields);
+            PyObject *out = dump_dataclass(self, obj, fields);
             Py_DECREF(fields);
             return out;
         }
@@ -16913,7 +16913,7 @@ to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
             PyErr_Clear();
         }
         if (PyDict_Contains(type->tp_dict, self->mod->str___attrs_attrs__)) {
-            return to_builtins_object(self, obj);
+            return dump_object(self, obj);
         }
     }
 
@@ -16931,7 +16931,7 @@ to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
         temp = PyObject_CallOneArg(self->enc_hook, obj);
         if (temp == NULL) return NULL;
         if (!Py_EnterRecursiveCall(" while serializing an object")) {
-            out = to_builtins(self, temp, is_key);
+            out = dump_obj(self, temp, is_key);
             Py_LeaveRecursiveCall();
         }
         Py_DECREF(temp);
@@ -17027,11 +17027,11 @@ error:
 
 
 static PyObject*
-structtype_to_builtins(PyObject *self, PyObject *args, PyObject *kwargs)
+structtype_dump(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     PyObject *obj = NULL, *builtin_types = NULL, *enc_hook = NULL, *order = NULL;
     int str_keys = 0;
-    ToBuiltinsState state;
+    DumpState state;
 
     char *kwlist[] = {"obj", "builtin_types", "str_keys", "enc_hook", "order", NULL};
 
@@ -17071,29 +17071,29 @@ structtype_to_builtins(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    PyObject *out = to_builtins(&state, obj, false);
+    PyObject *out = dump_obj(&state, obj, false);
     Py_XDECREF(state.builtin_types_seq);
     return out;
 }
 
 /*************************************************************************
- * convert                                                               *
+ * validate                                                               *
  *************************************************************************/
 
-typedef struct ConvertState {
+typedef struct ValidateState {
     StructspecState *mod;
     PyObject *dec_hook;
     uint32_t builtin_types;
     bool str_keys;
     bool from_attributes;
     bool strict;
-} ConvertState;
+} ValidateState;
 
-static PyObject * convert(ConvertState *, PyObject *, TypeNode *, PathNode *);
+static PyObject * validate_obj(ValidateState *, PyObject *, TypeNode *, PathNode *);
 
 static PyObject *
-convert_int_uncommon(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_int_uncommon(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (!self->strict) {
         uint64_t ux;
@@ -17129,8 +17129,8 @@ convert_int_uncommon(
 }
 
 static PyObject *
-convert_int(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_int(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (MS_LIKELY(type->types & MS_TYPE_INT)) {
         return ms_decode_pyint(obj, type, path);
@@ -17147,12 +17147,12 @@ convert_int(
     ) {
         return ms_decode_decimal_from_pyobj(obj, path, self->mod);
     }
-    return convert_int_uncommon(self, obj, type, path);
+    return validate_int_uncommon(self, obj, type, path);
 }
 
 static PyObject *
-convert_float(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_float(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & MS_TYPE_FLOAT) {
         Py_INCREF(obj);
@@ -17185,8 +17185,8 @@ convert_float(
 }
 
 static PyObject *
-convert_bool(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_bool(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & MS_TYPE_BOOL) {
         Py_INCREF(obj);
@@ -17208,8 +17208,8 @@ convert_bool(
 }
 
 static PyObject *
-convert_none(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_none(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & MS_TYPE_NONE) {
         Py_INCREF(obj);
@@ -17219,8 +17219,8 @@ convert_none(
 }
 
 static PyObject *
-convert_str_uncommon(
-    ConvertState *self, PyObject *obj, const char *view, Py_ssize_t size,
+validate_str_uncommon(
+    ValidateState *self, PyObject *obj, const char *view, Py_ssize_t size,
     bool is_key, TypeNode *type, PathNode *path
 ) {
     if (is_key && self->str_keys && (
@@ -17298,8 +17298,8 @@ convert_str_uncommon(
 }
 
 static PyObject *
-convert_str(
-    ConvertState *self, PyObject *obj,
+validate_str(
+    ValidateState *self, PyObject *obj,
     bool is_key, TypeNode *type, PathNode *path
 ) {
     if (type->types & (MS_TYPE_ANY | MS_TYPE_STR)) {
@@ -17316,12 +17316,12 @@ convert_str(
         PyObject *out = ms_decode_str_lax(view, size, type, path, &invalid);
         if (!invalid) return out;
     }
-    return convert_str_uncommon(self, obj, view, size, is_key, type, path);
+    return validate_str_uncommon(self, obj, view, size, is_key, type, path);
 }
 
 static PyObject *
-convert_bytes(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_bytes(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & (MS_TYPE_BYTES | MS_TYPE_BYTEARRAY | MS_TYPE_MEMORYVIEW)) {
         if (!ms_passes_bytes_constraints(PyBytes_GET_SIZE(obj), type, path)) {
@@ -17349,8 +17349,8 @@ convert_bytes(
 }
 
 static PyObject *
-convert_bytearray(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_bytearray(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & (MS_TYPE_BYTES | MS_TYPE_BYTEARRAY | MS_TYPE_MEMORYVIEW)) {
         if (!ms_passes_bytes_constraints(PyByteArray_GET_SIZE(obj), type, path)) {
@@ -17379,8 +17379,8 @@ convert_bytearray(
 }
 
 static PyObject *
-convert_memoryview(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_memoryview(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & (MS_TYPE_BYTES | MS_TYPE_BYTEARRAY | MS_TYPE_MEMORYVIEW)) {
         Py_ssize_t len = PyMemoryView_GET_BUFFER(obj)->len;
@@ -17412,8 +17412,8 @@ convert_memoryview(
 }
 
 static PyObject *
-convert_datetime(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_datetime(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & MS_TYPE_DATETIME) {
         PyObject *tz = MS_DATE_GET_TZINFO(obj);
@@ -17425,8 +17425,8 @@ convert_datetime(
 }
 
 static PyObject *
-convert_time(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_time(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & MS_TYPE_TIME) {
         PyObject *tz = MS_TIME_GET_TZINFO(obj);
@@ -17438,14 +17438,14 @@ convert_time(
 }
 
 static PyObject *
-convert_enum(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_enum(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & MS_TYPE_ENUM) {
         StrLookup *lookup = TypeNode_get_str_enum_or_literal(type);
 
         /* Check that the type matches. Note that enums that are also int or
-         * str subclasses will be handled by `convert_int`/`convert_str`, not
+         * str subclasses will be handled by `validate_int`/`validate_str`, not
          * here */
         if (lookup->common.cls != NULL && Py_TYPE(obj) == (PyTypeObject *)(lookup->common.cls)) {
             Py_INCREF(obj);
@@ -17457,8 +17457,8 @@ convert_enum(
 }
 
 static PyObject *
-convert_decimal(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_decimal(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & MS_TYPE_DECIMAL) {
         Py_INCREF(obj);
@@ -17467,7 +17467,7 @@ convert_decimal(
     else if (type->types & MS_TYPE_FLOAT) {
         PyObject *temp = PyNumber_Float(obj);
         if (temp == NULL) return NULL;
-        PyObject *out = convert_float(self, temp, type, path);
+        PyObject *out = validate_float(self, temp, type, path);
         Py_DECREF(temp);
         return out;
     }
@@ -17476,8 +17476,8 @@ convert_decimal(
 
 
 static PyObject *
-convert_immutable(
-    ConvertState *self, uint64_t mask, const char *expected,
+validate_immutable(
+    ValidateState *self, uint64_t mask, const char *expected,
     PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types & mask) {
@@ -17488,8 +17488,8 @@ convert_immutable(
 }
 
 static PyObject *
-convert_raw(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_raw(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (type->types == 0) {
         Py_INCREF(obj);
@@ -17499,8 +17499,8 @@ convert_raw(
 }
 
 static PyObject *
-convert_seq_to_list(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq_to_list(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     TypeNode *item_type, PathNode *path
 ) {
     PyObject *out = PyList_New(size);
@@ -17513,7 +17513,7 @@ convert_seq_to_list(
     }
     for (Py_ssize_t i = 0; i < size; i++) {
         PathNode item_path = {path, i};
-        PyObject *val = convert(self, items[i], item_type, &item_path);
+        PyObject *val = validate_obj(self, items[i], item_type, &item_path);
         if (val == NULL) {
             Py_CLEAR(out);
             break;
@@ -17525,8 +17525,8 @@ convert_seq_to_list(
 }
 
 static PyObject *
-convert_seq_to_set(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq_to_set(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     bool mutable, TypeNode *item_type, PathNode *path
 ) {
     PyObject *out = mutable ? PySet_New(NULL) : PyFrozenSet_New(NULL);
@@ -17539,7 +17539,7 @@ convert_seq_to_set(
     }
     for (Py_ssize_t i = 0; i < size; i++) {
         PathNode item_path = {path, i};
-        PyObject *val = convert(self, items[i], item_type, &item_path);
+        PyObject *val = validate_obj(self, items[i], item_type, &item_path);
         if (MS_UNLIKELY(val == NULL || PySet_Add(out, val) < 0)) {
             Py_XDECREF(val);
             Py_CLEAR(out);
@@ -17552,8 +17552,8 @@ convert_seq_to_set(
 }
 
 static PyObject *
-convert_seq_to_vartuple(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq_to_vartuple(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     TypeNode *item_type, PathNode *path
 ) {
     PyObject *out = PyTuple_New(size);
@@ -17566,7 +17566,7 @@ convert_seq_to_vartuple(
     }
     for (Py_ssize_t i = 0; i < size; i++) {
         PathNode item_path = {path, i};
-        PyObject *val = convert(self, items[i], item_type, &item_path);
+        PyObject *val = validate_obj(self, items[i], item_type, &item_path);
         if (val == NULL) {
             Py_CLEAR(out);
             break;
@@ -17578,8 +17578,8 @@ convert_seq_to_vartuple(
 }
 
 static PyObject *
-convert_seq_to_fixtuple(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq_to_fixtuple(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     TypeNode *type, PathNode *path
 ) {
     Py_ssize_t fixtuple_size, offset;
@@ -17607,7 +17607,7 @@ convert_seq_to_fixtuple(
 
     for (Py_ssize_t i = 0; i < fixtuple_size; i++) {
         PathNode item_path = {path, i};
-        PyObject *val = convert(
+        PyObject *val = validate_obj(
             self, items[i], type->details[offset + i].pointer, &item_path
         );
         if (MS_UNLIKELY(val == NULL)) {
@@ -17621,8 +17621,8 @@ convert_seq_to_fixtuple(
 }
 
 static PyObject *
-convert_seq_to_namedtuple(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq_to_namedtuple(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     TypeNode *type, PathNode *path
 ) {
     NamedTupleInfo *info = TypeNode_get_namedtuple_info(type);
@@ -17662,7 +17662,7 @@ convert_seq_to_namedtuple(
     }
     for (Py_ssize_t i = 0; i < size; i++) {
         PathNode item_path = {path, i};
-        PyObject *item = convert(self, items[i], info->types[i], &item_path);
+        PyObject *item = validate_obj(self, items[i], info->types[i], &item_path);
         if (MS_UNLIKELY(item == NULL)) goto error;
         PyTuple_SET_ITEM(out, i, item);
     }
@@ -17680,8 +17680,8 @@ error:
 }
 
 static bool
-convert_tag_matches(
-    ConvertState *self, PyObject *tag, PyObject *expected_tag, PathNode *path
+validate_tag_matches(
+    ValidateState *self, PyObject *tag, PyObject *expected_tag, PathNode *path
 ) {
     if (PyUnicode_CheckExact(expected_tag)) {
         if (!PyUnicode_CheckExact(tag)) goto wrong_type;
@@ -17706,8 +17706,8 @@ wrong_type:
 }
 
 static StructInfo *
-convert_lookup_tag(
-    ConvertState *self, Lookup *lookup, PyObject *tag, PathNode *path
+validate_lookup_tag(
+    ValidateState *self, Lookup *lookup, PyObject *tag, PathNode *path
 ) {
     StructInfo *out = NULL;
     if (Lookup_IsStrLookup(lookup)) {
@@ -17745,8 +17745,8 @@ wrong_type:
 }
 
 static PyObject *
-convert_seq_to_struct_array_inner(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq_to_struct_array_inner(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     bool tag_already_read, StructInfo *info, PathNode *path
 ) {
     StructMetaObject *st_type = info->class;
@@ -17770,7 +17770,7 @@ convert_seq_to_struct_array_inner(
     if (tagged) {
         if (!tag_already_read) {
             if (
-                !convert_tag_matches(
+                !validate_tag_matches(
                     self, items[item_path.index], st_type->struct_tag_value, &item_path
                 )
             ) {
@@ -17792,7 +17792,7 @@ convert_seq_to_struct_array_inner(
     for (Py_ssize_t i = 0; i < nfields; i++) {
         PyObject *val;
         if (size > 0) {
-            val = convert(
+            val = validate_obj(
                 self, items[item_path.index], info->types[i], &item_path
             );
             if (MS_UNLIKELY(val == NULL)) goto error;
@@ -17833,18 +17833,18 @@ error:
 }
 
 static PyObject *
-convert_seq_to_struct_array(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq_to_struct_array(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     TypeNode *type, PathNode *path
 ) {
-    return convert_seq_to_struct_array_inner(
+    return validate_seq_to_struct_array_inner(
         self, items, size, false, TypeNode_get_struct_info(type), path
     );
 }
 
 static PyObject *
-convert_seq_to_struct_array_union(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq_to_struct_array_union(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     TypeNode *type, PathNode *path
 ) {
     Lookup *lookup = TypeNode_get_struct_union(type);
@@ -17855,52 +17855,52 @@ convert_seq_to_struct_array_union(
     }
 
     PathNode tag_path = {path, 0};
-    StructInfo *info = convert_lookup_tag(self, lookup, items[0], &tag_path);
+    StructInfo *info = validate_lookup_tag(self, lookup, items[0], &tag_path);
     if (info == NULL) return NULL;
-    return convert_seq_to_struct_array_inner(self, items, size, true, info, path);
+    return validate_seq_to_struct_array_inner(self, items, size, true, info, path);
 }
 
 static PyObject *
-convert_seq(
-    ConvertState *self, PyObject **items, Py_ssize_t size,
+validate_seq(
+    ValidateState *self, PyObject **items, Py_ssize_t size,
     TypeNode *type, PathNode *path
 ) {
     if (!ms_passes_array_constraints(size, type, path)) return NULL;
 
     if (type->types & MS_TYPE_LIST) {
-        return convert_seq_to_list(
+        return validate_seq_to_list(
             self, items, size, TypeNode_get_array(type), path
         );
     }
     else if (type->types & (MS_TYPE_SET | MS_TYPE_FROZENSET)) {
-        return convert_seq_to_set(
+        return validate_seq_to_set(
             self, items, size,
             (type->types & MS_TYPE_SET), TypeNode_get_array(type), path
         );
     }
     else if (type->types & MS_TYPE_VARTUPLE) {
-        return convert_seq_to_vartuple(
+        return validate_seq_to_vartuple(
             self, items, size, TypeNode_get_array(type), path
         );
     }
     else if (type->types & MS_TYPE_FIXTUPLE) {
-        return convert_seq_to_fixtuple(self, items, size, type, path);
+        return validate_seq_to_fixtuple(self, items, size, type, path);
     }
     else if (type->types & MS_TYPE_NAMEDTUPLE) {
-        return convert_seq_to_namedtuple(self, items, size, type, path);
+        return validate_seq_to_namedtuple(self, items, size, type, path);
     }
     else if (type->types & MS_TYPE_STRUCT_ARRAY) {
-        return convert_seq_to_struct_array(self, items, size, type, path);
+        return validate_seq_to_struct_array(self, items, size, type, path);
     }
     else if (type->types & MS_TYPE_STRUCT_ARRAY_UNION) {
-        return convert_seq_to_struct_array_union(self, items, size, type, path);
+        return validate_seq_to_struct_array_union(self, items, size, type, path);
     }
     return ms_validation_error("array", type, path);
 }
 
 static PyObject *
-convert_any_set(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_any_set(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     PyObject *seq = PySequence_Tuple(obj);
     if (seq == NULL) return NULL;
@@ -17913,19 +17913,19 @@ convert_any_set(
     if (!ms_passes_array_constraints(size, type, path)) goto done;
 
     if (type->types & MS_TYPE_LIST) {
-        out = convert_seq_to_list(
+        out = validate_seq_to_list(
             self, items, size, TypeNode_get_array(type), path
         );
     }
     else if (type->types & (MS_TYPE_SET | MS_TYPE_FROZENSET)) {
-        out = convert_seq_to_set(
+        out = validate_seq_to_set(
             self, items, size,
             (type->types & MS_TYPE_SET),
             TypeNode_get_array(type), path
         );
     }
     else if (type->types & MS_TYPE_VARTUPLE) {
-        out = convert_seq_to_vartuple(
+        out = validate_seq_to_vartuple(
             self, items, size, TypeNode_get_array(type), path
         );
     }
@@ -17939,8 +17939,8 @@ done:
 }
 
 static PyObject *
-convert_dict_to_dict(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_dict_to_dict(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     Py_ssize_t size = PyDict_GET_SIZE(obj);
     if (!ms_passes_map_constraints(size, type, path)) return NULL;
@@ -17963,13 +17963,13 @@ convert_dict_to_dict(
     while (PyDict_Next(obj, &pos, &key_obj, &val_obj)) {
         PyObject *key;
         if (PyUnicode_CheckExact(key_obj)) {
-            key = convert_str(self, key_obj, true, key_type, &key_path);
+            key = validate_str(self, key_obj, true, key_type, &key_path);
         }
         else {
-            key = convert(self, key_obj, key_type, &key_path);
+            key = validate_obj(self, key_obj, key_type, &key_path);
         }
         if (MS_UNLIKELY(key == NULL)) goto error;
-        PyObject *val = convert(self, val_obj, val_type, &val_path);
+        PyObject *val = validate_obj(self, val_obj, val_type, &val_path);
         if (MS_UNLIKELY(val == NULL)) {
             Py_DECREF(key);
             goto error;
@@ -17989,30 +17989,30 @@ error:
 
 #if PY315_PLUS
 static PyObject *
-convert_dict_to_frozendict(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_dict_to_frozendict(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
-    PyObject *dict = convert_dict_to_dict(self, obj, type, path);
+    PyObject *dict = validate_dict_to_dict(self, obj, type, path);
     return _PyFrozenDict_NewSteal(dict);
 }
 #endif
 
 static PyObject *
-convert_mapping_to_dict(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_mapping_to_dict(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     PyObject *out = NULL;
     PyObject *temp = PyDict_New();
     if (temp == NULL) return NULL;
     if (PyDict_Merge(temp, obj, 1) == 0) {
-        out = convert_dict_to_dict(self, temp, type, path);
+        out = validate_dict_to_dict(self, temp, type, path);
     }
     Py_DECREF(temp);
     return out;
 }
 
 static bool
-convert_is_str_key(PyObject *key, PathNode *path) {
+validate_is_str_key(PyObject *key, PathNode *path) {
     if (PyUnicode_CheckExact(key)) return true;
     PathNode key_path = {path, PATH_KEY, NULL};
     ms_error_with_path("Expected `str`%U", &key_path);
@@ -18021,8 +18021,8 @@ convert_is_str_key(PyObject *key, PathNode *path) {
 
 
 static PyObject *
-convert_dict_to_struct(
-    ConvertState *self, PyObject *obj, StructInfo *info, PathNode *path,
+validate_dict_to_struct(
+    ValidateState *self, PyObject *obj, StructInfo *info, PathNode *path,
     bool tag_already_read
 ) {
     StructMetaObject *struct_type = info->class;
@@ -18035,7 +18035,7 @@ convert_dict_to_struct(
     Py_ssize_t pos = 0, pos_obj = 0;
     PyObject *key_obj, *val_obj;
     while (PyDict_Next(obj, &pos_obj, &key_obj, &val_obj)) {
-        if (!convert_is_str_key(key_obj, path)) goto error;
+        if (!validate_is_str_key(key_obj, path)) goto error;
 
         Py_ssize_t key_size;
         const char *key = unicode_str_and_size(key_obj, &key_size);
@@ -18047,7 +18047,7 @@ convert_dict_to_struct(
                 if (tag_already_read) continue;
                 PathNode tag_path = {path, PATH_STR, struct_type->struct_tag_field};
                 if (
-                    !convert_tag_matches(
+                    !validate_tag_matches(
                         self, val_obj, struct_type->struct_tag_value, &tag_path
                     )
                 ) {
@@ -18064,7 +18064,7 @@ convert_dict_to_struct(
         }
         else {
             PathNode field_path = {path, field_index, (PyObject *)struct_type};
-            PyObject *val = convert(
+            PyObject *val = validate_obj(
                 self, val_obj, info->types[field_index], &field_path
             );
             if (val == NULL) goto error;
@@ -18082,27 +18082,27 @@ error:
 }
 
 static PyObject *
-convert_dict_to_struct_union(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_dict_to_struct_union(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     Lookup *lookup = TypeNode_get_struct_union(type);
     PyObject *tag_field = Lookup_tag_field(lookup);
     PyObject *value = PyDict_GetItem(obj, tag_field);
     if (value != NULL) {
         PathNode tag_path = {path, PATH_STR, tag_field};
-        StructInfo *info = convert_lookup_tag(
+        StructInfo *info = validate_lookup_tag(
             self, lookup, value, &tag_path
         );
         if (info == NULL) return NULL;
-        return convert_dict_to_struct(self, obj, info, path, true);
+        return validate_dict_to_struct(self, obj, info, path, true);
     }
     ms_missing_required_field(tag_field, path);
     return NULL;
 }
 
 static PyObject *
-convert_dict_to_typeddict(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_dict_to_typeddict(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (Py_EnterRecursiveCall(" while deserializing an object")) return NULL;
 
@@ -18113,7 +18113,7 @@ convert_dict_to_typeddict(
     Py_ssize_t nrequired = 0, pos = 0, pos_obj = 0;
     PyObject *key_obj, *val_obj;
     while (PyDict_Next(obj, &pos_obj, &key_obj, &val_obj)) {
-        if (!convert_is_str_key(key_obj, path)) goto error;
+        if (!validate_is_str_key(key_obj, path)) goto error;
 
         Py_ssize_t key_size;
         const char *key = unicode_str_and_size(key_obj, &key_size);
@@ -18126,7 +18126,7 @@ convert_dict_to_typeddict(
         if (field != NULL) {
             if (field_type->types & MS_EXTRA_FLAG) nrequired++;
             PathNode field_path = {path, PATH_STR, field};
-            PyObject *val = convert(self, val_obj, field_type, &field_path);
+            PyObject *val = validate_obj(self, val_obj, field_type, &field_path);
             if (val == NULL) goto error;
             int status = PyDict_SetItem(out, field, val);
             Py_DECREF(val);
@@ -18147,8 +18147,8 @@ error:
 }
 
 static PyObject *
-convert_dict_to_dataclass(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_dict_to_dataclass(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (Py_EnterRecursiveCall(" while deserializing an object")) return NULL;
 
@@ -18166,7 +18166,7 @@ convert_dict_to_dataclass(
     Py_ssize_t pos = 0, pos_obj = 0;
     PyObject *key_obj = NULL, *val_obj = NULL;
     while (PyDict_Next(obj, &pos_obj, &key_obj, &val_obj)) {
-        if (!convert_is_str_key(key_obj, path)) goto error;
+        if (!validate_is_str_key(key_obj, path)) goto error;
         Py_ssize_t key_size;
         const char *key = unicode_str_and_size(key_obj, &key_size);
         if (MS_UNLIKELY(key == NULL)) goto error;
@@ -18177,7 +18177,7 @@ convert_dict_to_dataclass(
         );
         if (field != NULL) {
             PathNode field_path = {path, PATH_STR, field};
-            PyObject *val = convert(self, val_obj, field_type, &field_path);
+            PyObject *val = validate_obj(self, val_obj, field_type, &field_path);
             if (val == NULL) goto error;
             int status = PyObject_GenericSetAttr(out, field, val);
             Py_DECREF(val);
@@ -18194,31 +18194,31 @@ error:
 }
 
 static PyObject *
-convert_dict(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_dict(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     PyObject *res = NULL;
     Py_BEGIN_CRITICAL_SECTION(obj);
     if (type->types & MS_TYPE_DICT) {
-        res = convert_dict_to_dict(self, obj, type, path);
+        res = validate_dict_to_dict(self, obj, type, path);
     }
 #if PY315_PLUS
     else if (type->types & MS_TYPE_FROZENDICT) {
-        res = convert_dict_to_frozendict(self, obj, type, path);
+        res = validate_dict_to_frozendict(self, obj, type, path);
     }
 #endif
     else if (type->types & MS_TYPE_STRUCT) {
         StructInfo *info = TypeNode_get_struct_info(type);
-        res = convert_dict_to_struct(self, obj, info, path, false);
+        res = validate_dict_to_struct(self, obj, info, path, false);
     }
     else if (type->types & MS_TYPE_STRUCT_UNION) {
-        res = convert_dict_to_struct_union(self, obj, type, path);
+        res = validate_dict_to_struct_union(self, obj, type, path);
     }
     else if (type->types & MS_TYPE_TYPEDDICT) {
-        res = convert_dict_to_typeddict(self, obj, type, path);
+        res = validate_dict_to_typeddict(self, obj, type, path);
     }
     else if (type->types & MS_TYPE_DATACLASS) {
-        res = convert_dict_to_dataclass(self, obj, type, path);
+        res = validate_dict_to_dataclass(self, obj, type, path);
     } else {
         res = ms_validation_error("object", type, path);
     }
@@ -18227,8 +18227,8 @@ convert_dict(
 }
 
 static PyObject *
-convert_object_to_struct(
-    ConvertState *self, PyObject *obj, StructInfo *info, PathNode *path,
+validate_object_to_struct(
+    ValidateState *self, PyObject *obj, StructInfo *info, PathNode *path,
     PyObject* (*getter)(PyObject *, PyObject *), bool tag_already_read
 ) {
     StructMetaObject *struct_type = info->class;
@@ -18240,7 +18240,7 @@ convert_object_to_struct(
         PyObject *attr = getter(obj, struct_type->struct_tag_field);
         if (attr != NULL) {
             PathNode tag_path = {path, PATH_STR, struct_type->struct_tag_field};
-            bool ok = convert_tag_matches(
+            bool ok = validate_tag_matches(
                 self, attr, struct_type->struct_tag_value, &tag_path
             );
             Py_DECREF(attr);
@@ -18301,7 +18301,7 @@ convert_object_to_struct(
 
         if (attr != NULL) {
             PathNode field_path = {path, PATH_STR, field};
-            val = convert(self, attr, info->types[i], &field_path);
+            val = validate_obj(self, attr, info->types[i], &field_path);
             Py_DECREF(attr);
         }
         else {
@@ -18342,8 +18342,8 @@ error:
 }
 
 static PyObject *
-convert_object_to_struct_union(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path,
+validate_object_to_struct_union(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path,
     PyObject* (*getter)(PyObject *, PyObject *)
 ) {
     Lookup *lookup = TypeNode_get_struct_union(type);
@@ -18351,20 +18351,20 @@ convert_object_to_struct_union(
     PyObject *value = getter(obj, tag_field);
     if (value != NULL) {
         PathNode tag_path = {path, PATH_STR, tag_field};
-        StructInfo *info = convert_lookup_tag(
+        StructInfo *info = validate_lookup_tag(
             self, lookup, value, &tag_path
         );
         Py_DECREF(value);
         if (info == NULL) return NULL;
-        return convert_object_to_struct(self, obj, info, path, getter, true);
+        return validate_object_to_struct(self, obj, info, path, getter, true);
     }
     ms_missing_required_field(tag_field, path);
     return NULL;
 }
 
 static PyObject *
-convert_object_to_dataclass(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path,
+validate_object_to_dataclass(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path,
     PyObject* (*getter)(PyObject *, PyObject *)
 ) {
     DataclassInfo *info = TypeNode_get_dataclass_info(type);
@@ -18409,7 +18409,7 @@ convert_object_to_dataclass(
         }
         else {
             PathNode field_path = {path, PATH_STR, field};
-            val = convert(self, attr, info->fields[i].type, &field_path);
+            val = validate_obj(self, attr, info->fields[i].type, &field_path);
             Py_DECREF(attr);
         }
         if (val == NULL) goto error;
@@ -18479,8 +18479,8 @@ getattr_then_getitem(PyObject *obj, PyObject *key) {
 }
 
 static PyObject *
-convert_other(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_other(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     PyTypeObject *pytype = Py_TYPE(obj);
 
@@ -18518,18 +18518,18 @@ convert_other(
     /* No luck. Next check if it's a tuple subclass (standard tuples are
      * handled earlier), and if so try converting it as a sequence */
     if (PyTuple_Check(obj)) {
-        return convert_seq(self, TUPLE_ITEMS(obj), PyTuple_GET_SIZE(obj), type, path);
+        return validate_seq(self, TUPLE_ITEMS(obj), PyTuple_GET_SIZE(obj), type, path);
     }
 
     /* Next try converting from a mapping or by attribute */
     bool is_mapping = PyMapping_Check(obj);
     if (is_mapping) {
         if (type->types & MS_TYPE_DICT) {
-            return convert_mapping_to_dict(self, obj, type, path);
+            return validate_mapping_to_dict(self, obj, type, path);
         }
 #if PY315_PLUS
         if (type->types & MS_TYPE_FROZENDICT) {
-            PyObject *dict = convert_mapping_to_dict(self, obj, type, path);
+            PyObject *dict = validate_mapping_to_dict(self, obj, type, path);
             return _PyFrozenDict_NewSteal(dict);
         }
 #endif
@@ -18553,13 +18553,13 @@ convert_other(
 
         if (matches_struct) {
             StructInfo *info = TypeNode_get_struct_info(type);
-            return convert_object_to_struct(self, obj, info, path, getter, false);
+            return validate_object_to_struct(self, obj, info, path, getter, false);
         }
         else if (matches_struct_union) {
-            return convert_object_to_struct_union(self, obj, type, path, getter);
+            return validate_object_to_struct_union(self, obj, type, path, getter);
         }
         else if (type->types & MS_TYPE_DATACLASS) {
-            return convert_object_to_dataclass(self, obj, type, path, getter);
+            return validate_object_to_dataclass(self, obj, type, path, getter);
         }
     }
 
@@ -18567,8 +18567,8 @@ convert_other(
 }
 
 static PyObject *
-convert(
-    ConvertState *self, PyObject *obj, TypeNode *type, PathNode *path
+validate_obj(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_ANY))) {
         Py_INCREF(obj);
@@ -18580,82 +18580,82 @@ convert(
 
     PyTypeObject *pytype = Py_TYPE(obj);
     if (PyUnicode_Check(obj)) {
-        return convert_str(self, obj, false, type, path);
+        return validate_str(self, obj, false, type, path);
     }
     else if (pytype == &PyBool_Type) {
-        return convert_bool(self, obj, type, path);
+        return validate_bool(self, obj, type, path);
     }
     else if (PyLong_Check(obj)) {
-        return convert_int(self, obj, type, path);
+        return validate_int(self, obj, type, path);
     }
     else if (pytype == &PyFloat_Type) {
-        return convert_float(self, obj, type, path);
+        return validate_float(self, obj, type, path);
     }
     else if (PyList_Check(obj)) {
-        return convert_seq(self, LIST_ITEMS(obj), PyList_GET_SIZE(obj), type, path);
+        return validate_seq(self, LIST_ITEMS(obj), PyList_GET_SIZE(obj), type, path);
     }
     else if (pytype == &PyTuple_Type) {
         /* Tuple subclasses are handled later on */
-        return convert_seq(self, TUPLE_ITEMS(obj), PyTuple_GET_SIZE(obj), type, path);
+        return validate_seq(self, TUPLE_ITEMS(obj), PyTuple_GET_SIZE(obj), type, path);
     }
     else if (PyDict_Check(obj)) {
-        return convert_dict(self, obj, type, path);
+        return validate_dict(self, obj, type, path);
     }
 #if PY315_PLUS
     else if (PyFrozenDict_Check(obj)) {
-        return convert_dict(self, obj, type, path);
+        return validate_dict(self, obj, type, path);
     }
 #endif
     else if (obj == Py_None) {
-        return convert_none(self, obj, type, path);
+        return validate_none(self, obj, type, path);
     }
     else if (PyBytes_Check(obj)) {
-        return convert_bytes(self, obj, type, path);
+        return validate_bytes(self, obj, type, path);
     }
     else if (pytype == &PyByteArray_Type) {
-        return convert_bytearray(self, obj, type, path);
+        return validate_bytearray(self, obj, type, path);
     }
     else if (pytype == &PyMemoryView_Type) {
-        return convert_memoryview(self, obj, type, path);
+        return validate_memoryview(self, obj, type, path);
     }
     else if (pytype == PyDateTimeAPI->DateTimeType) {
-        return convert_datetime(self, obj, type, path);
+        return validate_datetime(self, obj, type, path);
     }
     else if (pytype == PyDateTimeAPI->TimeType) {
-        return convert_time(self, obj, type, path);
+        return validate_time(self, obj, type, path);
     }
     else if (pytype == PyDateTimeAPI->DateType) {
-        return convert_immutable(self, MS_TYPE_DATE, "date", obj, type, path);
+        return validate_immutable(self, MS_TYPE_DATE, "date", obj, type, path);
     }
     else if (pytype == PyDateTimeAPI->DeltaType) {
-        return convert_immutable(self, MS_TYPE_TIMEDELTA, "duration", obj, type, path);
+        return validate_immutable(self, MS_TYPE_TIMEDELTA, "duration", obj, type, path);
     }
     else if (PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->UUIDType))) {
-        return convert_immutable(self, MS_TYPE_UUID, "uuid", obj, type, path);
+        return validate_immutable(self, MS_TYPE_UUID, "uuid", obj, type, path);
     }
     else if (pytype == (PyTypeObject *)self->mod->DecimalType) {
-        return convert_decimal(self, obj, type, path);
+        return validate_decimal(self, obj, type, path);
     }
     else if (PyType_IsSubtype(Py_TYPE(pytype), self->mod->EnumMetaType)) {
-        return convert_enum(self, obj, type, path);
+        return validate_enum(self, obj, type, path);
     }
     else if (pytype == &Raw_Type) {
-        return convert_raw(self, obj, type, path);
+        return validate_raw(self, obj, type, path);
     }
     else if (PyAnySet_Check(obj)) {
-        return convert_any_set(self, obj, type, path);
+        return validate_any_set(self, obj, type, path);
     }
     else {
-        return convert_other(self, obj, type, path);
+        return validate_other(self, obj, type, path);
     }
 }
 
 static PyObject*
-structtype_convert(PyObject *self, PyObject *args, PyObject *kwargs)
+structtype_validate(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     PyObject *obj = NULL, *pytype = NULL, *builtin_types = NULL, *dec_hook = NULL;
     int str_keys = false, strict = true, from_attributes = false;
-    ConvertState state;
+    ValidateState state;
 
     char *kwlist[] = {
         "obj", "type", "strict", "from_attributes", "dec_hook", "builtin_types",
@@ -18701,14 +18701,14 @@ structtype_convert(PyObject *self, PyObject *args, PyObject *kwargs)
         TypeNodeSimple type;
         type.types = array_like ? MS_TYPE_STRUCT_ARRAY : MS_TYPE_STRUCT;
         type.details[0].pointer = info;
-        PyObject *out = convert(&state, obj, (TypeNode *)(&type), NULL);
+        PyObject *out = validate_obj(&state, obj, (TypeNode *)(&type), NULL);
         Py_DECREF(info);
         return out;
     }
 
     TypeNode *type = TypeNode_Convert(pytype);
     if (type == NULL) return NULL;
-    PyObject *out = convert(&state, obj, type, NULL);
+    PyObject *out = validate_obj(&state, obj, type, NULL);
     TypeNode_Free(type);
     return out;
 }
@@ -18798,7 +18798,7 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
 {
     if (nargs > 0) {
         return PyErr_Format(PyExc_TypeError,
-            "struct_dump() takes no positional arguments (%zd given)", nargs);
+            "struct_dump_obj() takes no positional arguments (%zd given)", nargs);
     }
     StructspecState *mod = structtype_get_global_state();
     if (mod == NULL) return NULL;
@@ -18823,11 +18823,11 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
                 builtin_types = val;
             } else {
                 return PyErr_Format(PyExc_TypeError,
-                    "struct_dump() got an unexpected keyword argument '%U'", name);
+                    "struct_dump_obj() got an unexpected keyword argument '%U'", name);
             }
         }
     }
-    ToBuiltinsState state;
+    DumpState state;
     state.mod = mod;
     state.str_keys = str_keys;
     state.builtin_types = 0;
@@ -18839,7 +18839,7 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
             &(state.builtin_types), &(state.builtin_types_seq)) < 0) {
         return NULL;
     }
-    PyObject *out = to_builtins(&state, self, false);
+    PyObject *out = dump_obj(&state, self, false);
     Py_XDECREF(state.builtin_types_seq);
     return out;
 }
@@ -18878,7 +18878,7 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
         }
     }
 
-    ConvertState state;
+    ValidateState state;
     state.mod = mod;
     state.strict = strict;
     state.from_attributes = from_attributes;
@@ -18893,21 +18893,21 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
         TypeNodeSimple type;
         type.types = array_like ? MS_TYPE_STRUCT_ARRAY : MS_TYPE_STRUCT;
         type.details[0].pointer = info;
-        PyObject *out = convert(&state, obj, (TypeNode *)(&type), NULL);
+        PyObject *out = validate_obj(&state, obj, (TypeNode *)(&type), NULL);
         Py_DECREF(info);
         return out;
     }
 
     TypeNode *type = TypeNode_Convert(cls);
     if (type == NULL) return NULL;
-    PyObject *out = convert(&state, obj, type, NULL);
+    PyObject *out = validate_obj(&state, obj, type, NULL);
     TypeNode_Free(type);
     return out;
 }
 
 /* Recursive helper for struct_validate_self — validates each field against its type
  * annotation, recursing into nested struct fields without creating intermediate
- * objects (no to_builtins roundtrip). */
+ * objects (no dump roundtrip). */
 static int
 struct_check_recursive(
     PyObject *self,
@@ -18947,15 +18947,15 @@ struct_check_recursive(
             }
         }
 
-        /* All other types: validate via convert() */
-        ConvertState state;
+        /* All other types: validate via validate_obj() */
+        ValidateState state;
         state.mod = mod;
         state.strict = 1;
         state.from_attributes = 0;
         state.dec_hook = NULL;
         state.str_keys = 0;
         state.builtin_types = 0;
-        PyObject *out = convert(&state, val, field_type, NULL);
+        PyObject *out = validate_obj(&state, val, field_type, NULL);
         if (out == NULL) {
             ret = -1;
         } else {
@@ -19002,10 +19002,10 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
  *************************************************************************/
 
 static struct PyMethodDef structtype_methods[] = {
-    {"json_encode", (PyCFunction) structtype_json_encode, METH_FASTCALL | METH_KEYWORDS, ""},
-    {"json_decode", (PyCFunction) structtype_json_decode, METH_FASTCALL | METH_KEYWORDS, ""},
-    {"_to_builtins", (PyCFunction) structtype_to_builtins, METH_VARARGS | METH_KEYWORDS, ""},
-    {"_convert", (PyCFunction) structtype_convert, METH_VARARGS | METH_KEYWORDS, ""},
+    {"_json_encode", (PyCFunction) structtype_json_encode, METH_FASTCALL | METH_KEYWORDS, ""},
+    {"_json_decode", (PyCFunction) structtype_json_decode, METH_FASTCALL | METH_KEYWORDS, ""},
+    {"_dump", (PyCFunction) structtype_dump, METH_VARARGS | METH_KEYWORDS, ""},
+    {"_validate", (PyCFunction) structtype_validate, METH_VARARGS | METH_KEYWORDS, ""},
     {NULL, NULL} /* sentinel */
 };
 

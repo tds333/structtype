@@ -85,3 +85,6 @@ editable_mode = "compat"
 build = "cp3*"
 skip = ["pp*", "*-manylinux_i686", "*-musllinux*", "*-win32"]
 test-command = "pip install pytest>=9 && pytest {project}/tests"
+
+[tool.ruff]
+target-version = "py310"

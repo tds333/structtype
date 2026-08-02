@@ -22,9 +22,7 @@ from ._core import (  # type: ignore
 from ._core import (
     Struct,
     StructMeta,
-)
-from ._core import (
-    _to_builtins as _to_builtins,
+    _dump,
 )
 from ._utils import (  # type: ignore
     _CONCRETE_TYPES,
@@ -916,7 +914,7 @@ class _Translator:
             if meta.json_schema_extra is not None:
                 extra_json_schema = _merge_json(
                     extra_json_schema,
-                    _to_builtins(meta.json_schema_extra, str_keys=True),
+                    _dump(meta.json_schema_extra, str_keys=True),
                 )
 
         out = self._translate_inner(t, args, **constrs)
