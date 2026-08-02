@@ -1,6 +1,6 @@
 from typing import Any
 
-from ._core import _convert, json_decode, json_encode
+from ._core import _convert, _to_builtins, json_decode, json_encode
 
 
 class StructAdapter:
@@ -78,16 +78,13 @@ class StructAdapter:
 
     def struct_dump(self, obj, *, enc_hook=None, order=None, str_keys=False, builtin_types=None):
         """Convert a validated object to built-in Python types (``dict``, ``list``, etc.)."""
-        if hasattr(obj, "struct_dump"):
-            return obj.struct_dump(
-                enc_hook=enc_hook,
-                order=order,
-                str_keys=str_keys,
-                builtin_types=builtin_types,
-            )
-        if hasattr(obj, "model_dump"):
-            return obj.model_dump()
-        return obj
+        return _to_builtins(
+            obj,
+            builtin_types=builtin_types,
+            str_keys=str_keys,
+            enc_hook=enc_hook,
+            order=order,
+        )
 
 
 class StrAdapter:
