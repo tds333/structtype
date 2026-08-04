@@ -532,6 +532,9 @@ typedef struct {
     PyObject *astimezone;
     PyObject *re_compile;
     uint8_t gc_cycle;
+#ifdef Py_GIL_DISABLED
+    PyMutex cache_lock;
+#endif
     PyObject *string_cache[STRING_CACHE_SIZE];
     TimezoneCacheItem timezone_cache[TIMEZONE_CACHE_SIZE];
 } StructspecState;
@@ -1134,6 +1137,7 @@ static int
 IntLookup_traverse(IntLookup *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->common.cls);
+    Py_VISIT(self->common.tag_field);
     if (self->compact) {
         IntLookupCompact *lk = (IntLookupCompact *)self;
         for (Py_ssize_t i = 0; i < Py_SIZE(lk); i++) {
@@ -1380,6 +1384,7 @@ static int
 StrLookup_traverse(StrLookup *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->common.cls);
+    Py_VISIT(self->common.tag_field);
     for (Py_ssize_t i = 0; i < Py_SIZE(self); i++) {
         Py_VISIT(self->table[i].key);
         Py_VISIT(self->table[i].value);
@@ -10685,10 +10690,16 @@ timezone_from_offset(StructspecState *st, int32_t offset) {
     PyObject *tz = PyTimeZone_FromOffset(delta);
     Py_DECREF(delta);
     if (tz == NULL) return NULL;
+#ifdef Py_GIL_DISABLED
+    PyMutex_Lock(&st->cache_lock);
+#endif
     Py_XDECREF(st->timezone_cache[index].tz);
     st->timezone_cache[index].offset = offset;
     Py_INCREF(tz);
     st->timezone_cache[index].tz = tz;
+#ifdef Py_GIL_DISABLED
+    PyMutex_Unlock(&st->cache_lock);
+#endif
     return tz;
 }
 
@@ -13775,14 +13786,22 @@ JSONDecoder_traverse(JSONDecoder *self, visitproc visit, void *arg)
     return 0;
 }
 
+static int
+JSONDecoder_clear(JSONDecoder *self)
+{
+    Py_CLEAR(self->orig_type);
+    TypeNode_Free(self->type);
+    self->type = NULL;
+    Py_CLEAR(self->dec_hook);
+    Py_CLEAR(self->float_hook);
+    return 0;
+}
+
 static void
 JSONDecoder_dealloc(JSONDecoder *self)
 {
     PyObject_GC_UnTrack(self);
-    TypeNode_Free(self->type);
-    Py_XDECREF(self->orig_type);
-    Py_XDECREF(self->dec_hook);
-    Py_XDECREF(self->float_hook);
+    JSONDecoder_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -14625,9 +14644,15 @@ json_decode_dict_key(JSONDecoderState *self, TypeNode *type, PathNode *path) {
     memcpy(ascii_get_buffer(new), view, size);
 
     /* Swap out the str in the cache */
+#ifdef Py_GIL_DISABLED
+    PyMutex_Lock(&st->cache_lock);
+#endif
     Py_XDECREF(existing);
     Py_INCREF(new);
     st->string_cache[index] = new;
+#ifdef Py_GIL_DISABLED
+    PyMutex_Unlock(&st->cache_lock);
+#endif
     return new;
 }
 
@@ -16207,6 +16232,7 @@ static PyTypeObject JSONDecoder_Type = {
     .tp_new = PyType_GenericNew,
     .tp_init = (initproc)JSONDecoder_init,
     .tp_traverse = (traverseproc)JSONDecoder_traverse,
+    .tp_clear = (inquiry)JSONDecoder_clear,
     .tp_dealloc = (destructor)JSONDecoder_dealloc,
     .tp_repr = (reprfunc)JSONDecoder_repr,
     .tp_methods = JSONDecoder_methods,
