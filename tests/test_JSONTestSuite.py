@@ -7,7 +7,7 @@ import itertools
 import pytest
 
 import structtype
-from structtype._core import json_decode
+from structtype._core import _json_decode
 
 from .utils import emscripten_stack_limited
 
@@ -325,11 +325,11 @@ invalid_cases = [_case_param(case) for case in invalid_cases]
 
 @pytest.mark.parametrize("case", valid_cases, ids=itertools.count())
 def test_valid(case):
-    json_decode(case)
+    _json_decode(case)
 
 
 @pytest.mark.parametrize("case", invalid_cases, ids=itertools.count())
 def test_invalid(case):
     expected_errors = (structtype.DecodeError, UnicodeDecodeError, RecursionError)
     with pytest.raises(expected_errors):
-        json_decode(case)
+        _json_decode(case)

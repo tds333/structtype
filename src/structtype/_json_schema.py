@@ -3,7 +3,7 @@ import textwrap
 from collections.abc import Callable, Iterable
 from typing import Any, Final
 
-from ._core import NODEFAULT, _to_builtins, json_encode
+from ._core import NODEFAULT, _dump, _json_encode
 from ._inspect import (
     AnyType,
     BoolType,
@@ -116,7 +116,7 @@ def json_schema_dump(
     ref_template : str, optional
         A template to use when generating ``"$ref"`` fields.
     """
-    return json_encode(
+    return _json_encode(
         json_schema(type=type, schema_hook=schema_hook, ref_template=ref_template)
     )
 
@@ -186,7 +186,9 @@ def _collect_component_types(type_infos: Iterable[Type]) -> dict[Any, Type]:
     components = {}
 
     def collect(t):
-        if isinstance(t, (StructType, TypedDictType, DataclassType, NamedTupleType, PydanticType)):
+        if isinstance(
+            t, (StructType, TypedDictType, DataclassType, NamedTupleType, PydanticType)
+        ):
             if t.cls not in components:
                 components[t.cls] = t
                 for f in t.fields:
@@ -461,7 +463,7 @@ class _SchemaGenerator:
                 if field.required:
                     required.append(field.encode_name)
                 elif field.default is not NODEFAULT:
-                    field_schema["default"] = _to_builtins(field.default, str_keys=True)
+                    field_schema["default"] = _dump(field.default, str_keys=True)
                 elif field.default_factory in (list, dict, set, bytearray):
                     field_schema["default"] = field.default_factory()
                 names.append(field.encode_name)
@@ -483,7 +485,9 @@ class _SchemaGenerator:
                 schema["required"] = required
                 if t.forbid_unknown_fields:
                     schema["additionalProperties"] = False
-        elif isinstance(t, (TypedDictType, DataclassType, NamedTupleType, PydanticType)):
+        elif isinstance(
+            t, (TypedDictType, DataclassType, NamedTupleType, PydanticType)
+        ):
             schema.setdefault("title", _get_class_name(t.cls))
             if doc := _get_doc(t):
                 schema.setdefault("description", doc)
@@ -495,7 +499,7 @@ class _SchemaGenerator:
                 if field.required:
                     required.append(field.encode_name)
                 elif field.default is not NODEFAULT:
-                    field_schema["default"] = _to_builtins(field.default, str_keys=True)
+                    field_schema["default"] = _dump(field.default, str_keys=True)
                 names.append(field.encode_name)
                 fields.append(field_schema)
             if isinstance(t, NamedTupleType):

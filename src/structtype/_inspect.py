@@ -22,9 +22,7 @@ from ._core import (  # type: ignore
 from ._core import (
     Struct,
     StructMeta,
-)
-from ._core import (
-    _to_builtins as _to_builtins,
+    _dump,
 )
 from ._utils import (  # type: ignore
     _CONCRETE_TYPES,
@@ -641,6 +639,22 @@ class FieldInfo(structtype.Struct):
     def required(self) -> bool:
         return self.default is NODEFAULT and self.default_factory is NODEFAULT
 
+    def __repr__(self):
+        parts = [
+            f"name={self.name!r}",
+            f"encode_name={self.encode_name!r}",
+            f"type={self.type!r}",
+        ]
+        if self.required:
+            parts.append("required=True")
+        else:
+            parts.append("required=False")
+            if self.default is not NODEFAULT:
+                parts.append(f"default={self.default!r}")
+            if self.default_factory is not NODEFAULT:
+                parts.append(f"default_factory={self.default_factory!r}")
+        return f"FieldInfo({', '.join(parts)})"
+
 
 def fields(type_or_instance: Struct | type[Struct]) -> tuple[FieldInfo, ...]:
     """Get introspection information about a struct's fields.
@@ -667,8 +681,7 @@ def fields(type_or_instance: Struct | type[Struct]) -> tuple[FieldInfo, ...]:
     ...     y: float
 
     >>> fields(Point)
-    (FieldInfo(name='x', encode_name='x', type=<class 'float'>, required=True),
-     FieldInfo(name='y', encode_name='y', type=<class 'float'>, required=True))
+    (FieldInfo(name='x', encode_name='x', type=<class 'float'>, required=True), FieldInfo(name='y', encode_name='y', type=<class 'float'>, required=True))
     """
     obj = type_or_instance
     if isinstance(obj, StructMeta):
@@ -916,7 +929,7 @@ class _Translator:
             if meta.json_schema_extra is not None:
                 extra_json_schema = _merge_json(
                     extra_json_schema,
-                    _to_builtins(meta.json_schema_extra, str_keys=True),
+                    _dump(meta.json_schema_extra, str_keys=True),
                 )
 
         out = self._translate_inner(t, args, **constrs)

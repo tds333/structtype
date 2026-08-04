@@ -17,8 +17,8 @@ import pytest
 from structtype._core import (
     JSONDecoder,
     JSONEncoder,
-    json_decode,
-    json_encode,
+    _json_decode,
+    _json_encode,
 )
 
 import structtype
@@ -91,21 +91,21 @@ class TestInvalidJSONTypes:
         with pytest.raises(
             structtype.ValidationError, match="Expected `array`, got `str`"
         ):
-            json_decode(b'{"x": 1}', type=dict[tuple[int, int], int])
+            _json_decode(b'{"x": 1}', type=dict[tuple[int, int], int])
 
 
 class TestEncodeFunction:
     def test_encode(self):
-        assert json_encode(1) == b"1"
+        assert _json_encode(1) == b"1"
 
     def test_encode_error(self):
         with pytest.raises(TypeError):
-            json_encode(object())
+            _json_encode(object())
 
     def test_encode_large_object(self):
         """Check that buffer resize works"""
         data = "x" * 4097
-        assert json_encode(data) == f'"{data}"'.encode()
+        assert _json_encode(data) == f'"{data}"'.encode()
 
     def test_encode_no_enc_hook(self):
         class Foo:
@@ -114,7 +114,7 @@ class TestEncodeFunction:
         with pytest.raises(
             TypeError, match="Encoding objects of type Foo is unsupported"
         ):
-            json_encode(Foo())
+            _json_encode(Foo())
 
     def test_encode_enc_hook(self):
         unsupported = object()
@@ -125,8 +125,8 @@ class TestEncodeFunction:
 
         orig_refcount = sys.getrefcount(enc_hook)
 
-        res = json_encode(unsupported, enc_hook=enc_hook)
-        assert json_encode("hello") == res
+        res = _json_encode(unsupported, enc_hook=enc_hook)
+        assert _json_encode("hello") == res
         assert sys.getrefcount(enc_hook) == orig_refcount
 
     def test_encode_enc_hook_errors(self):
@@ -136,25 +136,25 @@ class TestEncodeFunction:
         orig_refcount = sys.getrefcount(enc_hook)
 
         with pytest.raises(TypeError, match="bad"):
-            json_encode(object(), enc_hook=enc_hook)
+            _json_encode(object(), enc_hook=enc_hook)
 
         assert sys.getrefcount(enc_hook) == orig_refcount
 
     def test_encode_parse_arguments_errors(self):
         with pytest.raises(TypeError, match="Missing 1 required argument"):
-            json_encode()
+            _json_encode()
 
         with pytest.raises(TypeError, match="Extra positional arguments"):
-            json_encode(1, lambda x: None)
+            _json_encode(1, lambda x: None)
 
         with pytest.raises(TypeError, match="Extra positional arguments"):
-            json_encode(1, 2, 3)
+            _json_encode(1, 2, 3)
 
         with pytest.raises(TypeError, match="Extra keyword arguments"):
-            json_encode(1, bad=1)
+            _json_encode(1, bad=1)
 
         with pytest.raises(TypeError, match="Extra keyword arguments"):
-            json_encode(1, enc_hook=lambda x: None, extra="extra")
+            _json_encode(1, enc_hook=lambda x: None, extra="extra")
 
 
 class TestEncoderMisc:
@@ -269,7 +269,7 @@ class TestEncoderMisc:
         enc = JSONEncoder()
 
         msg = {"key": "x" * 48}
-        encoded = json_encode(msg)
+        encoded = _json_encode(msg)
 
         buf = bytearray(buf_size)
         out = enc.encode_into(msg, buf)
@@ -320,22 +320,22 @@ class TestEncoderMisc:
 
 class TestDecodeFunction:
     def test_decode(self):
-        assert json_decode(b"[1, 2, 3]") == [1, 2, 3]
+        assert _json_decode(b"[1, 2, 3]") == [1, 2, 3]
 
     def test_decode_from_str(self):
-        assert json_decode("[1, 2, 3]") == [1, 2, 3]
+        assert _json_decode("[1, 2, 3]") == [1, 2, 3]
 
         with pytest.raises(structtype.DecodeError, match="truncated"):
-            assert json_decode("[1, 2, 3")
+            assert _json_decode("[1, 2, 3")
 
     def test_decode_type_keyword(self):
-        assert json_decode(b"[1, 2, 3]", type=set[int]) == {1, 2, 3}
+        assert _json_decode(b"[1, 2, 3]", type=set[int]) == {1, 2, 3}
 
         with pytest.raises(structtype.ValidationError):
-            assert json_decode(b"[1, 2, 3]", type=set[str])
+            assert _json_decode(b"[1, 2, 3]", type=set[str])
 
     def test_decode_type_any(self):
-        assert json_decode(b"[1, 2, 3]", type=Any) == [1, 2, 3]
+        assert _json_decode(b"[1, 2, 3]", type=Any) == [1, 2, 3]
 
     @pytest.mark.parametrize("array_like", [False, True])
     def test_decode_type_struct(self, array_like):
@@ -343,47 +343,47 @@ class TestDecodeFunction:
             x: int
             y: int
 
-        msg = json_encode(Point(1, 2))
+        msg = _json_encode(Point(1, 2))
 
         for _ in range(2):
-            assert json_decode(msg, type=Point) == Point(1, 2)
+            assert _json_decode(msg, type=Point) == Point(1, 2)
 
     def test_decode_type_struct_invalid_type(self):
         class Test(structtype.Struct):
             x: 1
 
         with pytest.raises(TypeError):
-            json_decode(b"{}", type=Test)
+            _json_decode(b"{}", type=Test)
 
     def test_decode_invalid_type(self):
         with pytest.raises(TypeError, match="Type '1' is not supported"):
-            json_decode(b"[]", type=1)
+            _json_decode(b"[]", type=1)
 
     def test_decode_invalid_buf(self):
         with pytest.raises(TypeError):
-            json_decode(1)
+            _json_decode(1)
 
     def test_decode_parse_arguments_errors(self):
         buf = b"[1, 2, 3]"
 
         with pytest.raises(TypeError, match="Missing 1 required argument"):
-            json_decode()
+            _json_decode()
 
         with pytest.raises(TypeError, match="Extra positional arguments"):
-            json_decode(buf, list[int])
+            _json_decode(buf, list[int])
 
         with pytest.raises(TypeError, match="Extra positional arguments"):
-            json_decode(buf, 2, 3)
+            _json_decode(buf, 2, 3)
 
         with pytest.raises(TypeError, match="Extra keyword arguments"):
-            json_decode(buf, bad=1)
+            _json_decode(buf, bad=1)
 
         with pytest.raises(TypeError, match="Extra keyword arguments"):
-            json_decode(buf, type=list[int], extra=1)
+            _json_decode(buf, type=list[int], extra=1)
 
     def test_decode_with_trailing_characters_errors(self):
         with pytest.raises(structtype.DecodeError):
-            json_decode(b'[1, 2, 3]"trailing"')
+            _json_decode(b'[1, 2, 3]"trailing"')
 
 
 class TestDecoderMisc:
@@ -432,52 +432,52 @@ class TestDecoderMisc:
 
 class TestBoolAndNone:
     def test_encode_none(self):
-        assert json_encode(None) == b"null"
+        assert _json_encode(None) == b"null"
 
     def test_decode_none(self):
-        assert json_decode(b"null") is None
-        assert json_decode(b"   null   ") is None
+        assert _json_decode(b"null") is None
+        assert _json_decode(b"   null   ") is None
 
     @pytest.mark.parametrize("s", [b"nul", b"nulll", b"nuul", b"nulp"])
     def test_decode_none_malformed(self, s):
         with pytest.raises(structtype.DecodeError):
-            json_decode(s)
+            _json_decode(s)
 
     def test_decode_none_typed(self):
         with pytest.raises(
             structtype.ValidationError, match="Expected `int | null`, got `str`"
         ):
-            json_decode(b'"test"', type=int | None)
+            _json_decode(b'"test"', type=int | None)
 
     def test_encode_true(self):
-        assert json_encode(True) == b"true"
+        assert _json_encode(True) == b"true"
 
     def test_decode_true(self):
-        assert json_decode(b"true") is True
-        assert json_decode(b"   true   ") is True
+        assert _json_decode(b"true") is True
+        assert _json_decode(b"   true   ") is True
 
     @pytest.mark.parametrize("s", [b"tru", b"truee", b"trru", b"trup"])
     def test_decode_true_malformed(self, s):
         with pytest.raises(structtype.DecodeError):
-            json_decode(s)
+            _json_decode(s)
 
     def test_encode_false(self):
-        assert json_encode(False) == b"false"
+        assert _json_encode(False) == b"false"
 
     def test_decode_false(self):
-        assert json_decode(b"false") is False
-        assert json_decode(b"   false   ") is False
+        assert _json_decode(b"false") is False
+        assert _json_decode(b"   false   ") is False
 
     @pytest.mark.parametrize("s", [b"fals", b"falsee", b"faase", b"falsp"])
     def test_decode_false_malformed(self, s):
         with pytest.raises(structtype.DecodeError):
-            json_decode(s)
+            _json_decode(s)
 
     def test_decode_bool_typed(self):
         with pytest.raises(
             structtype.ValidationError, match="Expected `bool`, got `str`"
         ):
-            json_decode(b'"test"', type=bool)
+            _json_decode(b'"test"', type=bool)
 
 
 class TestStrings:
@@ -501,7 +501,7 @@ class TestStrings:
 
     @pytest.mark.parametrize("decoded, encoded", STRINGS)
     def test_encode_str(self, decoded, encoded):
-        assert json_encode(decoded) == encoded
+        assert _json_encode(decoded) == encoded
 
     @pytest.mark.parametrize("length", [*range(1, 17), 25, 33, 63, 255])
     @pytest.mark.parametrize("esc1", ["\n", "\x01"])
@@ -534,12 +534,12 @@ class TestStrings:
 
         for s in gen():
             sol = json.dumps(s, ensure_ascii=False).encode("utf-8")
-            res = json_encode(s)
+            res = _json_encode(s)
             assert res == sol
 
     @pytest.mark.parametrize("decoded, encoded", STRINGS)
     def test_decode_str(self, decoded, encoded):
-        assert json_decode(encoded) == decoded
+        assert _json_decode(encoded) == decoded
 
     @pytest.mark.parametrize(
         "decoded, encoded",
@@ -554,7 +554,7 @@ class TestStrings:
         ],
     )
     def test_decode_str_unicode_escapes(self, decoded, encoded):
-        assert json_decode(encoded) == decoded
+        assert _json_decode(encoded) == decoded
 
     @pytest.mark.parametrize(
         "s, error",
@@ -572,18 +572,18 @@ class TestStrings:
     )
     def test_decode_str_malformed_escapes(self, s, error):
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s)
+            _json_decode(s)
 
     def test_decode_str_invalid_byte(self):
         with pytest.raises(structtype.DecodeError, match="invalid character"):
-            json_decode(b'"123 \x00 456"')
+            _json_decode(b'"123 \x00 456"')
 
         with pytest.raises(structtype.DecodeError, match="invalid character"):
-            json_decode(b'"123 \x01 456"')
+            _json_decode(b'"123 \x01 456"')
 
     def test_decode_str_missing_closing_quote(self):
         with pytest.raises(structtype.DecodeError, match="truncated"):
-            json_decode(b'"test')
+            _json_decode(b'"test')
 
     @pytest.mark.parametrize("length", range(10))
     @pytest.mark.parametrize("in_list", [False, True])
@@ -598,21 +598,21 @@ class TestStrings:
             prefix = "a\nb\t\ncd" if escape else ""
         s = prefix + string.ascii_letters[:length]
         sol = [s, 1] if in_list else s
-        buf = json_encode(sol)
-        res = json_decode(buf)
+        buf = _json_encode(sol)
+        res = _json_decode(buf)
         assert res == sol
 
         left, _, right = buf.rpartition(b'"')
         buf2 = left + b'\x01"' + right
         with pytest.raises(structtype.DecodeError, match="invalid character"):
-            json_decode(buf2)
+            _json_decode(buf2)
 
         # Test str skipping
         class Test(structtype.Struct):
             x: int
 
-        buf3 = json_encode({"y": sol, "x": 1})
-        json_decode(buf3, type=Test)
+        buf3 = _json_encode({"y": sol, "x": 1})
+        _json_decode(buf3, type=Test)
 
 
 class TestBinary:
@@ -622,7 +622,7 @@ class TestBinary:
     @pytest.mark.parametrize("type", [bytes, bytearray, memoryview])
     def test_encode_binary(self, x, type):
         x = type(x)
-        s = json_encode(x)
+        s = _json_encode(x)
         expected = b'"' + base64.b64encode(x) + b'"'
         assert s == expected
 
@@ -632,7 +632,7 @@ class TestBinary:
     @pytest.mark.parametrize("type", [bytes, bytearray, memoryview])
     def test_decode_binary(self, x, type):
         s = b'"' + base64.b64encode(x) + b'"'
-        res = json_decode(s, type=type)
+        res = _json_decode(s, type=type)
         assert res == bytes(x)
         assert isinstance(res, type)
 
@@ -640,8 +640,8 @@ class TestBinary:
     def test_roundtrip_random(self, n, rand):
         for _ in range(10):
             x = rand.bytes(n)
-            s = json_encode(x)
-            x2 = json_decode(s, type=bytes)
+            s = _json_encode(x)
+            x2 = _json_decode(s, type=bytes)
             assert x == x2
 
     @pytest.mark.parametrize(
@@ -651,24 +651,24 @@ class TestBinary:
         with pytest.raises(
             structtype.ValidationError, match="Invalid base64 encoded string"
         ):
-            json_decode(s, type=bytes)
+            _json_decode(s, type=bytes)
 
 
 class TestDatetime:
     def test_encode_datetime(self):
         # All fields, zero padded
         x = datetime.datetime(1, 2, 3, 4, 5, 6, 7, UTC)
-        s = json_encode(x)
+        s = _json_encode(x)
         assert s == b'"0001-02-03T04:05:06.000007Z"'
 
         # All fields, no zeros
         x = datetime.datetime(1234, 12, 31, 14, 56, 27, 123456, UTC)
-        s = json_encode(x)
+        s = _json_encode(x)
         assert s == b'"1234-12-31T14:56:27.123456Z"'
 
     def test_encode_datetime_no_microsecond(self):
         x = datetime.datetime(1234, 12, 31, 14, 56, 27, 0, UTC)
-        s = json_encode(x)
+        s = _json_encode(x)
         assert s == b'"1234-12-31T14:56:27Z"'
 
     @pytest.mark.parametrize(
@@ -687,7 +687,7 @@ class TestDatetime:
         ],
     )
     def test_encode_datetime_naive(self, dt, sol):
-        res = json_encode(dt)
+        res = _json_encode(dt)
         assert res == sol
 
     @pytest.mark.parametrize(
@@ -705,7 +705,7 @@ class TestDatetime:
     def test_encode_datetime_offset_is_appx_equal_to_utc(self, offset):
         tz = datetime.timezone(offset)
         x = datetime.datetime(1234, 12, 31, 14, 56, 27, 123456, tz)
-        s = json_encode(x)
+        s = _json_encode(x)
         assert s == b'"1234-12-31T14:56:27.123456Z"'
 
     @pytest.mark.parametrize(
@@ -728,7 +728,7 @@ class TestDatetime:
     def test_encode_datetime_offset_rounds_to_nearest_minute(self, offset, expected):
         tz = datetime.timezone(offset)
         x = datetime.datetime(1234, 12, 31, 14, 56, 27, 123456, tz)
-        s = json_encode(x)
+        s = _json_encode(x)
         assert s == expected
 
     def test_encode_datetime_zoneinfo(self):
@@ -741,8 +741,8 @@ class TestDatetime:
         except zoneinfo.ZoneInfoNotFoundError:
             # Some envs in CI do not have `tzdata`:
             pytest.skip(reason="Failed to load timezone")
-        sol = json_encode(x.isoformat())
-        res = json_encode(x)
+        sol = _json_encode(x.isoformat())
+        res = _json_encode(x)
         assert res == sol
 
     @pytest.mark.parametrize(
@@ -759,7 +759,7 @@ class TestDatetime:
         dt += suffix
         exp = datetime.datetime.fromisoformat(dt.replace("Z", "+00:00"))
         s = f'"{dt}"'.encode()
-        res = json_decode(s, type=datetime.datetime)
+        res = _json_decode(s, type=datetime.datetime)
         assert res == exp
 
     @pytest.mark.parametrize(
@@ -781,7 +781,7 @@ class TestDatetime:
         s = f"{dt}{sign}{hour:02}:{minute:02}"
         json_s = f'"{s}"'.encode()
         exp = datetime.datetime.fromisoformat(s)
-        res = json_decode(json_s, type=datetime.datetime)
+        res = _json_decode(json_s, type=datetime.datetime)
         assert res == exp
 
     @pytest.mark.skipif(
@@ -790,8 +790,8 @@ class TestDatetime:
     )
     def test_decode_timezone_cache(self):
         msg = b'"2000-01-01T00:00:01+03:02"'
-        tz = json_decode(msg, type=datetime.datetime).tzinfo
-        tz2 = json_decode(msg, type=datetime.datetime).tzinfo
+        tz = _json_decode(msg, type=datetime.datetime).tzinfo
+        tz2 = _json_decode(msg, type=datetime.datetime).tzinfo
         assert tz is tz2
         del tz2
         assert sys.getrefcount(tz) <= 3  # 1 tz, 1 cache, 1 func call
@@ -799,7 +799,7 @@ class TestDatetime:
             gc.collect()  # cache is cleared every 10 full collections
 
         # Since tz still has refcnt > 1, shouldn't be cleared
-        tz2 = json_decode(msg, type=datetime.datetime).tzinfo
+        tz2 = _json_decode(msg, type=datetime.datetime).tzinfo
         assert tz is tz2
 
     @pytest.mark.parametrize(
@@ -813,7 +813,7 @@ class TestDatetime:
     def test_decode_datetime_naive(self, s):
         sol = datetime.datetime.fromisoformat(s)
         msg = f'"{s}"'.encode()
-        res = json_decode(msg, type=datetime.datetime)
+        res = _json_decode(msg, type=datetime.datetime)
         assert sol == res
 
     @pytest.mark.parametrize("t", ["T", "t"])
@@ -822,16 +822,16 @@ class TestDatetime:
         """Both T & Z can be upper/lowercase"""
         s = f'"0001-02-03{t}04:05:06.000007{z}"'.encode()
         exp = datetime.datetime(1, 2, 3, 4, 5, 6, 7, UTC)
-        res = json_decode(s, type=datetime.datetime)
+        res = _json_decode(s, type=datetime.datetime)
         assert res == exp
 
     def test_decode_min_datetime(self):
-        res = json_decode(b'"0001-01-01T00:00:00Z"', type=datetime.datetime)
+        res = _json_decode(b'"0001-01-01T00:00:00Z"', type=datetime.datetime)
         exp = datetime.datetime.min.replace(tzinfo=UTC)
         assert res == exp
 
     def test_decode_max_datetime(self):
-        res = json_decode(b'"9999-12-31T23:59:59.999999Z"', type=datetime.datetime)
+        res = _json_decode(b'"9999-12-31T23:59:59.999999Z"', type=datetime.datetime)
         exp = datetime.datetime.max.replace(tzinfo=UTC)
         assert res == exp
 
@@ -873,7 +873,7 @@ class TestDatetime:
         ],
     )
     def test_decode_datetime_nanos(self, msg, sol):
-        res = json_decode(msg, type=datetime.datetime)
+        res = _json_decode(msg, type=datetime.datetime)
         assert res == sol
 
     @pytest.mark.parametrize(
@@ -887,8 +887,8 @@ class TestDatetime:
     def test_decode_datetime_rfc3339_relaxed(self, lax, strict):
         """structtype supports a few relaxations of the RFC3339 format."""
         sol = datetime.datetime.fromisoformat(strict)
-        msg = json_encode(lax)
-        res = json_decode(msg, type=datetime.datetime)
+        msg = _json_encode(lax)
+        res = _json_decode(msg, type=datetime.datetime)
         assert res == sol
 
     @pytest.mark.parametrize(
@@ -955,7 +955,7 @@ class TestDatetime:
     )
     def test_decode_datetime_malformed(self, s):
         with pytest.raises(structtype.ValidationError, match="Invalid RFC3339"):
-            json_decode(s, type=datetime.datetime)
+            _json_decode(s, type=datetime.datetime)
 
 
 class TestIntegers:
@@ -969,13 +969,13 @@ class TestIntegers:
             ).encode()
 
         x = int(s)
-        assert json_encode(x) == s
+        assert _json_encode(x) == s
         if 0 < ndigits < 20:
-            assert json_encode(-x) == b"-" + s
+            assert _json_encode(-x) == b"-" + s
 
     @pytest.mark.parametrize("x", [-(2**63 + 1), -(2**63), 2**64 - 1, 2**64])
     def test_encode_big_integers(self, x):
-        assert json_encode(x) == str(x).encode()
+        assert _json_encode(x) == str(x).encode()
 
     @pytest.mark.parametrize("ndigits", range(21))
     def test_decode_int(self, ndigits):
@@ -987,21 +987,21 @@ class TestIntegers:
             ).encode()
 
         x = int(s)
-        assert json_decode(s) == x
+        assert _json_decode(s) == x
         if 0 < ndigits < 20:
-            assert json_decode(b"-" + s) == -x
+            assert _json_decode(b"-" + s) == -x
 
     @pytest.mark.parametrize("x", [2**63 - 1, 2**63, 2**63 + 1])
     def test_decode_int_19_digit_overflow_boundary(self, x):
         s = str(x).encode("utf-8")
         # Add extra trailing 0 to ensure no out-of-bounds reads
         buffer = memoryview(s + b"0")[:-1]
-        assert json_decode(buffer) == x
+        assert _json_decode(buffer) == x
 
     @pytest.mark.parametrize("x", [-(2**63), 2**64 - 1])
     def test_decode_int_boundaries(self, x):
         s = str(x).encode()
-        x2 = json_decode(s)
+        x2 = _json_decode(s)
         assert isinstance(x2, int)
         assert x2 == x
 
@@ -1028,7 +1028,7 @@ class TestIntegers:
     @pytest.mark.parametrize("type", [Any, int])
     def test_decode_big_int(self, x, type):
         s = str(x).encode()
-        x2 = json_decode(s, type=type)
+        x2 = _json_decode(s, type=type)
         assert isinstance(x2, int)
         assert x2 == x
 
@@ -1054,25 +1054,25 @@ class TestIntegers:
             with pytest.raises(
                 structtype.ValidationError, match="Integer value out of range"
             ):
-                json_decode(s, type=int)
+                _json_decode(s, type=int)
         finally:
             if cleanup:
                 cleanup()
 
     @pytest.mark.parametrize("s", [b"   123   ", b"   -123   "])
     def test_decode_int_whitespace(self, s):
-        assert json_decode(s) == int(s)
+        assert _json_decode(s) == int(s)
 
     @pytest.mark.parametrize("s", [b"- 123", b"-n123", b"1 2", b"12n3", b"123n"])
     def test_decode_int_malformed(self, s):
         with pytest.raises(structtype.DecodeError):
-            json_decode(s)
+            _json_decode(s)
 
     def test_decode_int_converts_to_float_if_requested(self):
-        x = json_decode(b"123", type=float)
+        x = _json_decode(b"123", type=float)
         assert isinstance(x, float)
         assert x == 123.0
-        x = json_decode(b"-123", type=float)
+        x = _json_decode(b"-123", type=float)
         assert isinstance(x, float)
         assert x == -123.0
 
@@ -1080,7 +1080,7 @@ class TestIntegers:
         with pytest.raises(
             structtype.ValidationError, match="Expected `str`, got `int`"
         ):
-            json_decode(b"123", type=str)
+            _json_decode(b"123", type=str)
 
 
 class TestLiteral:
@@ -1102,11 +1102,11 @@ class TestLiteral:
         literal = Literal[values]
         dec = JSONDecoder(literal)
         for val in values:
-            assert dec.decode(json_encode(val)) == val
+            assert dec.decode(_json_encode(val)) == val
 
         for bad in ["bad", 1234]:
             with pytest.raises(structtype.ValidationError):
-                dec.decode(json_encode(bad))
+                dec.decode(_json_encode(bad))
 
     def test_int_literal_errors(self):
         dec = JSONDecoder(Literal[1, 2, 3])
@@ -1216,51 +1216,51 @@ class TestFloat:
     def test_roundtrip_float_tricky_cases(self, x):
         """Tricky float values, many taken from
         https://github.com/ulfjack/ryu/blob/master/ryu/tests/d2s_test.cc"""
-        s = json_encode(x)
-        x2 = json_decode(s)
+        s = _json_encode(x)
+        x2 = _json_decode(s)
         assert x == x2
 
     @pytest.mark.parametrize("x", [-0.0, 0.0])
     def test_roundtrip_signed_zero(self, x):
-        s = json_encode(x)
-        x2 = json_decode(s)
+        s = _json_encode(x)
+        x2 = _json_decode(s)
         assert x == x2
         assert math.copysign(1.0, x) == math.copysign(1.0, x2)
 
     @pytest.mark.parametrize("n", range(-15, 15))
     def test_roundtrip_float_powers_10(self, n):
         x = 10.0**n
-        s = json_encode(x)
-        x2 = json_decode(s)
+        s = _json_encode(x)
+        x2 = _json_decode(s)
         assert x == x2
 
     @pytest.mark.parametrize("n", range(-15, 14))
     def test_roundtrip_float_lots_of_middle_zeros(self, n):
         x = 1e15 + 10.0**n
-        s = json_encode(x)
-        x2 = json_decode(s)
+        s = _json_encode(x)
+        x2 = _json_decode(s)
         assert x == x2
 
     @pytest.mark.parametrize("n", range(1, 17))
     def test_roundtrip_float_integers(self, n):
         x = float("".join(itertools.islice(itertools.cycle("123456789"), n)))
-        s = json_encode(x)
-        x2 = json_decode(s)
+        s = _json_encode(x)
+        x2 = _json_decode(s)
         assert x == x2
 
     @pytest.mark.parametrize("scale", [0.0001, 1, 1000])
     @pytest.mark.parametrize("n", range(54))
     def test_roundtrip_float_powers_of_2(self, n, scale):
         x = (2.0**n) * scale
-        s = json_encode(x)
-        x2 = json_decode(s)
+        s = _json_encode(x)
+        x2 = _json_decode(s)
         assert x == x2
 
     def test_roundtrip_float_random_checks(self, rand):
         for _ in range(1000):
             x = rand.float()
-            s = json_encode(x)
-            x2 = json_decode(s)
+            s = _json_encode(x)
+            x2 = _json_decode(s)
             assert x == x2
 
     @pytest.mark.parametrize(
@@ -1280,26 +1280,26 @@ class TestFloat:
             s += b".0"
         else:
             s = b"0." + b"0" * (-i) + s
-        x = json_decode(s)
-        x2 = json_decode(s, type=float)
+        x = _json_decode(s)
+        x2 = _json_decode(s, type=float)
         assert float(s) == x == x2
         with pytest.raises(
             structtype.ValidationError, match="Expected `int`, got `float`"
         ):
-            json_decode(s, type=int)
+            _json_decode(s, type=int)
 
     @pytest.mark.parametrize("n", [5, 20, 300, 500])
     def test_decode_float_lots_of_leading_zeros(self, n):
         s = b"0." + b"0" * n + b"123"
-        x = json_decode(s)
-        x2 = json_decode(s, type=float)
+        x = _json_decode(s)
+        x2 = _json_decode(s, type=float)
         assert x == x2 == float(s)
 
     @pytest.mark.parametrize("n", [5, 20, 300, 500])
     def test_decode_float_lots_of_middle_leading_zeros(self, n):
         s = b"1." + b"0" * n + b"123"
-        x = json_decode(s)
-        x2 = json_decode(s, type=float)
+        x = _json_decode(s)
+        x2 = _json_decode(s, type=float)
         assert x == x2 == float(s)
 
     @pytest.mark.parametrize("prefix", [b"0", b"0.0", b"0.0001", b"123", b"123.000"])
@@ -1308,19 +1308,19 @@ class TestFloat:
     @pytest.mark.parametrize("exp", [b"0", b"000", b"12", b"300"])
     def test_decode_float_with_exponent(self, prefix, e, sign, exp):
         s = prefix + e + sign + exp
-        x = json_decode(s)
-        x2 = json_decode(s, type=float)
+        x = _json_decode(s)
+        x2 = _json_decode(s, type=float)
         assert x == x2 == float(s)
 
     def test_decode_float_long_decimal_large_exponent(self):
         s = b"0." + b"0" * 500 + b"123e500"
-        x = json_decode(s)
+        x = _json_decode(s)
         assert x == float(s)
 
     @pytest.mark.parametrize("s", [b"123e308", b"-123e308", b"123e50000", b"123e50000"])
     def test_decode_float_boundaries_errors(self, s):
         with pytest.raises(structtype.ValidationError, match="Number out of range"):
-            json_decode(s)
+            _json_decode(s)
 
     @pytest.mark.parametrize(
         "s",
@@ -1466,7 +1466,7 @@ class TestFloat:
     def test_decode_float_cases_from_fastfloat(self, s):
         """Some tricky test cases from
         https://github.com/fastfloat/fast_float/blob/main/tests/basictest.cpp"""
-        x = json_decode(s.encode(), type=float)
+        x = _json_decode(s.encode(), type=float)
         assert x == float(s)
 
     @pytest.mark.parametrize("negative", [True, False])
@@ -1474,7 +1474,7 @@ class TestFloat:
         s = b"0." + b"0" * 400 + b"1"
         if negative:
             s = b"-" + s
-        x = json_decode(s)
+        x = _json_decode(s)
         assert x == 0.0
         assert (math.copysign(1.0, x) < 0) == negative
 
@@ -1491,7 +1491,7 @@ class TestFloat:
     def test_decode_long_float_truncated_but_exp_brings_back_in_bounds(self, s):
         """The digits part of these would put them over the limit to inf, but
         the exponent bit brings them back in range"""
-        x = json_decode(s.encode())
+        x = _json_decode(s.encode())
         assert x == float(s)
 
     @pytest.mark.parametrize(
@@ -1519,7 +1519,7 @@ class TestFloat:
     )
     def test_decode_float_malformed(self, s, error):
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s)
+            _json_decode(s)
 
     @pytest.mark.parametrize(
         "s, error",
@@ -1537,7 +1537,7 @@ class TestFloat:
     )
     def test_decode_long_float_malformed(self, s, error):
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s)
+            _json_decode(s)
 
     @pytest.mark.parametrize(
         "s",
@@ -1555,14 +1555,14 @@ class TestFloat:
     )
     def test_decode_float_out_of_bounds(self, s):
         with pytest.raises(structtype.ValidationError, match="out of range"):
-            json_decode(s)
+            _json_decode(s)
 
     @pytest.mark.parametrize("s", [b"1.23e3", b"1.2", b"1e2"])
     def test_decode_float_err_expected_int(self, s):
         with pytest.raises(
             structtype.ValidationError, match="Expected `int`, got `float`"
         ):
-            json_decode(s, type=int)
+            _json_decode(s, type=int)
 
     def test_float_hook_untyped(self):
         dec = JSONDecoder(float_hook=decimal.Decimal)
@@ -1626,7 +1626,7 @@ class TestDecimal:
         ],
     )
     def test_decimal_from_number_keeps_precision(self, msg):
-        res = json_decode(msg, type=Decimal)
+        res = _json_decode(msg, type=Decimal)
         sol = Decimal(msg)
         assert res == sol
         assert str(res) == str(sol)  # check trailing 0s
@@ -1650,7 +1650,7 @@ class TestDecimal:
         but aren't valid JSON still error as invalid JSON"""
         Decimal(msg)
         with pytest.raises(structtype.DecodeError) as rec:
-            json_decode(msg)
+            _json_decode(msg)
 
         # not ValidationError, a subclass
         assert type(rec.value) is structtype.DecodeError
@@ -1687,7 +1687,7 @@ class TestDecimal:
         ]
 
         for msg, request_type, out_type in cases:
-            out = json_decode(msg, type=request_type)
+            out = _json_decode(msg, type=request_type)
             assert type(out) is out_type
 
 
@@ -1696,8 +1696,8 @@ class TestSequences:
     @pytest.mark.parametrize("type", [list, set, frozenset, tuple])
     def test_roundtrip_sequence(self, x, type):
         x = type(x)
-        s = json_encode(x)
-        x2 = json_decode(s, type=type)
+        s = _json_encode(x)
+        x2 = _json_decode(s, type=type)
         assert x == x2
         assert isinstance(x2, type)
 
@@ -1712,7 +1712,7 @@ class TestSequences:
     )
     @pytest.mark.parametrize("type", [list, set, frozenset, tuple])
     def test_decode_sequence_ignores_whitespace(self, s, x, type):
-        x2 = json_decode(s, type=type)
+        x2 = _json_decode(s, type=type)
         assert isinstance(x2, type)
         assert type(x) == type(x2)
 
@@ -1749,7 +1749,7 @@ class TestSequences:
         dec = JSONDecoder(type)
         data = [1] * (bad_index + 1)
         data[bad_index] = "oops"
-        msg = json_encode(data)
+        msg = _json_encode(data)
         err_msg = rf"Expected `int`, got `str` - at `\$\[{bad_index}\]`"
         with pytest.raises(structtype.ValidationError, match=err_msg):
             dec.decode(msg)
@@ -1768,7 +1768,7 @@ class TestSequences:
     @pytest.mark.parametrize("type", [list, set, tuple, tuple[int, int, int]])
     def test_decode_sequence_malformed(self, s, error, type):
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=type)
+            _json_decode(s, type=type)
 
     def test_decode_fixtuple_any(self):
         dec = JSONDecoder(tuple[Any, Any, Any])
@@ -1809,7 +1809,7 @@ class TestNamedTuple:
             a: int = 0
             b: int = 1
 
-        x2 = json_decode(s, type=Test)
+        x2 = _json_decode(s, type=Test)
         assert x2 == Test(*x)
 
     @pytest.mark.parametrize(
@@ -1829,7 +1829,7 @@ class TestNamedTuple:
             b: int
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test)
+            _json_decode(s, type=Test)
 
 
 class TestDict:
@@ -1838,17 +1838,17 @@ class TestDict:
             TypeError,
             match="Only dicts with str-like or number-like keys are supported",
         ):
-            json_encode({"a": 1, (1, 2): "bad"})
+            _json_encode({"a": 1, (1, 2): "bad"})
 
     @pytest.mark.parametrize("x", [{}, {"a": 1}, {"a": 1, "b": 2}])
     def test_roundtrip_dict(self, x):
-        s = json_encode(x)
-        x2 = json_decode(s)
+        s = _json_encode(x)
+        x2 = _json_decode(s)
         assert x == x2
         assert json.loads(s) == x
 
     def test_decode_any_dict(self):
-        x = json_decode(b'{"a": 1, "b": "two", "c": false}')
+        x = _json_decode(b'{"a": 1, "b": "two", "c": false}')
         assert x == {"a": 1, "b": "two", "c": False}
 
     @pytest.mark.parametrize(
@@ -1861,14 +1861,14 @@ class TestDict:
         ],
     )
     def test_decode_dict_ignores_whitespace(self, s, x):
-        x2 = json_decode(s)
+        x2 = _json_decode(s)
         assert x == x2
 
     def test_decode_dict_wrong_element_type(self):
         dec = JSONDecoder(dict[str, int])
         with pytest.raises(
             structtype.ValidationError,
-            match=r"Expected `int`, got `str` - at `\$\[...\]`",
+            match=r"Expected `int`, got `str` - at `\$\['a'\]`",
         ):
             dec.decode(b'{"a": "bad"}')
 
@@ -1908,7 +1908,7 @@ class TestDict:
     def test_decode_dict_string_cache(self, length):
         key = "x" * length
         msg = [{key: 1}, {key: 2}, {key: 3}]
-        res = json_decode(json_encode(msg))
+        res = _json_decode(_json_encode(msg))
         assert msg == res
         ids = {id(k) for d in res for k in d.keys()}
         if length > 32:
@@ -1920,7 +1920,7 @@ class TestDict:
         """Short non-ascii strings aren't cached"""
         s = "123 á 456"
         msg = [{s: 1}, {s: 2}, {s: 3}]
-        res = json_decode(json_encode(msg))
+        res = _json_decode(_json_encode(msg))
         ids = {id(k) for d in res for k in d.keys()}
         assert len(ids) == 3
 
@@ -1942,32 +1942,32 @@ class TestDict:
     )
     def test_roundtrip_dict_key_types(self, key):
         msg = {key: 100}
-        from structtype._core import _to_builtins
+        from structtype._core import _dump
 
-        sol = json_encode(_to_builtins(msg, str_keys=True))
-        res = json_encode(msg)
+        sol = _json_encode(_dump(msg, str_keys=True))
+        res = _json_encode(msg)
         assert res == sol
 
-        msg2 = json_decode(sol, type=dict[type(key), int])
+        msg2 = _json_decode(sol, type=dict[type(key), int])
         assert msg == msg2
 
     def test_encode_dict_plain_enum_str_key(self):
         # Regression: a plain `enum.Enum` with str values, used as a dict key.
         # json.encode previously raised "Only dicts with str-like or
         # number-like keys are supported", even though `dict[FruitStr, int]` is
-        # an accepted decode type and both msgpack and to_builtins handle it.
+        # an accepted decode type and both msgpack and dump handle it.
         msg = {FruitStr.APPLE: 1, FruitStr.BANANA: 2}
 
-        res = json_encode(msg)
+        res = _json_encode(msg)
         assert res == b'{"apple":1,"banana":2}'
 
         expected = {"apple": 1, "banana": 2}
-        from structtype._core import _to_builtins
+        from structtype._core import _dump
 
-        assert _to_builtins(msg) == expected
+        assert _dump(msg) == expected
 
         # Full round-trip through the accepted decode type.
-        assert json_decode(res, type=dict[FruitStr, int]) == msg
+        assert _json_decode(res, type=dict[FruitStr, int]) == msg
 
     def test_encode_dict_plain_enum_str_key_nested(self):
         # The same must hold when the dict is nested inside a Struct field.
@@ -1975,9 +1975,9 @@ class TestDict:
             fruits: dict[FruitStr, int]
 
         rec = Rec(fruits={FruitStr.APPLE: 5})
-        res = json_encode(rec)
+        res = _json_encode(rec)
         assert res == b'{"fruits":{"apple":5}}'
-        assert json_decode(res, type=Rec) == rec
+        assert _json_decode(res, type=Rec) == rec
 
     def test_encode_dict_plain_int_enum_key(self):
         # A plain Enum with int values (not IntEnum) must keep round-tripping.
@@ -1986,9 +1986,9 @@ class TestDict:
             B = 2
 
         msg = {IntVals.A: 9, IntVals.B: 8}
-        res = json_encode(msg)
+        res = _json_encode(msg)
         assert res == b'{"1":9,"2":8}'
-        assert json_decode(res, type=dict[IntVals, int]) == msg
+        assert _json_decode(res, type=dict[IntVals, int]) == msg
 
     def test_decode_dict_int_enum_key(self):
         dec = JSONDecoder(dict[FruitInt, int])
@@ -2003,17 +2003,17 @@ class TestDict:
     @pytest.mark.parametrize("x", [-(2**63), 2**64 - 1])
     def test_encode_dict_int_key(self, x):
         msg = {-(2**63): "a", 0: "b", 2**64 - 1: "c"}
-        s = json_encode(msg)
+        s = _json_encode(msg)
         assert s == b'{"-9223372036854775808":"a","0":"b","18446744073709551615":"c"}'
 
         for x in [-(2**63) - 1, 2**64]:
-            s = json_encode({x: "a"})
+            s = _json_encode({x: "a"})
             assert s == f'{{"{x}":"a"}}'.encode()
 
     def test_decode_dict_int_key(self):
         msg = {-(2**63): "a", 0: "b", 2**64 - 1: "c"}
-        buf = json_encode(msg)
-        res = json_decode(buf, type=dict[int, str])
+        buf = _json_encode(msg)
+        res = _json_decode(buf, type=dict[int, str])
         assert res == msg
 
     @pytest.mark.parametrize("s", ['""', '"-"', '"a"', '"-a"', '"01"', '"1a"'])
@@ -2022,13 +2022,13 @@ class TestDict:
         with pytest.raises(
             structtype.ValidationError, match="Expected `int`, got `str`"
         ):
-            json_decode(bad, type=dict[int, int])
+            _json_decode(bad, type=dict[int, int])
 
     @pytest.mark.parametrize("x", [-(2**63) - 1, 2**64, 2**65])
     def test_decode_dict_big_int(self, x):
         msg = {str(x): 1}
-        buf = json_encode(msg)
-        res = json_decode(buf, type=dict[int, int])
+        buf = _json_encode(msg)
+        res = _json_decode(buf, type=dict[int, int])
         assert res == {x: 1}
         assert type(list(res)[0]) is int
 
@@ -2055,21 +2055,21 @@ class TestDict:
             float("inf"): 5,
             float("nan"): 6,
         }
-        sol = json_encode({str(k): v for k, v in msg.items()})
-        res = json_encode(msg)
+        sol = _json_encode({str(k): v for k, v in msg.items()})
+        res = _json_encode(msg)
         assert res == sol
 
     def test_decode_dict_float_key(self):
         msg = {"1.5": 1, "inf": 2, "-inf": 3, "0": 4, "-1.5e12": 5, "123": 6}
-        buf = json_encode(msg)
+        buf = _json_encode(msg)
         sol = {float(k): v for k, v in msg.items()}
-        res = json_decode(buf, type=dict[float, int])
+        res = _json_decode(buf, type=dict[float, int])
         assert res == sol
 
     def test_decode_dict_int_or_float_key(self):
         buf = b'{"1.5": "a", "123": "b"}'
         sol = {1.5: "a", 123: "b"}
-        res = json_decode(buf, type=dict[int | float, str])
+        res = _json_decode(buf, type=dict[int | float, str])
         assert res == sol
         assert type(list(res.keys())[-1]) is int
 
@@ -2077,7 +2077,7 @@ class TestDict:
         class mystr(str):
             pass
 
-        msg = json_encode({mystr("test"): 1})
+        msg = _json_encode({mystr("test"): 1})
         assert msg == b'{"test":1}'
 
     def test_encode_dict_custom_key(self):
@@ -2085,14 +2085,14 @@ class TestDict:
             def __init__(self, value):
                 self.value = value
 
-        msg = json_encode({Custom("a"): 1, Custom("b"): 2}, enc_hook=lambda x: x.value)
+        msg = _json_encode({Custom("a"): 1, Custom("b"): 2}, enc_hook=lambda x: x.value)
         assert msg == b'{"a":1,"b":2}'
 
         def enc_hook(x):
             raise TypeError("Oh no!")
 
         with pytest.raises(TypeError):
-            json_encode({Custom("x"): 1}, enc_hook=enc_hook)
+            _json_encode({Custom("x"): 1}, enc_hook=enc_hook)
 
     @emscripten_stack_limited
     def test_encode_dict_custom_key_recursion_error(self):
@@ -2101,7 +2101,7 @@ class TestDict:
                 self.value = value
 
         with pytest.raises(RecursionError):
-            json_encode({Custom("x"): 1}, enc_hook=lambda x: x)
+            _json_encode({Custom("x"): 1}, enc_hook=lambda x: x)
 
     def test_decode_dict_custom_key(self):
         class Custom:
@@ -2121,7 +2121,7 @@ class TestDict:
 
         msg = b'{"a":1,"b":2}'
 
-        obj = json_decode(msg, type=dict[Custom, int], dec_hook=dec_hook)
+        obj = _json_decode(msg, type=dict[Custom, int], dec_hook=dec_hook)
         assert obj == {Custom("a"): 1, Custom("b"): 2}
 
     @pytest.mark.parametrize(
@@ -2140,11 +2140,11 @@ class TestDict:
     @pytest.mark.parametrize("type", [dict, Any])
     def test_decode_dict_malformed(self, s, error, type):
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=type)
+            _json_decode(s, type=type)
 
     def test_encode_dict_order_escape(self):
         msg = {"test\nkey": 1, "another\t\rkey": 2}
-        res = json_encode(msg, order="deterministic")
+        res = _json_encode(msg, order="deterministic")
         sol = b'{"another\\t\\rkey":2,"test\\nkey":1}'
         assert res == sol
 
@@ -2166,7 +2166,7 @@ class TestTypedDict:
             a: int
             b: int
 
-        x2 = json_decode(s, type=Test)
+        x2 = _json_decode(s, type=Test)
         assert x == x2
 
     @pytest.mark.parametrize(
@@ -2188,7 +2188,7 @@ class TestTypedDict:
             b: int
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test)
+            _json_decode(s, type=Test)
 
 
 class TestDataclass:
@@ -2209,7 +2209,7 @@ class TestDataclass:
             a: int = -1
             b: int = -2
 
-        x2 = json_decode(s, type=Test)
+        x2 = _json_decode(s, type=Test)
         assert x2 == Test(**x)
 
     @pytest.mark.parametrize(
@@ -2232,7 +2232,7 @@ class TestDataclass:
             b: int
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test)
+            _json_decode(s, type=Test)
 
 
 class TestStruct:
@@ -2241,9 +2241,9 @@ class TestStruct:
         class Test(structtype.Struct, tag=tag):
             pass
 
-        s = json_encode(Test())
+        s = _json_encode(Test())
         if tag:
-            expected = json_encode({"type": tag})
+            expected = _json_encode({"type": tag})
             assert s == expected
         else:
             assert s == b"{}"
@@ -2253,9 +2253,9 @@ class TestStruct:
         class Test(structtype.Struct, tag=tag):
             a: int
 
-        s = json_encode(Test(a=1))
+        s = _json_encode(Test(a=1))
         if tag:
-            expected = json_encode({"type": tag, "a": 1})
+            expected = _json_encode({"type": tag, "a": 1})
             assert s == expected
         else:
             assert s == b'{"a":1}'
@@ -2266,9 +2266,9 @@ class TestStruct:
             a: int
             b: str
 
-        s = json_encode(Test(a=1, b="two"))
+        s = _json_encode(Test(a=1, b="two"))
         if tag:
-            expected = json_encode({"type": tag, "a": 1, "b": "two"})
+            expected = _json_encode({"type": tag, "a": 1, "b": "two"})
             assert s == expected
         else:
             assert s == b'{"a":1,"b":"two"}'
@@ -2301,20 +2301,20 @@ class TestStruct:
         with pytest.raises(
             structtype.ValidationError, match="Object missing required field `age`"
         ):
-            json_decode(bad, type=Person)
+            _json_decode(bad, type=Person)
 
         bad = b"{}"
         with pytest.raises(
             structtype.ValidationError, match="Object missing required field `first`"
         ):
-            json_decode(bad, type=Person)
+            _json_decode(bad, type=Person)
 
         bad = b'[{"first": "harry", "last": "potter"}]'
         with pytest.raises(
             structtype.ValidationError,
             match=r"Object missing required field `age` - at `\$\[0\]`",
         ):
-            json_decode(bad, type=list[Person])
+            _json_decode(bad, type=list[Person])
 
     def test_decode_struct_fields_mixed_order(self):
         class Test(structtype.Struct):
@@ -2330,7 +2330,7 @@ class TestStruct:
         pairs = list(zip("abcdef", range(6)))
 
         for data in itertools.permutations(pairs):
-            msg = json_encode(dict(data))
+            msg = _json_encode(dict(data))
             res = dec.decode(msg)
             assert res == sol
 
@@ -2350,7 +2350,7 @@ class TestStruct:
     def test_decode_struct_ignore_extra_fields(self, extra):
         dec = JSONDecoder(Person)
 
-        a = json_encode(
+        a = _json_encode(
             {
                 "extra1": extra,
                 "first": "harry",
@@ -2386,7 +2386,7 @@ class TestStruct:
     )
     def test_decode_struct_malformed(self, s, error):
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Person)
+            _json_decode(s, type=Person)
 
     @pytest.mark.parametrize("array_like", [False, True])
     def test_struct_gc_maybe_untracked_on_decode(self, array_like):
@@ -2425,7 +2425,7 @@ class TestStruct:
             Test([], []),
             Test({}, {}),
         ]
-        for obj in dec.decode(json_encode(ts)):
+        for obj in dec.decode(_json_encode(ts)):
             assert not gc.is_tracked(obj)
 
     def test_struct_recursive_definition(self):
@@ -2451,20 +2451,20 @@ class TestStruct:
             {"type": tag, "a": 1, "b": 2},
             {"a": 1, "type": tag, "b": 2},
         ]:
-            res = dec.decode(json_encode(msg))
+            res = dec.decode(_json_encode(msg))
             assert res == Test(1, 2)
 
         # Tag incorrect type
         for bad in [False, 123.456]:
             with pytest.raises(structtype.ValidationError) as rec:
-                dec.decode(json_encode({"type": bad}))
+                dec.decode(_json_encode({"type": bad}))
             assert f"Expected `{type(tag).__name__}`" in str(rec.value)
             assert "`$.type`" in str(rec.value)
 
         # Tag incorrect value
         bad = -3 if isinstance(tag, int) else "bad"
         with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode(json_encode({"type": bad}))
+            dec.decode(_json_encode({"type": bad}))
         assert f"Invalid value {bad!r}" in str(rec.value)
         assert "`$.type`" in str(rec.value)
 
@@ -2476,11 +2476,11 @@ class TestStruct:
         dec = JSONDecoder(Test)
 
         # Tag missing
-        res = dec.decode(json_encode({}))
+        res = dec.decode(_json_encode({}))
         assert res == Test()
 
         # Tag present
-        res = dec.decode(json_encode({"type": tag}))
+        res = dec.decode(_json_encode({"type": tag}))
         assert res == Test()
 
     @pytest.mark.parametrize(
@@ -2507,7 +2507,7 @@ class TestStruct:
             b: int
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test1)
+            _json_decode(s, type=Test1)
 
     @pytest.mark.parametrize("ndigits", range(19))
     @pytest.mark.parametrize("negative", [False, True])
@@ -2527,8 +2527,8 @@ class TestStruct:
             x: int
 
         t = Test(1)
-        msg = json_encode(t)
-        assert json_decode(msg, type=Test) == t
+        msg = _json_encode(t)
+        assert _json_decode(msg, type=Test) == t
 
     def test_decode_tagged_struct_int_tag_uint64_always_invalid(self):
         """Uint64 values aren't currently valid tag values, but we still want
@@ -2538,7 +2538,7 @@ class TestStruct:
             pass
 
         with pytest.raises(structtype.ValidationError) as rec:
-            json_decode(json_encode({"type": 2**64 - 1}), type=Test)
+            _json_decode(_json_encode({"type": 2**64 - 1}), type=Test)
         assert f"Invalid value {2**64 - 1}" in str(rec.value)
         assert "`$.type`" in str(rec.value)
 
@@ -2566,7 +2566,7 @@ class TestStruct:
             b: int
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test1)
+            _json_decode(s, type=Test1)
 
 
 class TestStructUnion:
@@ -2599,7 +2599,7 @@ class TestStructUnion:
             pass
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test1 | Test2)
+            _json_decode(s, type=Test1 | Test2)
 
     @pytest.mark.parametrize(
         "s, error",
@@ -2628,7 +2628,7 @@ class TestStructUnion:
             pass
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test1 | Test2)
+            _json_decode(s, type=Test1 | Test2)
 
     @pytest.mark.parametrize(
         "s",
@@ -2646,7 +2646,7 @@ class TestStructUnion:
         class Test2(structtype.Struct, tag=True):
             pass
 
-        res = json_decode(s, type=Test1 | Test2)
+        res = _json_decode(s, type=Test1 | Test2)
         assert res == Test1(1, 2)
 
     @pytest.mark.parametrize(
@@ -2665,7 +2665,7 @@ class TestStructUnion:
         class Test2(structtype.Struct, tag=123):
             pass
 
-        res = json_decode(s, type=Test1 | Test2)
+        res = _json_decode(s, type=Test1 | Test2)
         assert res == Test1(1, 2)
 
 
@@ -2675,7 +2675,7 @@ class TestStructArray:
         class Test(structtype.Struct, array_like=True, tag=tag):
             pass
 
-        s = json_encode(Test())
+        s = _json_encode(Test())
         if tag:
             assert s == b'["Test"]'
         else:
@@ -2686,7 +2686,7 @@ class TestStructArray:
         class Test(structtype.Struct, array_like=True, tag=tag):
             a: int
 
-        s = json_encode(Test(a=1))
+        s = _json_encode(Test(a=1))
         if tag:
             assert s == b'["Test",1]'
         else:
@@ -2698,7 +2698,7 @@ class TestStructArray:
             a: int
             b: str
 
-        s = json_encode(Test(a=1, b="two"))
+        s = _json_encode(Test(a=1, b="two"))
         if tag:
             assert s == b'["Test",1,"two"]'
         else:
@@ -2708,8 +2708,8 @@ class TestStructArray:
         dec = JSONDecoder(PersonArray)
 
         x = PersonArray(first="harry", last="potter", age=13)
-        a = json_encode(x)
-        assert json_encode(("harry", "potter", 13, False)) == a
+        a = _json_encode(x)
+        assert _json_encode(("harry", "potter", 13, False)) == a
         assert dec.decode(a) == x
 
         with pytest.raises(
@@ -2718,7 +2718,7 @@ class TestStructArray:
             dec.decode(b"1")
 
         # Wrong field type
-        bad = json_encode(("harry", "potter", "thirteen"))
+        bad = _json_encode(("harry", "potter", "thirteen"))
         with pytest.raises(
             structtype.ValidationError,
             match=r"Expected `int`, got `str` - at `\$\[2\]`",
@@ -2726,14 +2726,14 @@ class TestStructArray:
             dec.decode(bad)
 
         # Missing fields
-        bad = json_encode(("harry", "potter"))
+        bad = _json_encode(("harry", "potter"))
         with pytest.raises(
             structtype.ValidationError,
             match="Expected `array` of at least length 3, got 2",
         ):
             dec.decode(bad)
 
-        bad = json_encode(())
+        bad = _json_encode(())
         with pytest.raises(
             structtype.ValidationError,
             match="Expected `array` of at least length 3, got 0",
@@ -2742,7 +2742,7 @@ class TestStructArray:
 
         # Extra fields ignored
         dec2 = JSONDecoder(list[PersonArray])
-        msg = json_encode(
+        msg = _json_encode(
             [
                 ("harry", "potter", 13, False, 1, 2, 3, 4),
                 ("ron", "weasley", 13, False, 5, 6),
@@ -2755,13 +2755,13 @@ class TestStructArray:
         ]
 
         # Defaults applied
-        res = dec.decode(json_encode(("harry", "potter", 13)))
+        res = dec.decode(_json_encode(("harry", "potter", 13)))
         assert res == PersonArray("harry", "potter", 13)
         assert res.prefect is False
 
     def test_struct_map_and_array_like_messages_cant_mix(self):
-        array_msg = json_encode(("harry", "potter", 13))
-        map_msg = json_encode({"first": "harry", "last": "potter", "age": 13})
+        array_msg = _json_encode(("harry", "potter", 13))
+        map_msg = _json_encode({"first": "harry", "last": "potter", "age": 13})
         sol = Person("harry", "potter", 13)
         array_sol = PersonArray("harry", "potter", 13)
 
@@ -2797,7 +2797,7 @@ class TestStructArray:
             z: int
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Point)
+            _json_decode(s, type=Point)
 
     @pytest.mark.parametrize("tag", ["Test", 123])
     def test_decode_tagged_struct(self, tag):
@@ -2809,41 +2809,41 @@ class TestStructArray:
         dec = JSONDecoder(Test)
 
         # Decode with tag
-        res = dec.decode(json_encode([tag, 1, 2]))
+        res = dec.decode(_json_encode([tag, 1, 2]))
         assert res == Test(1, 2)
-        res = dec.decode(json_encode([tag, 1, 2, 3]))
+        res = dec.decode(_json_encode([tag, 1, 2, 3]))
         assert res == Test(1, 2, 3)
 
         # Trailing fields ignored
-        res = dec.decode(json_encode([tag, 1, 2, 3, 4]))
+        res = dec.decode(_json_encode([tag, 1, 2, 3, 4]))
         assert res == Test(1, 2, 3)
 
         # Missing required field errors
         with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode(json_encode([tag, 1]))
+            dec.decode(_json_encode([tag, 1]))
         assert "Expected `array` of at least length 3, got 2" in str(rec.value)
 
         # Tag missing
         with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode(json_encode([]))
+            dec.decode(_json_encode([]))
         assert "Expected `array` of at least length 3, got 0" in str(rec.value)
 
         # Tag incorrect type
         with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode(json_encode([123.456, 2, 3]))
+            dec.decode(_json_encode([123.456, 2, 3]))
         assert f"Expected `{type(tag).__name__}`" in str(rec.value)
         assert "`$[0]`" in str(rec.value)
 
         # Tag incorrect value
         bad = 0 if isinstance(tag, int) else "bad"
         with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode(json_encode([bad, 1, 2]))
+            dec.decode(_json_encode([bad, 1, 2]))
         assert f"Invalid value {bad!r}" in str(rec.value)
         assert "`$[0]`" in str(rec.value)
 
         # Field incorrect type correct index
         with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode(json_encode([tag, "a", 2]))
+            dec.decode(_json_encode([tag, "a", 2]))
         assert "Expected `int`, got `str`" in str(rec.value)
         assert "`$[1]`" in str(rec.value)
 
@@ -2855,12 +2855,12 @@ class TestStructArray:
         dec = JSONDecoder(Test)
 
         # Decode with tag
-        res = dec.decode(json_encode([tag, 1, 2]))
+        res = dec.decode(_json_encode([tag, 1, 2]))
         assert res == Test()
 
         # Tag missing
         with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode(json_encode([]))
+            dec.decode(_json_encode([]))
         assert "Expected `array` of at least length 1, got 0" in str(rec.value)
 
 
@@ -2896,7 +2896,7 @@ class TestStructArrayUnion:
             pass
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test1 | Test2)
+            _json_decode(s, type=Test1 | Test2)
 
     @pytest.mark.parametrize(
         "s, error",
@@ -2925,7 +2925,7 @@ class TestStructArrayUnion:
             pass
 
         with pytest.raises(structtype.DecodeError, match=error):
-            json_decode(s, type=Test1 | Test2)
+            _json_decode(s, type=Test1 | Test2)
 
     def test_decode_struct_array_union_ignores_whitespace(self):
         s = b'  [  "Test1"  ,  1  ,  2  ]  '
@@ -2937,7 +2937,7 @@ class TestStructArrayUnion:
         class Test2(structtype.Struct, tag=True, array_like=True):
             pass
 
-        res = json_decode(s, type=Test1 | Test2)
+        res = _json_decode(s, type=Test1 | Test2)
         assert res == Test1(1, 2)
 
     def test_decode_struct_array_union_int_tag_ignores_whitespace(self):
@@ -2950,7 +2950,7 @@ class TestStructArrayUnion:
         class Test2(structtype.Struct, tag=-123, array_like=True):
             pass
 
-        res = json_decode(s, type=Test1 | Test2)
+        res = _json_decode(s, type=Test1 | Test2)
         assert res == Test1(1, 2)
 
 
@@ -2958,8 +2958,8 @@ class TestRaw:
     def test_encode_raw(self):
         b = b'{"x":1}'
         r = structtype.Raw(b)
-        assert json_encode(r) == b
-        assert json_encode({"y": r}) == b'{"y":{"x":1}}'
+        assert _json_encode(r) == b
+        assert _json_encode({"y": r}) == b'{"y":{"x":1}}'
 
     def test_decode_raw_field(self):
         class Test(structtype.Struct):
@@ -2967,7 +2967,7 @@ class TestRaw:
             y: structtype.Raw
 
         s = b'{"x": 1, "y": [1, 2, 3]  }'
-        res = json_decode(s, type=Test)
+        res = _json_decode(s, type=Test)
         assert res.x == 1
         assert bytes(res.y) == b"[1, 2, 3]"
 
@@ -2979,12 +2979,12 @@ class TestRaw:
             y: structtype.Raw = default
 
         s = b'{"x": 1, "y": [1, 2, 3]  }'
-        res = json_decode(s, type=Test)
+        res = _json_decode(s, type=Test)
         assert res.x == 1
         assert bytes(res.y) == b"[1, 2, 3]"
 
         s = b'{"x": 1}'
-        res = json_decode(s, type=Test)
+        res = _json_decode(s, type=Test)
         assert res.x == 1
         assert res.y is default
 
@@ -2995,11 +2995,11 @@ class TestRaw:
 
         s = b'{"x": 1, "y": [1, 2,]}'
         with pytest.raises(structtype.DecodeError, match="malformed"):
-            json_decode(s, type=Test)
+            _json_decode(s, type=Test)
 
     def test_decode_raw_is_view(self):
         s = b'   {"x": 1}   '
-        r = json_decode(s, type=structtype.Raw)
+        r = _json_decode(s, type=structtype.Raw)
         assert bytes(r) == b'{"x": 1}'
         assert r.copy() is not r  # actual copy indicates a view
 
@@ -3008,9 +3008,9 @@ class TestRaw:
         msg = '[{"x": 1}]' if wrap else '{"x": 1}'
         c = sys.getrefcount(msg)
         if wrap:
-            [r] = json_decode(msg, type=list[structtype.Raw])
+            [r] = _json_decode(msg, type=list[structtype.Raw])
         else:
-            r = json_decode(msg, type=structtype.Raw)
+            r = _json_decode(msg, type=structtype.Raw)
         assert bytes(r) == b'{"x": 1}'
         # Raw holds a ref to the original str
         assert sys.getrefcount(msg) <= c + 1
@@ -3021,7 +3021,7 @@ class TestRaw:
         class Test(structtype.Struct):
             x: int | str | structtype.Raw
 
-        r = json_decode(b'{"x": 1}', type=Test)
+        r = _json_decode(b'{"x": 1}', type=Test)
         assert r == Test(1)
 
     def test_raw_can_be_mixed_with_custom_type(self):
@@ -3032,5 +3032,5 @@ class TestRaw:
             assert typ is Custom
             return typ(*obj)
 
-        res = json_decode(b'{"x": [1, 2]}', type=Test, dec_hook=dec_hook)
+        res = _json_decode(b'{"x": [1, 2]}', type=Test, dec_hook=dec_hook)
         assert res == Test(Custom(1, 2))

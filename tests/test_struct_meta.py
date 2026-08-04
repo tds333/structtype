@@ -9,7 +9,7 @@ import pytest
 
 import structtype
 from structtype import Struct, StructMeta
-from structtype._core import json_decode, json_encode
+from structtype._core import _json_decode, _json_encode
 from structtype import StructConfig
 
 
@@ -298,8 +298,8 @@ def test_struct_meta_subclass_with_encoder():
     obj = EncoderStruct(id=123, name="test")
 
     # Test JSON encoding and decoding
-    json_bytes = json_encode(obj)
-    decoded = json_decode(json_bytes, type=EncoderStruct)
+    json_bytes = _json_encode(obj)
+    decoded = _json_decode(json_bytes, type=EncoderStruct)
 
     assert decoded.id == 123
     assert decoded.name == "test"
@@ -311,8 +311,8 @@ def test_struct_meta_subclass_with_encoder():
         count: int
 
     container = Container(item=obj, count=1)
-    json_bytes = json_encode(container)
-    decoded = json_decode(json_bytes, type=Container)
+    json_bytes = _json_encode(container)
+    decoded = _json_decode(json_bytes, type=Container)
 
     assert decoded.count == 1
     assert decoded.item.id == 123
@@ -360,8 +360,8 @@ def test_structmeta_abcmeta_mixed_behaves_like_abc():
     assert isinstance(obj, IntegerStructBase)
 
     # structtype roundtrip still works
-    encoded = json_encode(obj)
-    decoded = json_decode(encoded, type=ConcreteIntStruct)
+    encoded = _json_encode(obj)
+    decoded = _json_decode(encoded, type=ConcreteIntStruct)
     assert decoded == obj
 
     # Repeated checks must continue working (no latent _abc_impl issues)
@@ -444,8 +444,8 @@ def test_structmeta_abcmeta_mixed_reverse_order():
     assert issubclass(ConcreteIntStruct, IntegerStructBase)
     assert isinstance(obj, IntegerStructBase)
 
-    encoded = json_encode(obj)
-    decoded = json_decode(encoded, type=ConcreteIntStruct)
+    encoded = _json_encode(obj)
+    decoded = _json_decode(encoded, type=ConcreteIntStruct)
     assert decoded == obj
 
 
@@ -474,8 +474,8 @@ def test_structmeta_abcmeta_mixed_supports_register():
     assert isinstance(other, IntegerStructBase)
 
     # structtype usage should still be fine
-    encoded = json_encode(other)
-    decoded = json_decode(encoded, type=OtherStruct)
+    encoded = _json_encode(other)
+    decoded = _json_decode(encoded, type=OtherStruct)
     assert decoded == other
 
 
@@ -486,8 +486,8 @@ def test_plain_struct_not_treated_as_abc():
     obj = Plain(1)
 
     # Normal structtype behaviour works
-    encoded = json_encode(obj)
-    decoded = json_decode(encoded, type=Plain)
+    encoded = _json_encode(obj)
+    decoded = _json_decode(encoded, type=Plain)
     assert decoded == obj
 
     # Sanity: Plain should not suddenly be an ABC

@@ -1,10 +1,13 @@
 # Changelog
 
-## 0.3.0 (2026-08-01)
+## 0.3.0 (2026-08-02)
 
 - Improve C compilation, fix warnings
 - Add Windows wheel builds.
+- Add Python 3.15 wheel builds.
 - Add pydantic json schema support.
+- Internal renames and fix StructAdapter struct_dump.
+- Pass throug struct_dump parameters.
 
 ## 0.2.0 (2026-07-27)
 

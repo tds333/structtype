@@ -99,8 +99,7 @@ def test_structadapter_msgspec():
     u2 = adapter.struct_validate({"name": "Bob"})
     assert u2.name == "Bob"
     assert u2.age == 0
-    # StructAdapter.struct_dump falls through to return obj for msgspec types
-    assert adapter.struct_dump(u2) is u2
+    assert adapter.struct_dump(u2) == {"name": "Bob", "age": 0}
 
 
 def test_msgspec_roundtrip():

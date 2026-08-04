@@ -7,13 +7,13 @@ import pytest
 
 import structtype
 from structtype import Field
-from structtype._core import JSONDecoder, JSONEncoder, json_encode, json_decode
+from structtype._core import JSONDecoder, JSONEncoder, _json_encode, _json_decode
 
 class _JsonProto:
     Decoder = JSONDecoder
     Encoder = JSONEncoder
-    encode = staticmethod(json_encode)
-    decode = staticmethod(json_decode)
+    encode = staticmethod(_json_encode)
+    decode = staticmethod(_json_decode)
 
 @pytest.fixture(params=["json"])
 def proto(request):

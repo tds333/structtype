@@ -1,23 +1,11 @@
 import enum
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from inspect import Signature
-from typing import (
-    Any,
-    ClassVar,
-    Final,
-    Literal,
-    Optional,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-    final,
-    overload,
-)
+from typing import Any, ClassVar, Final, Literal, TypeAlias, TypeVar, final, overload
 
-from typing_extensions import Buffer, Self, TypeAlias, dataclass_transform
+from typing_extensions import Buffer, Self, dataclass_transform
 
-from . import _inspect
+from . import StructConfig
 
 # PEP 673 explicitly rejects using Self in metaclass definitions:
 # https://peps.python.org/pep-0673/#valid-locations-for-self
@@ -34,7 +22,7 @@ class StructMeta(type):
     @property
     def __signature__(self) -> Signature: ...
     @property
-    def __struct_config__(self) -> structs.StructConfig: ...
+    def __struct_config__(self) -> StructConfig: ...
     def __new__(
         mcls: type[_SM],
         name: str,
