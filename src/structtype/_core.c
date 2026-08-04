@@ -11704,6 +11704,7 @@ ms_uuid_to_16_bytes(StructspecState *mod, PyObject *obj, unsigned char *buf) {
     if (int128 == NULL) return -1;
     if (MS_UNLIKELY(!PyLong_CheckExact(int128))) {
         PyErr_SetString(PyExc_TypeError, "uuid.int must be an int");
+        Py_DECREF(int128);
         return -1;
     }
 #if PY313_PLUS
@@ -14485,6 +14486,7 @@ json_decode_string(JSONDecoderState *self, TypeNode *type, PathNode *path) {
         PyObject *out;
         if (MS_LIKELY(is_ascii)) {
             out = PyUnicode_New(size, 127);
+            if (MS_UNLIKELY(out == NULL)) return NULL;
             memcpy(ascii_get_buffer(out), view, size);
         }
         else {
@@ -16359,6 +16361,7 @@ dump_datetime(DumpState *self, PyObject *obj) {
     int size = ms_encode_datetime(self->mod, obj, buf);
     if (size < 0) return NULL;
     PyObject *out = PyUnicode_New(size, 127);
+    if (MS_UNLIKELY(out == NULL)) return NULL;
     memcpy(ascii_get_buffer(out), buf, size);
     return out;
 }
@@ -16377,6 +16380,7 @@ dump_time(DumpState *self, PyObject *obj) {
     int size = ms_encode_time(self->mod, obj, buf);
     if (size < 0) return NULL;
     PyObject *out = PyUnicode_New(size, 127);
+    if (MS_UNLIKELY(out == NULL)) return NULL;
     memcpy(ascii_get_buffer(out), buf, size);
     return out;
 }
@@ -16385,7 +16389,9 @@ static PyObject *
 dump_timedelta(DumpState *self, PyObject *obj) {
     char buf[26];
     int size = ms_encode_timedelta(obj, buf);
+    if (MS_UNLIKELY(size < 0)) return NULL;
     PyObject *out = PyUnicode_New(size, 127);
+    if (MS_UNLIKELY(out == NULL)) return NULL;
     memcpy(ascii_get_buffer(out), buf, size);
     return out;
 }
