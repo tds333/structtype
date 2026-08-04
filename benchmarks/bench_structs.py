@@ -133,8 +133,14 @@ BENCHMARKS = [
     ("standard classes", None, classes_template),
     ("attrs", "attrs", attrs_template),
     ("dataclasses", None, dataclasses_template),
-    ("pydantic", "pydantic", pydantic_template),
 ]
+
+try:
+    import pydantic
+    BENCHMARKS.append(("pydantic", "pydantic", pydantic_template))
+except ImportError:
+    pydantic = None
+
 BENCHMARK_NAMES = [bench_data[0] for bench_data in BENCHMARKS]
 
 
