@@ -3,6 +3,8 @@ import decimal
 import enum
 import uuid
 
+import pytest
+
 import structtype
 from structtype import ALL_BUILTIN_TYPES, Field, Struct, StructAdapter
 from typing import Annotated
@@ -182,3 +184,76 @@ def test_roundtrip_python():
     ta = StructAdapter(Point)
     obj = ta.struct_validate({"x": 1, "y": 2})
     assert ta.struct_dump(obj) == {"x": 1, "y": 2}
+
+
+def test_dump_builtin_types_not_iterable():
+    class Obj(Struct):
+        x: int
+
+    obj = Obj(x=1)
+    with pytest.raises(TypeError, match="builtin_types must be an iterable"):
+        obj.struct_dump(builtin_types=42)
+
+
+def test_dump_builtin_types_non_type():
+    class Obj(Struct):
+        x: int
+
+    obj = Obj(x=1)
+    with pytest.raises(TypeError, match="builtin_types must be an iterable"):
+        obj.struct_dump(builtin_types=[42])
+
+
+def test_dump_builtin_types_unsupported():
+    class Obj(Struct):
+        x: int
+
+    obj = Obj(x=1)
+    with pytest.raises(TypeError, match="must be an iterable of types"):
+        obj.struct_dump(builtin_types=42)
+
+
+def test_dump_builtin_types_empty():
+    class Obj(Struct):
+        ts: datetime.datetime
+
+    obj = Obj(ts=datetime.datetime(2024, 1, 15))
+    r = obj.struct_dump(builtin_types=[])
+    assert isinstance(r["ts"], str)
+
+
+def test_dump_builtin_types_bytes_only():
+    class Obj(Struct):
+        b: bytes
+        ts: datetime.datetime
+
+    obj = Obj(b=b"hello", ts=datetime.datetime(2024, 1, 15))
+    r = obj.struct_dump(builtin_types=[bytes])
+    assert isinstance(r["b"], bytes)
+    assert isinstance(r["ts"], str)
+
+
+def test_dump_adapter_builtin_types():
+    class Color(enum.Enum):
+        RED = 1
+
+    class Obj(Struct):
+        color: Color
+
+    obj = Obj(color=Color.RED)
+    ta = StructAdapter(Obj)
+    r = ta.struct_dump(obj, builtin_types=[Color])
+    assert isinstance(r["color"], Color)
+
+
+def test_dump_builtin_types_nested():
+    class Inner(Struct):
+        ts: datetime.datetime
+
+    class Outer(Struct):
+        inner: Inner
+
+    obj = Outer(inner=Inner(ts=datetime.datetime(2024, 1, 15)))
+    r = obj.struct_dump(builtin_types=ALL_BUILTIN_TYPES)
+    assert isinstance(r["inner"], dict)
+    assert isinstance(r["inner"]["ts"], datetime.datetime)
