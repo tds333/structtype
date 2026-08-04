@@ -19477,8 +19477,10 @@ PyInit__core(void)
         Py_INCREF(&PyFrozenDict_Type);
         PyTuple_SET_ITEM(all_types, idx++, (PyObject *)&PyFrozenDict_Type);
 #endif
-        if (PyModule_AddObjectRef(m, "ALL_BUILTIN_TYPES", all_types) < 0)
+        if (PyModule_AddObjectRef(m, "ALL_BUILTIN_TYPES", all_types) < 0) {
+            Py_DECREF(all_types);
             return NULL;
+        }
         Py_DECREF(all_types);
     }
 
