@@ -508,6 +508,7 @@ typedef struct {
     PyObject *UUIDType;
     PyObject *uuid_safeuuid_unknown;
     PyObject *DecimalType;
+    PyObject *EnumType;
     PyObject *typing_union;
     PyObject *typing_any;
     PyObject *typing_literal;
@@ -8388,7 +8389,9 @@ PyDoc_STRVAR(Struct_dump__doc__,
 "    types will be passed through unchanged. Currently supports\n"
 "    ``bytes``, ``bytearray``, ``memoryview``, ``datetime.datetime``,\n"
 "    ``datetime.time``, ``datetime.date``, ``datetime.timedelta``,\n"
-"    ``uuid.UUID``, ``decimal.Decimal``, and custom types.\n"
+"    ``uuid.UUID``, ``decimal.Decimal``, ``enum.Enum``, and custom types.\n"
+"    Use ``ALL_BUILTIN_TYPES`` as a shortcut to pass through all\n"
+"    supported types.\n"
 "\n"
 "Returns\n"
 "-------\n"
@@ -16303,6 +16306,7 @@ structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
 #define MS_BUILTIN_DECIMAL    (1ull << 7)
 #define MS_BUILTIN_TIMEDELTA  (1ull << 8)
 #define MS_BUILTIN_FROZENDICT (1ull << 9)
+#define MS_BUILTIN_ENUM       (1ull << 10)
 
 typedef struct {
     StructspecState *mod;
@@ -16874,6 +16878,7 @@ to_builtins(ToBuiltinsState *self, PyObject *obj, bool is_key) {
         return to_builtins_external_struct(self, obj);
     }
     else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
+        if (self->builtin_types & MS_BUILTIN_ENUM) goto builtin;
         return to_builtins_enum(self, obj);
     }
     else if (is_key & PyUnicode_Check(obj)) {
@@ -16998,6 +17003,9 @@ ms_process_builtin_types(
         }
         else if (type == mod->DecimalType) {
             *mask |= MS_BUILTIN_DECIMAL;
+        }
+        else if (PyType_Check(type) && Py_TYPE(type) == mod->EnumMetaType) {
+            *mask |= MS_BUILTIN_ENUM;
         }
         else if (!PyType_Check(type)) {
             PyErr_SetString(PyExc_TypeError, invalid_type_err);
@@ -19058,6 +19066,7 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->UUIDType);
     Py_CLEAR(st->uuid_safeuuid_unknown);
     Py_CLEAR(st->DecimalType);
+    Py_CLEAR(st->EnumType);
     Py_CLEAR(st->typing_union);
     Py_CLEAR(st->typing_any);
     Py_CLEAR(st->typing_literal);
@@ -19167,6 +19176,7 @@ structtype_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->UUIDType);
     Py_VISIT(st->uuid_safeuuid_unknown);
     Py_VISIT(st->DecimalType);
+    Py_VISIT(st->EnumType);
     Py_VISIT(st->astimezone);
     Py_VISIT(st->re_compile);
     return 0;
@@ -19344,20 +19354,25 @@ PyInit__core(void)
     SET_REF(types_uniontype, "UnionType");
     Py_DECREF(temp_module);
 
-    /* Get the EnumMeta type */
+    /* Get the EnumMeta type and Enum base class */
     temp_module = PyImport_ImportModule("enum");
     if (temp_module == NULL)
         return NULL;
     temp_obj = PyObject_GetAttrString(temp_module, "EnumMeta");
-    Py_DECREF(temp_module);
-    if (temp_obj == NULL)
+    if (temp_obj == NULL) {
+        Py_DECREF(temp_module);
         return NULL;
+    }
     if (!PyType_Check(temp_obj)) {
         Py_DECREF(temp_obj);
+        Py_DECREF(temp_module);
         PyErr_SetString(PyExc_TypeError, "enum.EnumMeta should be a type");
         return NULL;
     }
     st->EnumMetaType = (PyTypeObject *)temp_obj;
+    st->EnumType = PyObject_GetAttrString(temp_module, "Enum");
+    Py_DECREF(temp_module);
+    if (st->EnumType == NULL) return NULL;
 
     /* Get the abc.ABCMeta type and _abc_init helper */
     temp_module = PyImport_ImportModule("abc");
@@ -19409,6 +19424,44 @@ PyInit__core(void)
     if (temp_module == NULL) return NULL;
     st->DecimalType = PyObject_GetAttrString(temp_module, "Decimal");
     if (st->DecimalType == NULL) return NULL;
+
+    /* Build ALL_BUILTIN_TYPES convenience tuple */
+    {
+        Py_ssize_t n = 10;
+#if PY315_PLUS
+        n++;
+#endif
+        PyObject *all_types = PyTuple_New(n);
+        if (all_types == NULL) return NULL;
+        Py_ssize_t idx = 0;
+        Py_INCREF(&PyBytes_Type);
+        PyTuple_SET_ITEM(all_types, idx++, (PyObject *)&PyBytes_Type);
+        Py_INCREF(&PyByteArray_Type);
+        PyTuple_SET_ITEM(all_types, idx++, (PyObject *)&PyByteArray_Type);
+        Py_INCREF(&PyMemoryView_Type);
+        PyTuple_SET_ITEM(all_types, idx++, (PyObject *)&PyMemoryView_Type);
+        Py_INCREF(PyDateTimeAPI->DateTimeType);
+        PyTuple_SET_ITEM(all_types, idx++, (PyObject *)PyDateTimeAPI->DateTimeType);
+        Py_INCREF(PyDateTimeAPI->DateType);
+        PyTuple_SET_ITEM(all_types, idx++, (PyObject *)PyDateTimeAPI->DateType);
+        Py_INCREF(PyDateTimeAPI->TimeType);
+        PyTuple_SET_ITEM(all_types, idx++, (PyObject *)PyDateTimeAPI->TimeType);
+        Py_INCREF(PyDateTimeAPI->DeltaType);
+        PyTuple_SET_ITEM(all_types, idx++, (PyObject *)PyDateTimeAPI->DeltaType);
+        Py_INCREF(st->UUIDType);
+        PyTuple_SET_ITEM(all_types, idx++, st->UUIDType);
+        Py_INCREF(st->DecimalType);
+        PyTuple_SET_ITEM(all_types, idx++, st->DecimalType);
+        Py_INCREF(st->EnumType);
+        PyTuple_SET_ITEM(all_types, idx++, st->EnumType);
+#if PY315_PLUS
+        Py_INCREF(&PyFrozenDict_Type);
+        PyTuple_SET_ITEM(all_types, idx++, (PyObject *)&PyFrozenDict_Type);
+#endif
+        if (PyModule_AddObjectRef(m, "ALL_BUILTIN_TYPES", all_types) < 0)
+            return NULL;
+        Py_DECREF(all_types);
+    }
 
     /* Get the re.compile function */
     temp_module = PyImport_ImportModule("re");
