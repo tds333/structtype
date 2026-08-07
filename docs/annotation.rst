@@ -1,5 +1,5 @@
-Constraints
-===========
+Field Annotations
+=================
 
 When using :ref:`typed-decoding` ``structtype`` will ensure decoded
 messages match the specified types. For example, to decode a list of integers
@@ -23,8 +23,16 @@ from JSON:
 Often this is sufficient, but sometimes you also need to impose constraints on
 the *values* (rather than the *types*) found in the message.
 
-Constraints in ``structtype`` are specified by wrapping a type with
-`typing.Annotated`, and adding a `structtype.Field` annotation.
+Constraints and field metadata in ``structtype`` are specified by wrapping a
+type with `typing.Annotated`, and adding a `structtype.Field` annotation. The
+``Annotated`` wrapper attaches arbitrary metadata to a type without changing its
+runtime behavior; ``structtype`` reads the ``Field`` instances it contains.
+
+**Constraint options** (``gt``, ``ge``, ``lt``, ``le``, ``multiple_of``,
+``min_length``, ``max_length``, ``pattern``, ``tz``) restrict the *values* a
+field may take. **Metadata options** (``alias``, ``title``, ``description``,
+``examples``, ``json_schema_extra``) affect encoding names and generated
+:doc:`JSON Schemas <jsonschema>`.
 
 For example, to constrain the list to positive integers (``> 0``), you'd make
 use of the ``gt`` (greater-than) constraint:
@@ -248,5 +256,76 @@ These constraints are valid on `dict` types:
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
     structtype.ValidationError: Expected `object` of length <= 3 - at `$.items`
+
+Field Metadata
+--------------
+
+These ``Field`` options don't constrain values — they attach metadata that
+affects encoding names or generated JSON Schemas.
+
+``alias``
+~~~~~~~~~
+
+Set an alternative name for the field, used when encoding/decoding messages.
+The original name is still used in Python code. This is the field-level
+alternative to the struct-level ``rename`` option; see :ref:`Renaming Fields
+<renaming-fields>` in the usage guide for the full comparison.
+
+.. code-block:: python
+
+    >>> from typing import Annotated
+    >>> from structtype import Struct, Field
+
+    >>> class Example(Struct):
+    ...     x: int
+    ...     y: Annotated[int, Field(alias="field_y")]
+
+    >>> Example(1, 2).struct_dump_json()
+    b'{"x":1,"field_y":2}'
+
+    >>> Example.struct_validate_json(b'{"x": 1, "field_y": 2}')
+    Example(x=1, y=2)
+
+``title`` and ``description``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Human-readable metadata for the field, included in generated JSON Schemas:
+
+.. code-block:: python
+
+    >>> from typing import Annotated
+    >>> from structtype import Struct, Field
+
+    >>> class Product(Struct):
+    ...     name: Annotated[str, Field(
+    ...         title="Product Name",
+    ...         description="The display name of the product"
+    ...     )]
+
+``examples``
+~~~~~~~~~~~~
+
+Provide example values that appear in generated JSON Schemas:
+
+.. code-block:: python
+
+    >>> from typing import Annotated
+    >>> from structtype import Struct, Field
+
+    >>> class Product(Struct):
+    ...     name: Annotated[str, Field(examples=["Widget", "Gadget"])]
+
+``json_schema_extra``
+~~~~~~~~~~~~~~~~~~~~~
+
+Add arbitrary extra properties to the generated JSON Schema for a field:
+
+.. code-block:: python
+
+    >>> from typing import Annotated
+    >>> from structtype import Struct, Field
+
+    >>> class Product(Struct):
+    ...     sku: Annotated[str, Field(json_schema_extra={"deprecated": True})]
 
 .. _timezone-aware: https://docs.python.org/3/library/datetime.html#aware-and-naive-objects

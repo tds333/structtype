@@ -7,7 +7,7 @@ passed to ``struct_dump_json`` / ``struct_validate_json``
 or to the ``struct_dump`` / ``struct_validate`` as keyword arguments.
 
 - ``enc_hook``, for transforming custom types into values
-  that ``structtype``:doc:`natively supports <supported-types>`.
+  that ``structtype`` :doc:`natively supports <supported-types>`.
 - ``dec_hook``, for converting natively supported types back into
   a custom type when using :ref:`typed decoding <typed-decoding>`.
 

@@ -3,7 +3,7 @@ JSON Schema
 
 ``structtype`` provides a few utilities for generating `JSON Schema`_
 specifications from structtype-compatible :doc:`types <supported-types>` and
-:doc:`constraints <constraints>`.
+:doc:`Field Annotations <annotation>`.
 
 - `json_schema()`: a function that generates a complete JSON Schema as a Python dict.
 - `json_schema_dump()`: a convenience wrapper that returns the schema as JSON bytes.
@@ -132,50 +132,9 @@ Both functions accept the following keyword arguments:
 Customizing the Schema
 ----------------------
 
-You can enrich the generated JSON Schema using several ``Field`` parameters.
-These appear in the schema output as additional metadata.
-
-``title`` and ``description``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-    >>> from typing import Annotated
-    >>> from structtype import Struct, Field
-
-    >>> class Product(Struct):
-    ...     name: Annotated[str, Field(
-    ...         title="Product Name",
-    ...         description="The display name of the product"
-    ...     )]
-
-``examples``
-~~~~~~~~~~~~
-
-Provide example values that will appear in the generated schema:
-
-.. code-block:: python
-
-    >>> from typing import Annotated
-    >>> from structtype import Struct, Field
-
-    >>> class Product(Struct):
-    ...     name: Annotated[str, Field(examples=["Widget", "Gadget"])]
-
-``json_schema_extra``
-~~~~~~~~~~~~~~~~~~~~~
-
-Add arbitrary extra properties to the generated schema for a field:
-
-.. code-block:: python
-
-    >>> from typing import Annotated
-    >>> from structtype import Struct, Field
-
-    >>> class Product(Struct):
-    ...     sku: Annotated[str, Field(
-    ...         json_schema_extra={"deprecated": True}
-    ...     )]
+You can enrich the generated JSON Schema using several ``Field`` parameters
+(``title``, ``description``, ``examples``, ``json_schema_extra``). These are
+covered on the :doc:`Field Annotations <annotation>` page.
 
 .. _JSON Schema: https://json-schema.org/
 .. _OpenAPI: https://www.openapis.org/

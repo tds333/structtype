@@ -15,7 +15,7 @@ Python. It features:
   faster than orjson_ can decode it alone.
 
 - ✨ **A speedy Struct type** for representing structured data. If you already
-  use dataclasses_ or attrs_, :doc:`structs` should feel familiar. However,
+  use dataclasses_ or attrs_, :doc:`Structs <usage>` should feel familiar. However,
   they're :ref:`5-60x <struct-benchmark>` faster for common operations.
 
 All of this is included in a lightweight library
@@ -74,13 +74,6 @@ Highlights
   declarative way. ``structtype`` also works well with other type-checking tooling
   like mypy_ and pyright_, providing excellent editor integration.
 
-- ``structtype`` is **flexible**. It natively supports a :doc:`wide range of
-  Python builtin types <supported-types>`. Support for additional types can
-  also be added through :doc:`extensions <extending>`.
-
-- ``structtype`` is **lightweight**. It has no required dependencies, and the
-  binary size is a fraction of that of comparable libraries.
-
 - ``structtype`` is **correct**. The JSON encoder/decoder is strictly compliant
   with the JSON specification, providing strong guarantees of compatibility.
 
@@ -98,8 +91,9 @@ Highlights
     :maxdepth: 2
     :caption: Overview
 
-    why.rst
     install.rst
+    quickstart.rst
+    why.rst
     benchmarks.rst
 
 .. toctree::
@@ -109,18 +103,18 @@ Highlights
 
     usage.rst
     supported-types.rst
-    structs.rst
-    constraints.rst
-    converters.rst
+    annotation.rst
     jsonschema.rst
-    schema-evolution.rst
+    examples.rst
 
 .. toctree::
     :hidden:
     :maxdepth: 2
     :caption: Advanced
 
+    advanced_configuration.rst
     extending.rst
+    schema-evolution.rst
     perf-tips.rst
 
 .. toctree::
@@ -129,5 +123,4 @@ Highlights
     :caption: Reference
 
     api.rst
-    examples/index.rst
     changelog.md

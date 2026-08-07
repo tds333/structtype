@@ -35,6 +35,7 @@ All commands go through `make`.
 - C code uses `ms_`/`MS_` prefix
 - Type stubs (`.pyi`) alongside public modules
 - Sentinel values: `NODEFAULT`, `UNSET`, `_NoDefault`, `UnsetType`
+- never do git commit
 
 ## Key API
 

@@ -70,6 +70,7 @@ Most combinations of the following types are supported (with a few restrictions)
 **Third-Party Libraries**
 
 - attrs_ types
+- pydantic_ types (inherited from BaseModel)
 
 Additional types may be supported through :doc:`extensions <extending>`.
 
@@ -205,7 +206,7 @@ Note that in this case the strings ``"nan"``, ``"inf"`` / ``"infinity"``,
 ``str``
 -------
 
-Strings map to strings in all supported protocols.
+Strings map to strings in JSON.
 
 Note that for JSON, only the characters required by RFC8259_ are escaped to
 ascii; unicode characters (e.g. ``"𝄞"``) are *not* escaped and are serialized
@@ -253,15 +254,14 @@ Bytes-like objects map to base64-encoded strings in JSON.
     advanced topic, and should only be used when you know their usage will
     result in a performance benefit.
 
-    For all other protocols `memoryview` objects will still result in a copy,
-    and will likely be slightly slower than decoding into a `bytes` object
+    `memoryview` objects are decoded as copies, and will likely be slightly
+    slower than decoding into a `bytes` object.
 
 
 ``datetime``
 ------------
 
-The encoding used for `datetime.datetime` objects depends on both the
-protocol and whether these objects are timezone-aware_ or timezone-naive:
+The encoding used for `datetime.datetime` objects depends on whether these objects are timezone-aware_ or timezone-naive:
 
 - **JSON**: Timezone-aware datetimes are encoded as RFC3339_ compatible
   strings. Timezone-naive datetimes are encoded the same, but lack the timezone
@@ -306,7 +306,7 @@ timezone-naive by specifying a ``tz`` constraint (see
     structtype.ValidationError: Invalid RFC3339 encoded datetime
 
 
-Additionally, if ``strict=False`` is specified, all protocols will decode ints,
+Additionally, if ``strict=False`` is specified, JSON will decode ints,
 floats, or strings containing ints/floats as timezone-aware datetimes,
 interpreting the value as seconds since the epoch in UTC (a `Unix Timestamp
 <https://en.wikipedia.org/wiki/Unix_time>`__). See :ref:`strict-vs-lax` for
@@ -351,8 +351,8 @@ more information.
 ``time``
 --------
 
-The encoding used for `datetime.time` objects is dependent on both the protocol
-and whether these objects are timezone-aware_ or timezone-naive:
+The encoding used for `datetime.time` objects is dependent on whether these
+objects are timezone-aware_ or timezone-naive:
 
 - **JSON**: Timezone-aware times are encoded as RFC3339_ compatible strings.
   Timezone-naive times are encoded the same, but lack the timezone component
@@ -396,8 +396,7 @@ timezone-naive by specifying a ``tz`` constraint (see
 ``timedelta``
 -------------
 
-`datetime.timedelta` values map to extended `ISO 8601 duration strings`_ in all
-protocols.
+`datetime.timedelta` values map to extended `ISO 8601 duration strings`_ in JSON.
 
 The format as described in the ISO specification is fairly lax and a bit
 underspecified, leading most real-world implementations to implement a stricter
@@ -474,7 +473,7 @@ libraries, as well as similar ones in other language ecosystems.
       File "<stdin>", line 1, in <module>
     structtype.ValidationError: Invalid ISO8601 duration
 
-Additionally, if ``strict=False`` is specified, all protocols will decode ints,
+Additionally, if ``strict=False`` is specified, JSON will decode ints,
 floats, or strings containing ints/floats as timedeltas, interpreting the value
 as total seconds. See :ref:`strict-vs-lax` for more information.
 
@@ -491,8 +490,7 @@ as total seconds. See :ref:`strict-vs-lax` for more information.
 ``uuid``
 --------
 
-`uuid.UUID` values are serialized as RFC4122_ encoded canonical strings in all
-protocols by default. Subclasses of `uuid.UUID` are also supported for encoding
+`uuid.UUID` values are serialized as RFC4122_ encoded canonical strings in JSON by default. Subclasses of `uuid.UUID` are also supported for encoding
 only.
 
 .. code-block:: python
@@ -514,9 +512,9 @@ only.
         File "<stdin>", line 1, in <module>
     structtype.ValidationError: Invalid UUID
 
-Alternative formats are also supported by the JSON encoder.
-The format may be selected by passing it to ``uuid_format`` when creating an
-``Encoder``. The following options are supported:
+Alternative formats are supported by the JSON encoder. The format may be
+selected by passing ``uuid_format`` to ``struct_dump_json`` (on a ``Struct`` or
+``StructAdapter``). The following options are supported:
 
 - ``canonical``: UUIDs are encoded as RFC4122_ canonical strings (same as
   ``str(uuid)``). This is the default.
@@ -543,8 +541,8 @@ When decoding, any of the above formats are accepted.
 ``decimal``
 -----------
 
-`decimal.Decimal` values are encoded as their string representation in all
-protocols by default. This ensures no precision loss during serialization, as
+`decimal.Decimal` values are encoded as their string representation in
+JSON by default. This ensures no precision loss during serialization, as
 would happen with a float representation.
 
 .. code-block:: python
@@ -568,8 +566,8 @@ would happen with a float representation.
         File "<stdin>", line 1, in <module>
     structtype.ValidationError: Invalid decimal string
 
-For JSON you may instead encode decimal values the same as
-numbers by creating a ``Encoder`` and specifying ``decimal_format='number'``.
+For JSON you may instead encode decimal values the same as numbers by passing
+``decimal_format="number"`` to ``struct_dump_json``:
 
 .. code-block:: python
 
@@ -621,25 +619,11 @@ bytes, avoiding any precision loss:
    >>> StructAdapter(decimal.Decimal).struct_validate_json(b"0.1234567891234567811")
    Decimal('0.1234567891234567811')
 
-Other protocols will coerce float inputs to the shortest decimal value that
-roundtrips back to the corresponding IEEE754 float representation (this is
-effectively equivalent to ``decimal.Decimal(str(float_val))``). This may result
-in precision loss for some inputs! In general we recommend avoiding parsing
-`decimal.Decimal` values from anything but strings.
-
-.. code-block:: python
-
-   Decimal('1.3')
-
-   Decimal('1.3')
-
-   Decimal('0.12345678912345678')
-
 
 ``list`` / ``tuple`` / ``set`` / ``frozenset``
 ----------------------------------------------
 
-`list`, `tuple`, `set`, and `frozenset` objects map to arrays in all protocols.
+`list`, `tuple`, `set`, and `frozenset` objects map to arrays in JSON.
 An error is raised if the elements don't match the specified element type (if
 provided).
 
@@ -671,7 +655,7 @@ a ``list`` subclass you'll need to implement a ``dec_hook`` (see
 ``NamedTuple``
 --------------
 
-`typing.NamedTuple` types map to arrays in all protocols.  An error is raised
+`typing.NamedTuple` types map to arrays in JSON.  An error is raised
 during decoding if the type doesn't match or if any required fields are
 missing.
 
@@ -681,7 +665,7 @@ types.
 
 When possible we recommend using `structtype.Struct` (possibly with
 ``array_like=True`` and ``frozen=True``) instead of ``NamedTuple`` for
-specifying schemas - :doc:`structs` are faster, more ergonomic, and support
+specifying schemas - :doc:`Structs <usage>` are faster, more ergonomic, and support
 additional features.  Still, you may want to use a ``NamedTuple`` if you're
 already using them elsewhere, or if you have downstream code that requires a
 ``tuple`` instead of an object.
@@ -728,7 +712,7 @@ Other types that duck-type as ``NamedTuple`` are also supported, such as
 ``dict``
 --------
 
-Dicts encode/decode as objects/maps in all protocols.
+Dicts encode/decode as objects in JSON.
 
 Dict subclasses (`collections.OrderedDict`, for example) are also supported for
 encoding only. To decode into a ``dict`` subclass you'll need to implement a
@@ -766,12 +750,12 @@ values in a ``dict``, rather than a single value type (the ``int`` in
 information during decoding. Note that ``structtype`` supports both
 `typing.TypedDict` and ``typing_extensions.TypedDict`` (a backport).
 
-`typing.TypedDict` types map to objects/maps in all protocols. During decoding,
+`typing.TypedDict` types map to objects in JSON. During decoding,
 any extra fields are ignored. An error is raised during decoding if the type
 doesn't match or if any required fields are missing.
 
 When possible we recommend using `structtype.Struct` instead of ``TypedDict`` for
-specifying schemas - :doc:`structs` are faster, more ergonomic, and support
+specifying schemas - :doc:`Structs <usage>` are faster, more ergonomic, and support
 additional features. Still, you may want to use a ``TypedDict`` if you're
 already using them elsewhere, or if you have downstream code that requires a
 ``dict`` instead of an object.
@@ -801,7 +785,7 @@ already using them elsewhere, or if you have downstream code that requires a
 ``dataclasses``
 ---------------
 
-`dataclasses` map to objects/maps in all protocols.
+`dataclasses` map to objects in JSON.
 
 During decoding, any extra fields are ignored. An error is raised if a field's
 type doesn't match or if any required fields are missing.
@@ -812,7 +796,7 @@ the object is decoded. Note that `"Init-only parameters"
 (i.e. ``InitVar`` fields) are _not_ supported.
 
 When possible we recommend using `structtype.Struct` instead of dataclasses for
-specifying schemas - :doc:`structs` are faster, more ergonomic, and support
+specifying schemas - :doc:`Structs <usage>` are faster, more ergonomic, and support
 additional features.
 
 .. code-block:: python
@@ -864,7 +848,7 @@ Other types that duck-type as ``dataclasses`` are also supported, such as
 ``attrs``
 ---------
 
-attrs_ types map to objects/maps in all protocols.
+attrs_ types map to objects in JSON.
 
 During encoding, all attributes without a leading underscore (``"_"``) are
 encoded.
@@ -882,7 +866,7 @@ attrs' `converters
 supported.
 
 When possible we recommend using `structtype.Struct` instead of attrs_ types for
-specifying schemas - :doc:`structs` are faster, more ergonomic, and support
+specifying schemas - :doc:`Structs <usage>` are faster, more ergonomic, and support
 additional features.
 
 .. code-block:: python
@@ -914,9 +898,9 @@ additional features.
 Structs are the preferred way of defining structured data types in ``structtype``.
 You can think of them as similar to dataclasses_/attrs_/pydantic_, but much
 faster to create/compare/encode/decode. For more information, see the
-:doc:`structs` page.
+:doc:`Structs <usage>` page.
 
-By default `structtype.Struct` types map to objects/maps in all protocols. During
+By default `structtype.Struct` types map to objects in JSON. During
 decoding, any unknown fields are ignored (this can be disabled, see
 :ref:`forbid-unknown-fields`), and any missing optional fields have their
 default values applied. An error is raised during decoding if the type doesn't
@@ -1004,7 +988,7 @@ message where a field is missing and a message where the field is explicitly
 
 .. code-block:: python
 
-    >>> from structtype import Struct, UnsetType, UNSET, json
+    >>> from structtype import Struct, UnsetType, UNSET
 
     >>> class Example(Struct):
     ...     x: int
@@ -1014,31 +998,28 @@ During encoding, any field containing ``UNSET`` is omitted from the message.
 
 .. code-block:: python
 
-    >>> json.encode(Example(1))  # y is UNSET
+    >>> Example(1).struct_dump_json()  # y is UNSET
     b'{"x":1}'
 
-    >>> json.encode(Example(1, UNSET))  # y is UNSET
-    b'{"x":1}'
-
-    >>> json.encode(Example(1, None))  # y is None
+    >>> Example(1, None).struct_dump_json()  # y is None
     b'{"x":1,"y":null}'
 
-    >>> json.encode(Example(1, 2))  # y is 2
+    >>> Example(1, 2).struct_dump_json()  # y is 2
     b'{"x":1,"y":2}'
 
 During decoding, if a field isn't explicitly set in the message, the default
 value of ``UNSET`` will be set instead. This lets downstream consumers
-determine whether a field was left unset, or explicitly set to ``None``
+determine whether a field was left unset, or explicitly set to ``None``:
 
 .. code-block:: python
 
-    >>> json.decode(b'{"x": 1}', type=Example)  # y defaults to UNSET
+    >>> Example.struct_validate_json(b'{"x": 1}')  # y defaults to UNSET
     Example(x=1, y=UNSET)
 
-    >>> json.decode(b'{"x": 1, "y": null}', type=Example)  # y is None
+    >>> Example.struct_validate_json(b'{"x": 1, "y": null}')  # y is None
     Example(x=1, y=None)
 
-    >>> json.decode(b'{"x": 1, "y": 2}', type=Example)  # y is 2
+    >>> Example.struct_validate_json(b'{"x": 1, "y": 2}')  # y is 2
     Example(x=1, y=2)
 
 ``UNSET`` fields are supported for `structtype.Struct`, `dataclasses`, and attrs_
@@ -1046,15 +1027,14 @@ types. It is an error to use `structtype.UNSET` or `structtype.UnsetType` anywhe
 other than a field for one of these types.
 
 Omission of ``UNSET`` fields applies to `struct_dump_json` and
-`struct_dump`. `dict()`
-always include every field, so ``UNSET`` values appear in their output
-unchanged.
+`struct_dump`. `dict()` always include every field, so ``UNSET`` values appear
+in their output unchanged.
 
 ``Enum`` / ``IntEnum`` / ``StrEnum``
 ------------------------------------
 
 Enum types (`enum.Enum`, `enum.IntEnum`, `enum.StrEnum`, ...) encode as their
-member *values* in all protocols.
+member *values* in JSON.
 
 Any enum whose *value* is a supported type may be encoded, but only enums
 composed of all string or all integer values may be decoded.
@@ -1455,10 +1435,10 @@ message).
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Raw, Struct
 
     >>> # Create a new `Raw` object wrapping a pre-encoded message
-    ... fragment = structtype.Raw(b'{"x": 1, "y": 2}')
+    ... fragment = Raw(b'{"x": 1, "y": 2}')
 
     >>> # Compose a larger message containing the pre-encoded fragment
     ... msg = {"a": 1, "b": fragment}
@@ -1481,7 +1461,7 @@ field (``point``) depends on the value of another (``dimensions``).
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Raw, Struct
 
     >>> from typing import Union
 
@@ -1499,7 +1479,7 @@ field (``point``) depends on the value of another (``dimensions``).
 
     >>> class Model(Struct):
     ...     dimensions: int
-    ...     point: structtype.Raw  # use structtype.Raw to delay decoding the point field
+    ...     point: Raw  # use structtype.Raw to delay decoding the point field
 
     >>> def decode_point(msg: bytes) -> Point1D | Point2D | Point3D:
     ...     """A function for efficiently decoding the `point` field"""
@@ -1521,7 +1501,7 @@ field (``point``) depends on the value of another (``dimensions``).
     ...
     ...     # Now that we know the type of `point`, we can finish decoding it.
     ...     # Note that `Raw` objects are buffer-like, and can be passed
-    ...     # directly to the `decode` method.
+    ...     # directly to ``struct_validate_json``.
     ...     return StructAdapter(point_type).struct_validate_json(model.point)
 
     >>> decode_point(b'{"dimensions": 2, "point": {"x": 1, "y": 2}}')
@@ -1535,7 +1515,7 @@ field (``point``) depends on the value of another (``dimensions``).
 -------
 
 When decoding a message with `Any` type (or no type specified), encoded types
-map to Python types in a protocol specific manner.
+map to Python types as follows.
 
 **JSON**
 

@@ -115,11 +115,16 @@ across all operations, while ``pydantic`` is 3–5x slower. The tagged union
 benchmark tells the same story: both libraries are essentially tied,
 with ``pydantic`` 5–14x behind across all measurement types.
 
+Why is it faster than pydantic? 
+
+``structtype`` is highly optimize in C. Pydantic core is in Rust but still slower than pure C.
+Also Pydantic has more features, but the cost performance.
+
 
 .. _struct-benchmark:
 
-Structs
--------
+Dataclass like libs
+-------------------
 
 Here we benchmark common `structtype.Struct` operations, comparing their
 performance against other similar libraries. The cases compared are:

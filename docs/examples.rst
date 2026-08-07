@@ -1,5 +1,10 @@
+Examples
+========
+
+Here we provide a few examples using ``structtype`` to accomplish various tasks.
+
 GeoJSON
-=======
+-------
 
 `GeoJSON <https://geojson.org>`__ is a popular format for encoding geographic
 data. Its specification_ describes nine different types a message may take
@@ -23,7 +28,7 @@ relevant docs for more information.
 The full example source can be found `here
 <https://github.com/tds333/structtype/tree/main/examples/geojson>`__.
 
-.. literalinclude:: ../../examples/geojson/structtype_geojson.py
+.. literalinclude:: ../examples/geojson/structtype_geojson.py
     :language: python
 
 
