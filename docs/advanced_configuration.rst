@@ -83,6 +83,35 @@ ABCs.
       :meth:`object.__init_subclass__` on a :class:`structtype.Struct` base class
       instead of additional custom metaclasses.
 
+Inspecting Configuration
+------------------------
+
+Every struct type and instance exposes its configuration through the read-only
+``__struct_config__`` attribute, which returns a :class:`structtype.StructConfig`
+object:
+
+.. code-block:: python
+
+    >>> from structtype import Struct
+
+    >>> class User(Struct, frozen=True, tag="user"):
+    ...     name: str
+    ...     groups: set[str] = set()
+    ...
+
+    >>> User.__struct_config__.frozen
+    True
+    >>> User.__struct_config__.tag
+    'user'
+    >>> User("alice").__struct_config__.tag
+    'user'
+
+The exposed attributes mirror the struct configuration parameters of the same
+name described in the :class:`structtype.Struct` docstring, with the exception
+of ``kw_only`` and ``rename``, which are consumed at class creation time and
+are not available on the object. See the :doc:`api` reference for the full
+list of attributes.
+
 
 .. _struct-gc:
 

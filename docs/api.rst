@@ -10,6 +10,81 @@ Structs
     :members: struct_dump_json, struct_validate_json, struct_dump, struct_validate,
               struct_validate_self
 
+    .. attribute:: __struct_fields__
+
+        :type: tuple[str, ...]
+
+        A tuple of the field names in declaration order. Available on both the
+        struct type and on instances.
+
+    .. attribute:: __struct_encode_fields__
+
+        :type: tuple[str, ...]
+
+        A tuple of the field names used for serialization, in declaration
+        order. These are the field names after applying any ``rename``
+        configuration. Available on both the struct type and on instances.
+
+    .. attribute:: __struct_defaults__
+
+        :type: tuple[Any, ...]
+
+        A tuple of the default values for each field, in declaration order.
+        Fields without a default use ``NODEFAULT``. Available on both the
+        struct type and on instances.
+
+    .. attribute:: __struct_config__
+
+        :type: StructConfig
+
+        The :class:`StructConfig` for this struct type. Available on both the
+        struct type and on instances.
+
+    .. attribute:: __match_args__
+
+        :type: tuple[str, ...]
+
+        A tuple of the field names used for positional pattern matching.
+        Available on the struct type.
+
+    .. attribute:: __signature__
+
+        :type: inspect.Signature
+
+        The computed ``__init__`` signature for the struct type. Available on
+        the struct type.
+
+    .. attribute:: __slots__
+
+        :type: tuple[str, ...]
+
+        The field names stored as instance slots. On the base ``Struct`` class
+        this is empty; subclasses get one slot per field.
+
+    .. method:: __iter__()
+
+        Iterate over the struct as ``(name, value)`` pairs in declaration
+        order. This enables ``dict(p)``, ``list(p)``, and ``iter(p)`` support.
+
+    .. method:: __copy__()
+
+        Return a shallow copy of the struct, enabling ``copy.copy(p)``.
+
+    .. method:: __replace__(**changes)
+
+        Create a new struct with the given fields replaced, enabling
+        ``copy.replace(p, ...)``.
+
+    .. method:: __reduce__()
+
+        Return state information for pickling, enabling ``pickle.dump`` and
+        ``copy.deepcopy`` support.
+
+    .. method:: __rich_repr__()
+
+        Return a list of ``(name, value)`` pairs used by IPython and Jupyter
+        for a structured display of the struct.
+
 .. autoclass:: StructMeta(name, bases, namespace, /, *, **struct_config)
 
 .. autofunction:: structtype.fields
@@ -25,8 +100,81 @@ Structs
 
 .. autoclass:: structtype.StructConfig
 
+    .. attribute:: frozen
+
+        :type: bool
+
+    .. attribute:: eq
+
+        :type: bool
+
+    .. attribute:: order
+
+        :type: bool
+
+    .. attribute:: repr_omit_defaults
+
+        :type: bool
+
+    .. attribute:: array_like
+
+        :type: bool
+
+    .. attribute:: gc
+
+        :type: bool
+
+    .. attribute:: weakref
+
+        :type: bool
+
+    .. attribute:: dict
+
+        :type: bool
+
+    .. attribute:: cache_hash
+
+        :type: bool
+
+    .. attribute:: omit_defaults
+
+        :type: bool
+
+    .. attribute:: forbid_unknown_fields
+
+        :type: bool
+
+    .. attribute:: validate_on_init
+
+        :type: bool
+
+    .. attribute:: tag
+
+        :type: str | int | None
+
+    .. attribute:: tag_field
+
+        :type: str | None
+
+    .. note::
+
+        The ``kw_only`` and ``rename`` struct configuration options are
+        consumed at class creation time and are not exposed as attributes on
+        :class:`StructConfig`. See the :class:`Struct` docstring's
+        "Configuration" section for details.
+
 .. autodata:: NODEFAULT
    :no-value:
+
+.. data:: ALL_BUILTIN_TYPES
+
+   :type: tuple[type, ...]
+
+   A tuple of all builtin types that ``struct_dump`` passes through
+   unchanged. Use this as a shortcut for the ``builtin_types`` argument::
+
+       >>> from structtype import ALL_BUILTIN_TYPES
+       >>> obj.struct_dump(builtin_types=ALL_BUILTIN_TYPES)
 
 Field
 -----
