@@ -170,8 +170,8 @@ Structs
 
    :type: tuple[type, ...]
 
-   A tuple of all builtin types that ``struct_dump`` passes through
-   unchanged. Use this as a shortcut for the ``builtin_types`` argument::
+   A tuple of all builtin types. Can be used for ``struct_dump`` argument ``builtin_types``
+   to pass through all builtin types unchanged. ::
 
        >>> from structtype import ALL_BUILTIN_TYPES
        >>> obj.struct_dump(builtin_types=ALL_BUILTIN_TYPES)
