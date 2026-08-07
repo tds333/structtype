@@ -13,6 +13,10 @@ docs: ## build docs
 	rm -rf .doctrees site
 	uv run --group docs sphinx-build -d .doctrees -b html docs site --fail-on-warning
 
+.PHONY: docs-serve
+docs-serve: ## Open built docs in browser
+	uv run python -m webbrowser site/index.html
+
 .PHONY: wheels
 wheels: ## build wheels
 	uvx --from cibuildwheel==4.1.1 cibuildwheel

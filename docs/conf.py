@@ -77,6 +77,8 @@ html_theme_options = {
     ],
 }
 
+exclude_patterns = ["superpowers/**"]
+
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
