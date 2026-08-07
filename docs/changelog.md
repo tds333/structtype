@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remove `struct_force_setattr`. To set fields on a frozen struct inside
+  `__post_init__`, use `object.__setattr__(self, ...)` (requires Python 3.13+).
 - Add `tuple` with all builtin types usable in `struct_dump`.
 - Improved validation error messages.
 - Fix possible memory leak.

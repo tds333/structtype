@@ -1682,20 +1682,53 @@ class TestSetAttr:
             t.x = [1]
             assert gc.is_tracked(t)
 
-    def test_force_setattr(self):
+    def test_force_setattr_removed(self):
         class Ex(Struct, frozen=True):
             x: Any
 
         obj = Ex(1)
 
-        res = obj.struct_force_setattr("x", 2)
-        assert res is None
-        assert obj.x == 2
+        # struct_force_setattr was removed; plain setattr outside __post_init__
+        # still raises for frozen structs
+        assert not hasattr(obj, "struct_force_setattr")
 
         with pytest.raises(AttributeError):
-            obj.struct_force_setattr("oops", 3)
+            obj.x = 2
 
-        pass  # force_setattr on non-struct no longer applicable
+    def test_frozen_post_init_plain_setattr_blocked(self):
+        class Ex(Struct, frozen=True):
+            x: int
+            y: int = 0
+
+            def __post_init__(self):
+                self.y = self.x * 2
+
+        with pytest.raises(AttributeError):
+            Ex(2)
+
+        with pytest.raises(AttributeError):
+            Ex.struct_validate_json(b'{"x": 3}')
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 13),
+        reason="object.__setattr__ on struct instances requires Python 3.13+",
+    )
+    def test_frozen_post_init_object_setattr(self):
+        class Ex(Struct, frozen=True):
+            x: int
+            y: int = 0
+
+            def __post_init__(self):
+                object.__setattr__(self, "y", self.x * 2)
+
+        obj = Ex(2)
+        assert obj.y == 4
+
+        obj2 = Ex.struct_validate_json(b'{"x": 3}')
+        assert obj2.y == 6
+
+        obj3 = Ex.struct_validate({"x": 4})
+        assert obj3.y == 8
 
 
 class TestOrderAndEq:

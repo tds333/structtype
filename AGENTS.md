@@ -49,7 +49,6 @@ All commands go through `make`.
 
 - `obj.struct_dump_json(*, enc_hook=None, decimal_format=None, uuid_format=None, order=None)` — serialize to JSON bytes
 - `obj.struct_dump()` — convert to built-in Python types (uses `encode_name` for keys)
-- `obj.struct_force_setattr(name, value)` — set attr on frozen struct
 - `obj.struct_validate_self()` — validate field values against types + constraints
 - `cls.struct_validate_json(buf, *, strict=True, dec_hook=None)` — deserialize from JSON
 - `cls.struct_validate(obj, *, strict=True, from_attributes=False, dec_hook=None)` — convert built-in types to struct

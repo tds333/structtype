@@ -41,7 +41,7 @@ def test_valid_struct_passes():
 
 def test_type_mismatch_raises():
     p = Point(1, 2)
-    Struct.struct_force_setattr(p, "x", "hello")
+    p.x = "hello"
     with pytest.raises(ValidationError, match="Expected `int`, got `str`"):
         p.struct_validate_self()
 
@@ -104,7 +104,7 @@ def test_valid_nested():
 
 def test_invalid_nested():
     p = Nested(inner=Point(1, 2))
-    Struct.struct_force_setattr(p.inner, "x", "bad")
+    p.inner.x = "bad"
     with pytest.raises(ValidationError, match="Expected `int`, got `str`"):
         p.struct_validate_self()
 
@@ -124,7 +124,7 @@ def test_no_mutation():
 
 def test_strict_rejects_mismatch():
     p = Point(1, 2)
-    Struct.struct_force_setattr(p, "x", "123")
+    p.x = "123"
     with pytest.raises(ValidationError):
         p.struct_validate_self()
 
@@ -149,15 +149,14 @@ def test_bad_kwarg_raises():
         p.struct_validate_self(bad=True)
 
 
-# ── frozen struct with force_setattr ──
+# ── frozen struct ──
 
 
-def test_frozen_with_force_setattr():
+def test_frozen_with_bad_value_raises():
     class Frozen(Struct, frozen=True):
         x: int
 
-    f = Frozen(1)
-    Struct.struct_force_setattr(f, "x", "bad")
+    f = Frozen("bad")
     with pytest.raises(ValidationError):
         f.struct_validate_self()
 

@@ -168,6 +168,42 @@ In these cases any `TypeError` or `ValueError` exceptions raised by this method
 will be considered "user facing" and converted into a `structtype.ValidationError`
 with additional context. All other exceptions will be raised directly.
 
+For :ref:`frozen <struct-frozen>` structs, fields may not be assigned directly,
+even inside ``__post_init__``. To derive a field value from the constructor
+arguments before the instance becomes immutable, use `object.__setattr__`:
+
+.. code-block:: python
+
+    >>> from structtype import Struct
+
+    >>> class Circle(Struct, frozen=True):
+    ...     radius: float
+    ...     area: float = 0.0
+    ...
+    ...     def __post_init__(self):
+    ...         object.__setattr__(self, "area", 3.14159 * self.radius ** 2)
+
+    >>> Circle(2.0)
+    Circle(radius=2.0, area=12.56636)
+
+    >>> c = Circle(2.0)
+    >>> c.radius = 5.0  # frozen structs are immutable
+    Traceback (most recent call last):
+        ...
+    AttributeError: immutable type: 'Circle'
+
+Note that ``__post_init__`` can't be used to *supply* a required field — a
+field without a default is rejected by the generated ``__init__`` before
+``__post_init__`` runs. Fields that are already set (required or optional) may
+still be overwritten with `object.__setattr__`.
+
+.. note::
+
+    Calling `object.__setattr__` on a ``Struct`` instance requires Python 3.13+;
+    on Python 3.10-3.12 it raises a `TypeError`. If you need to derive
+    frozen-struct fields from constructor arguments on those versions, compute
+    the values in a helper function and pass them to the constructor instead.
+
 .. code-block:: python
 
     >>> from structtype import Struct, Field
@@ -440,6 +476,8 @@ equal to is itself.
     >>> p == p  # identity comparison only
     True
 
+
+.. _struct-frozen:
 
 Frozen Instances
 ----------------

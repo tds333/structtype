@@ -8097,25 +8097,9 @@ cleanup:
     Py_LeaveRecursiveCall();
     if (!ok) {
         AssocList_Free(out);
-    }
-    return out;
-}
-static PyObject*
-struct_force_setattr(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
-{
-    if (!check_positional_nargs(nargs, 3, 3)) return NULL;
-    PyObject *obj = args[0];
-    PyObject *name = args[1];
-    PyObject *value = args[2];
-    if (!ms_is_struct_inst(obj)) {
-        PyErr_SetString(PyExc_TypeError, "`struct` must be a `structtype.Struct`");
-        return NULL;
-    }
-    if (PyObject_GenericSetAttr(obj, name, value) < 0) {
-        return NULL;
-    }
-    Py_RETURN_NONE;
-}
+     }
+     return out;
+ }
 
 static PyObject *
 Struct_reduce(PyObject *self, PyObject *args)
@@ -8239,7 +8223,6 @@ Struct_iter(PyObject *self) {
 /* Forward declarations for struct methods */
 static PyObject *Struct_dump_json(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_validate_json(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
-static PyObject *Struct_force_setattr_wrapper(PyObject *, PyObject *const *, Py_ssize_t);
 static PyObject *Struct_dump(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_validate(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_check(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
@@ -8351,27 +8334,6 @@ PyDoc_STRVAR(Struct_validate_json__doc__,
 "    A new struct instance.\n"
 );
 
-PyDoc_STRVAR(Struct_force_setattr__doc__,
-"struct_force_setattr(self, name: str, value: Any)\n"
-"--\n"
-"\n"
-"Set an attribute on a struct, even if the struct is frozen.\n"
-"\n"
-"The main use case for this is modifying a frozen struct in a\n"
-"``__post_init__`` method before returning.\n"
-"\n"
-".. warning::\n"
-"    This function violates the guarantees of a frozen struct, and is\n"
-"    potentially unsafe. Only use it if you know what you're doing!\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"name : str\n"
-"    The attribute name.\n"
-"value : Any\n"
-"    The attribute value.\n"
-);
-
 PyDoc_STRVAR(Struct_dump__doc__,
 "struct_dump(self, *, enc_hook=None, order=None, str_keys=False, builtin_types=None)\n"
 "--\n"
@@ -8470,7 +8432,6 @@ static PyMethodDef Struct_methods[] = {
     {"__rich_repr__", Struct_rich_repr, METH_NOARGS, Struct_rich_repr__doc__},
     {"struct_dump_json", (PyCFunction) Struct_dump_json, METH_FASTCALL | METH_KEYWORDS, Struct_dump_json__doc__},
     {"struct_validate_json", (PyCFunction) Struct_validate_json, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate_json__doc__},
-    {"struct_force_setattr", (PyCFunction) Struct_force_setattr_wrapper, METH_FASTCALL, Struct_force_setattr__doc__},
     {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, Struct_dump__doc__},
     {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate__doc__},
     {"struct_validate_self", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, Struct_validate_self__doc__},
@@ -18838,18 +18799,6 @@ Struct_validate_json(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyO
     Py_DECREF(new_kwnames);
     PyMem_Free(new_args);
     return result;
-}
-static PyObject *
-Struct_force_setattr_wrapper(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
-{
-    PyObject *mod = PyState_FindModule(&structtypemodule);
-    if (mod == NULL) return NULL;
-    if (nargs != 2) {
-        return PyErr_Format(PyExc_TypeError,
-            "struct_force_setattr() takes exactly 2 positional arguments (%zd given)", nargs);
-    }
-    PyObject *new_args[3] = {self, args[0], args[1]};
-    return struct_force_setattr(mod, new_args, 3);
 }
 
 static PyObject *
