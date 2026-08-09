@@ -2617,16 +2617,6 @@ AssocList_Free(AssocList *list) {
     PyMem_Free(list);
 }
 
-static void
-AssocList_AppendCStr(AssocList *list, const char *key, PyObject *val) {
-    list->items[list->size].key = key;
-    list->items[list->size].key_size = strlen(key);
-    list->items[list->size].key_obj = NULL;
-    Py_INCREF(val);
-    list->items[list->size].val = val;
-    list->size++;
-}
-
 static int
 AssocList_Append(AssocList *list, PyObject *key, PyObject *val) {
     Py_ssize_t key_size;
