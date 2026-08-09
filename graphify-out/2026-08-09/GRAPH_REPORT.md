@@ -1,35 +1,35 @@
-# Graph Report - structtype  (2026-08-09)
+# Graph Report - structtype  (2026-08-04)
 
 ## Corpus Check
-- 43 files · ~137,990 words
+- 43 files · ~136,589 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1779 nodes · 4868 edges · 106 communities (72 shown, 34 thin omitted)
-- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 166 edges (avg confidence: 0.74)
+- 1764 nodes · 4857 edges · 91 communities (60 shown, 31 thin omitted)
+- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 165 edges (avg confidence: 0.74)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `75662068`
+- Built from commit: `43ab81ac`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - _core.c
 - test_schema.py
-- TypeNodeCollectState
+- structtype_get_global_state
 - TypeNode
 - EncoderState
 - test_inspect.py
 - _inspect.py
-- ryu.h
+- dump_obj
 - JSONDecoderState
 - PathNode
 - parametrize
 - Field
 - StructspecState
 - test_struct_meta.py
-- unicode_str_and_size
+- Py_ssize_t
 - test_json.py
 - visitproc
 - test_struct.py
@@ -46,21 +46,21 @@
 - TestDatetime
 - TestEncoderMisc
 - multi_type_info
-- PyObject
+- json_decode_struct_array_inner
 - TestStructParameterOrdering
 - bench_libs.py
 - TestGetClassAnnotations
 - _utils.py
 - temp_module
 - replace
-- _Lookup_OnMissing
+- validate_lookup_tag
 - test_raw.py
 - TestRaw
 - bench_gc.py
 - atof.h
 - Rand
 - TestBoolAndNone
-- TestSetAttr
+- TestHash
 - TestStructGC
 - structtype — AGENTS.md
 - TestStrings
@@ -91,7 +91,7 @@
 - EnumType
 - TestSignature
 - graphify.js
-- Struct_get_index
+- Struct_hash
 - BoolType
 - .__init__
 - .struct_dump_json
@@ -99,31 +99,16 @@
 - .struct_dump
 - __dir__
 - .includes_none
-- MS_INLINE
-- dump_obj
+- test_structadapter_pydantic
+- test_decode_pydantic_direct
 - test_python_validate_pydantic
 - structtype
-- json_encode_dataclass
-- PyTypeObject
-- structtype_get_global_state
-- Encoder
-- ms_passes_big_int_constraints
-- typenode_collect_validate_literals
-- structtype_get_state
-- JSONDecoder_decode
-- typenode_collect_constraints
-- StructMetaObject
-- TestStrConstraints
-- opencode.json
-- .struct_validate_json
-- test_dump_builtin_types
-- test_pydantic_with_default
 
 ## God Nodes (most connected - your core abstractions)
 1. `type_info()` - 56 edges
 2. `_SchemaGenerator` - 37 edges
-3. `StructAdapter` - 33 edges
-4. `ms_validation_error()` - 33 edges
+3. `ms_validation_error()` - 33 edges
+4. `StructAdapter` - 32 edges
 5. `IntType` - 32 edges
 6. `TestDict` - 31 edges
 7. `structtype_get_global_state()` - 29 edges
@@ -132,8 +117,6 @@
 10. `validate_obj()` - 28 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `test_dump_adapter_builtin_types()` --calls--> `StructAdapter`  [INFERRED]
-  tests/test_adapter.py → src/structtype/_adapter.py
 - `test_dump_json()` --calls--> `StructAdapter`  [INFERRED]
   tests/test_adapter.py → src/structtype/_adapter.py
 - `test_dump_json_tagged()` --calls--> `StructAdapter`  [INFERRED]
@@ -142,31 +125,33 @@
   tests/test_adapter.py → src/structtype/_adapter.py
 - `test_dump_python_struct()` --calls--> `StructAdapter`  [INFERRED]
   tests/test_adapter.py → src/structtype/_adapter.py
+- `test_roundtrip_json()` --calls--> `StructAdapter`  [INFERRED]
+  tests/test_adapter.py → src/structtype/_adapter.py
 
 ## Import Cycles
 - 3-file cycle: `src/structtype/__init__.py -> src/structtype/_json_schema.py -> src/structtype/_inspect.py -> src/structtype/__init__.py`
 
-## Communities (106 total, 34 thin omitted)
+## Communities (91 total, 31 thin omitted)
 
 ### Community 0 - "_core.c"
-Cohesion: 0.05
-Nodes (61): Raw, datetime_round_up_micros(), days_in_month(), ensure_is_bool(), ensure_is_finite_numeric(), ensure_is_nonnegative_integer(), ensure_is_string(), _err_float_constraint() (+53 more)
+Cohesion: 0.06
+Nodes (90): Encoder, PyObject, check_positional_nargs(), clear_slots(), _constr_as_py_ssize_t(), encode_common(), Encoder_clear(), Encoder_dealloc() (+82 more)
 
 ### Community 1 - "test_schema.py"
 Cohesion: 0.03
 Nodes (34): parametrize, py315_or_later_only, test_array_metadata(), test_binary(), test_binary_metadata(), test_custom(), test_custom_schema_hook(), test_dataclass_or_attrs() (+26 more)
 
-### Community 2 - "TypeNodeCollectState"
-Cohesion: 0.21
-Nodes (18): is_dataclass_or_attrs_class(), is_namedtuple_class(), is_typeddict_class(), normalize_types_generic_alias(), typenode_collect_array(), typenode_collect_check_invariants(), typenode_collect_clear_state(), typenode_collect_custom() (+10 more)
+### Community 2 - "structtype_get_global_state"
+Cohesion: 0.05
+Nodes (74): Constraints, IntLookupEntry, IntLookupHashmap, JSONDecoder, Py_buffer, PyMODINIT_FUNC, Raw, _constr_as_f64() (+66 more)
 
 ### Community 3 - "TypeNode"
-Cohesion: 0.16
-Nodes (41): DataclassInfo_lookup_key(), ms_validation_error(), _PyFrozenDict_NewSteal(), TypeNode_get_array(), TypeNode_get_dataclass_info(), TypeNode_get_namedtuple_info(), TypeNode_get_struct_info(), typenode_simple_repr() (+33 more)
+Cohesion: 0.10
+Nodes (68): MS_INLINE, _err_py_ssize_t_constraint(), _ms_check_float_constraints(), _ms_check_str_constraints(), _ms_passes_array_constraints(), ms_passes_bytes_constraints(), ms_passes_float_constraints_inline(), _ms_passes_map_constraints() (+60 more)
 
 ### Community 4 - "EncoderState"
-Cohesion: 0.17
-Nodes (43): EncoderState, MS_NOINLINE, json_encode(), json_encode_and_free_assoclist(), json_encode_bin(), json_encode_bytearray(), json_encode_bytes(), json_encode_cstr() (+35 more)
+Cohesion: 0.10
+Nodes (67): AssocItem, AssocList, DataclassIter, EncoderState, MS_NOINLINE, _AssocItem_lt(), AssocList_Append(), AssocList_AppendCStr() (+59 more)
 
 ### Community 5 - "test_inspect.py"
 Cohesion: 0.09
@@ -176,17 +161,17 @@ Nodes (63): py312_plus, AnyType, FieldNode, IntType, ListType, A type correspond
 Cohesion: 0.09
 Nodes (61): ByteArrayType, BytesType, CollectionType, CustomType, DataclassType, DateTimeType, DateType, DecimalType (+53 more)
 
-### Community 7 - "ryu.h"
-Cohesion: 0.12
-Nodes (31): floating_decimal_64, ms_encode_date(), ms_encode_datetime(), ms_encode_time_parts(), ms_encode_timedelta(), MS_INLINE, write_u32_1_to_8_digits(), write_u32_2_digits() (+23 more)
+### Community 7 - "dump_obj"
+Cohesion: 0.08
+Nodes (53): DumpState, floating_decimal_64, ascii_get_buffer(), dump_binary(), dump_date(), dump_datetime(), dump_decimal(), dump_dict() (+45 more)
 
 ### Community 8 - "JSONDecoderState"
-Cohesion: 0.12
-Nodes (58): JSONDecoderState, char_is_special(), char_is_special_or_nonascii(), json_decode(), json_decode_array(), json_decode_cint(), json_decode_cstr(), json_decode_dataclass() (+50 more)
+Cohesion: 0.13
+Nodes (55): JSONDecoderState, char_is_special(), char_is_special_or_nonascii(), json_decode(), json_decode_array(), json_decode_cint(), json_decode_cstr(), json_decode_dataclass() (+47 more)
 
 ### Community 9 - "PathNode"
 Cohesion: 0.11
-Nodes (52): PathNode, datetime_from_epoch(), double_as_int64(), json_decode_binary(), json_decode_dict_key_fallback(), json_decode_string(), maybe_parse_number(), ms_decode_bigint() (+44 more)
+Nodes (51): PathNode, DataclassInfo_post_decode(), datetime_from_epoch(), double_as_int64(), _err_int_constraint(), json_float_hook(), ms_decode_big_pyint(), ms_decode_bigint() (+43 more)
 
 ### Community 10 - "parametrize"
 Cohesion: 0.06
@@ -197,24 +182,24 @@ Cohesion: 0.09
 Nodes (10): Field, Field_clear(), Field_dealloc(), Field_richcompare(), parametrize, Constraint validity is applied in two places: - Type checks on constraint…, TestArrayConstraints, TestBytesConstraints (+2 more)
 
 ### Community 12 - "StructspecState"
-Cohesion: 0.17
-Nodes (23): dict_discard(), extract_field_from_annotated(), json_str_requires_escaping(), ms_encode_base64_size(), ms_encode_time(), ms_encode_uuid(), ms_uuid_to_16_bytes(), simple_qualname() (+15 more)
+Cohesion: 0.08
+Nodes (42): PyTypeObject, dict_discard(), extract_field_from_annotated(), Factory_New(), json_str_requires_escaping(), ms_encode_base64_size(), ms_encode_err_type_unsupported(), ms_encode_uuid() (+34 more)
 
 ### Community 13 - "test_struct_meta.py"
 Cohesion: 0.06
 Nodes (23): Tests for the exposed StructMeta metaclass., Test that StructMeta can be inherited in Python code., Test that StructMeta is properly exposed., Test if structs created by StructMeta subclasses support various function…, Test that StructMeta can be used directly as a metaclass., Test multi-level inheritance of StructMeta subclasses., Test compatibility of structs created by StructMeta subclasses with encoders., Test that StructMeta properly handles struct options. (+15 more)
 
-### Community 14 - "unicode_str_and_size"
-Cohesion: 0.24
-Nodes (11): murmur2(), StrLookup_clear(), StrLookup_dealloc(), _StrLookup_lookup(), StrLookup_Set(), StrLookup_traverse(), unaligned_load(), unicode_str_and_size() (+3 more)
+### Community 14 - "Py_ssize_t"
+Cohesion: 0.14
+Nodes (32): Py_ssize_t, DataclassInfo_lookup_key(), datetime_round_up_micros(), days_in_month(), is_leap_year(), json_decode_binary(), json_decode_dict_key_fallback(), json_decode_string() (+24 more)
 
 ### Community 15 - "test_json.py"
 Cohesion: 0.06
 Nodes (12): FruitInt, FruitStr, # TODO: remove when 3.10 support is dropped:, Most tests are in `test_common`, this just tests some JSON peculiarities, Most tests are in `test_common`, this just tests some JSON peculiarities, Most tests are in `test_common`, this just tests some JSON peculiarities, TestDataclass, TestDecoderMisc (+4 more)
 
 ### Community 16 - "visitproc"
-Cohesion: 0.10
-Nodes (27): DataclassInfo, Factory, LiteralInfo, NamedTupleInfo, DataclassInfo_clear(), DataclassInfo_dealloc(), DataclassInfo_traverse(), Factory_clear() (+19 more)
+Cohesion: 0.09
+Nodes (31): DataclassInfo, Factory, LiteralInfo, NamedTupleInfo, DataclassInfo_clear(), DataclassInfo_dealloc(), DataclassInfo_traverse(), Factory_clear() (+23 more)
 
 ### Community 17 - "test_struct.py"
 Cohesion: 0.07
@@ -237,16 +222,16 @@ Cohesion: 0.11
 Nodes (19): The type of `UNSET`. See Also -------- UNSET, UnsetType, Create a ``str`` subclass wrapper for validating a type during structtype…, StrAdapter, _build_name_map(), _collect_component_types(), _get_class_name(), _get_doc() (+11 more)
 
 ### Community 23 - "test_constraints.py"
-Cohesion: 0.12
-Nodes (8): assert_eq(), assert_ne(), _JsonProto, proto(), fixture, TestIntConstraints, TestMapConstraints, TestUnionConstraints
+Cohesion: 0.09
+Nodes (9): assert_eq(), assert_ne(), _JsonProto, proto(), fixture, TestIntConstraints, TestMapConstraints, TestStrConstraints (+1 more)
 
 ### Community 24 - "test_pydantic.py"
-Cohesion: 0.11
-Nodes (23): BaseModel, Container, Point, Struct, StructAdapter works with pydantic types., Full JSON roundtrip preserves pydantic data., Nested pydantic field in a struct — encoded via structtype encoder., Direct pydantic encode via StructAdapter. (+15 more)
+Cohesion: 0.13
+Nodes (21): BaseModel, Container, Point, Struct, Full JSON roundtrip preserves pydantic data., Nested pydantic field in a struct — encoded via structtype encoder., Direct pydantic encode via StructAdapter., Nested pydantic field decoded via structtype validator. (+13 more)
 
 ### Community 26 - "StructAdapter"
-Cohesion: 0.12
-Nodes (17): Adapter for validating and serializing types without subclassing ``Struct``.…, StructAdapter, test_dump_adapter_builtin_types(), test_dump_json(), test_dump_json_tagged(), test_dump_python_non_struct(), test_dump_python_struct(), test_json_schema_constrained() (+9 more)
+Cohesion: 0.15
+Nodes (17): Validate JSON bytes and decode into the adapter's type. Parameters ----------…, Adapter for validating and serializing types without subclassing ``Struct``.…, StructAdapter, test_dump_json(), test_dump_json_tagged(), test_dump_python_non_struct(), test_dump_python_struct(), test_json_schema_constrained() (+9 more)
 
 ### Community 27 - "TestStruct"
 Cohesion: 0.10
@@ -264,9 +249,9 @@ Nodes (3): emscripten_stack_limited, Node, TestEncoderMisc
 Cohesion: 0.11
 Nodes (13): FieldInfo, fields(), _merge_json(), multi_type_info(), _origin_args_metadata(), Any, Struct, A record describing a field in a struct. (+5 more)
 
-### Community 31 - "PyObject"
-Cohesion: 0.15
-Nodes (37): Py_ssize_t, PyObject, _constr_as_py_ssize_t(), DataclassInfo_post_decode(), encode_common(), Factory_Call(), fast_long_extract_parts(), find_keyword() (+29 more)
+### Community 31 - "json_decode_struct_array_inner"
+Cohesion: 0.22
+Nodes (19): Factory_Call(), get_default(), json_decode_struct_array_inner(), ms_error_unknown_field(), ms_missing_required_field(), Struct_alloc(), Struct_copy(), Struct_decode_post_init() (+11 more)
 
 ### Community 33 - "bench_libs.py"
 Cohesion: 0.12
@@ -281,12 +266,12 @@ Cohesion: 0.14
 Nodes (7): test_component_names_collide(), Annotations that start with `ClassVar`/`typing.ClassVar` but don't end there…, test_struct_defaults_from_field_annotated(), TestClassVar, parametrize, Mutually recursive struct types defined inside functions don't work (and…, temp_module()
 
 ### Community 37 - "replace"
-Cohesion: 0.23
+Cohesion: 0.25
 Nodes (5): copy_replace(), Point, fixture, replace(), TestReplace
 
-### Community 38 - "_Lookup_OnMissing"
-Cohesion: 0.30
-Nodes (12): IntLookup, Lookup, IntLookup_GetInt64(), IntLookup_GetInt64OrError(), IntLookup_GetPyIntOrError(), IntLookup_GetUInt64(), IntLookup_GetUInt64OrError(), _Lookup_OnMissing() (+4 more)
+### Community 38 - "validate_lookup_tag"
+Cohesion: 0.26
+Nodes (14): IntLookup, Lookup, fast_long_extract_parts(), IntLookup_clear(), IntLookup_dealloc(), IntLookup_GetInt64(), IntLookup_GetInt64OrError(), IntLookup_GetPyIntOrError() (+6 more)
 
 ### Community 39 - "test_raw.py"
 Cohesion: 0.14
@@ -304,9 +289,13 @@ Nodes (11): ms_hpd, ms_uint128, eisel_lemire(), ms_clzll(), ms_hpd_lshift_num_ne
 Cohesion: 0.17
 Nodes (6): package_dir(), fixture, Rand, Random source, pulled out into fixture with repr so the seed is displayed on…, str(n) -> random string of length `n`. str(n, m) -> random string between…, random bytes of length `n`
 
-### Community 45 - "TestSetAttr"
-Cohesion: 0.13
-Nodes (4): FrozenPoint, skipif, TestHash, TestSetAttr
+### Community 45 - "TestHash"
+Cohesion: 0.18
+Nodes (3): FrozenPoint, TestHash, TestSetAttr
+
+### Community 46 - "TestStructGC"
+Cohesion: 0.17
+Nodes (3): skipif, Copying doesn't go through the struct constructor, TestStructGC
 
 ### Community 47 - "structtype — AGENTS.md"
 Cohesion: 0.18
@@ -357,92 +346,40 @@ Cohesion: 0.70
 Nodes (4): bench(), format_table(), main(), print_header()
 
 ### Community 71 - "Changelog"
-Cohesion: 0.33
-Nodes (5): 0.1.0 (2026-07-26), 0.2.0 (2026-07-27), 0.3.0 (2026-08-02), 0.4.0 (Unreleased), Changelog
+Cohesion: 0.40
+Nodes (4): 0.1.0 (2026-07-26), 0.2.0 (2026-07-27), 0.3.0 (2026-08-02), Changelog
 
 ### Community 73 - "EnumType"
 Cohesion: 0.50
 Nodes (4): EnumType, A type corresponding to an `enum.Enum` type. Parameters ---------- cls: type…, test_enum(), test_int_enum()
 
-### Community 76 - "Struct_get_index"
-Cohesion: 0.22
-Nodes (9): Py_hash_t, Field_hash(), is_default(), Struct_get_index(), Struct_hash(), Struct_iter(), Struct_reduce(), Struct_rich_repr() (+1 more)
+### Community 76 - "Struct_hash"
+Cohesion: 0.67
+Nodes (3): Py_hash_t, Field_hash(), Struct_hash()
 
 ### Community 78 - "BoolType"
 Cohesion: 0.67
 Nodes (3): BoolType, A type corresponding to `bool`., test_bool()
 
-### Community 85 - "MS_INLINE"
-Cohesion: 0.13
-Nodes (31): MS_INLINE, _err_py_ssize_t_constraint(), _ms_check_float_constraints(), _ms_check_str_constraints(), ms_get_annotate_from_class_namespace(), _ms_passes_array_constraints(), ms_passes_bytes_constraints(), ms_passes_float_constraints_inline() (+23 more)
-
-### Community 86 - "dump_obj"
-Cohesion: 0.20
-Nodes (21): DumpState, ascii_get_buffer(), dump_binary(), dump_date(), dump_datetime(), dump_decimal(), dump_dict(), dump_enum() (+13 more)
-
-### Community 91 - "json_encode_dataclass"
-Cohesion: 0.23
-Nodes (20): AssocItem, AssocList, DataclassIter, _AssocItem_lt(), AssocList_Append(), AssocList_AppendCStr(), AssocList_Free(), AssocList_FromDataclass() (+12 more)
-
-### Community 92 - "PyTypeObject"
-Cohesion: 0.17
-Nodes (16): PyTypeObject, clear_slots(), Factory_New(), Lookup_union_contains_type(), ms_encode_err_type_unsupported(), ms_is_struct_inst(), ms_is_struct_meta(), _ms_is_struct_meta_scan() (+8 more)
-
-### Community 93 - "structtype_get_global_state"
-Cohesion: 0.33
-Nodes (15): DataclassInfo_Convert(), get_structtype_cache(), JSONDecoder_init(), ms_is_struct_cls(), NamedTupleInfo_Convert(), Struct_validate(), StructInfo_Convert(), StructInfo_Convert_lock_held() (+7 more)
-
-### Community 94 - "Encoder"
-Cohesion: 0.23
-Nodes (12): Encoder, check_positional_nargs(), Encoder_clear(), Encoder_dealloc(), Encoder_decimal_format(), encoder_encode_common(), encoder_encode_into_common(), Encoder_order() (+4 more)
-
-### Community 95 - "ms_passes_big_int_constraints"
-Cohesion: 0.32
-Nodes (12): _err_int_constraint(), ms_decode_big_pyint(), ms_decode_constr_int(), ms_decode_constr_uint(), ms_decode_int(), ms_decode_pyint(), ms_decode_uint(), ms_passes_big_int_constraints() (+4 more)
-
-### Community 96 - "typenode_collect_validate_literals"
-Cohesion: 0.22
-Nodes (11): IntLookupEntry, IntLookupHashmap, IntLookup_New(), _IntLookupHashmap_lookup(), _IntLookupHashmap_Set(), PyDict_GetItemRef(), StrLookup_New(), typenode_collect_literal() (+3 more)
-
-### Community 97 - "structtype_get_state"
-Cohesion: 0.20
-Nodes (11): PyMODINIT_FUNC, Encoder_init(), ms_process_builtin_types(), parse_order_arg(), PyInit__core(), Struct_dump(), structtype_clear(), structtype_dump() (+3 more)
-
-### Community 98 - "JSONDecoder_decode"
-Cohesion: 0.24
-Nodes (10): JSONDecoder, Py_buffer, json_has_trailing_characters(), JSONDecoder_clear(), JSONDecoder_dealloc(), JSONDecoder_decode(), JSONDecoder_repr(), ms_get_buffer() (+2 more)
-
-### Community 99 - "typenode_collect_constraints"
-Cohesion: 0.32
-Nodes (8): Constraints, _constr_as_f64(), _constr_as_i64(), constraints_is_empty(), constraints_update(), err_invalid_constraint(), typenode_collect_constraints(), typenode_origin_args_metadata()
-
-### Community 100 - "StructMetaObject"
-Cohesion: 0.36
-Nodes (8): StructConfig_New(), StructMeta_clear(), StructMeta_config(), StructMeta_dealloc(), StructMeta_signature(), StructMeta_traverse(), StructMixin_config(), StructMetaObject
-
-### Community 102 - "opencode.json"
-Cohesion: 0.50
-Nodes (3): plugin, $schema, .opencode/plugins/graphify.js
-
 ## Knowledge Gaps
-- **50 isolated node(s):** `$schema`, `.opencode/plugins/graphify.js`, `Point`, `PointGCFalse`, `Item_st` (+45 more)
+- **47 isolated node(s):** `Point`, `PointGCFalse`, `Item_st`, `Order_st`, `Item_ms` (+42 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **34 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **31 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `extract_field_from_annotated()` connect `StructspecState` to `_core.c`, `Field`, `PyObject`?**
-  _High betweenness centrality (0.068) - this node is a cross-community bridge._
-- **Why does `Field_repr()` connect `strbuilder_build` to `_core.c`, `Field`, `PyObject`?**
-  _High betweenness centrality (0.065) - this node is a cross-community bridge._
-- **Why does `constraints_update()` connect `typenode_collect_constraints` to `_core.c`, `Field`, `PyObject`?**
-  _High betweenness centrality (0.065) - this node is a cross-community bridge._
+- **Why does `Field_repr()` connect `strbuilder_build` to `_core.c`, `Field`?**
+  _High betweenness centrality (0.071) - this node is a cross-community bridge._
+- **Why does `extract_field_from_annotated()` connect `StructspecState` to `_core.c`, `Field`?**
+  _High betweenness centrality (0.066) - this node is a cross-community bridge._
+- **Why does `constraints_update()` connect `structtype_get_global_state` to `_core.c`, `Field`?**
+  _High betweenness centrality (0.063) - this node is a cross-community bridge._
 - **Are the 89 inferred relationships involving `Field` (e.g. with `test_json_schema_constrained()` and `test_validate_json_constrained()`) actually correct?**
   _`Field` has 89 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `$schema`, `.opencode/plugins/graphify.js`, `Point` to the rest of the system?**
-  _50 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **What connects `Point`, `PointGCFalse`, `Item_st` to the rest of the system?**
+  _47 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `_core.c` be split into smaller, more focused modules?**
-  _Cohesion score 0.048651507139079855 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05543345543345543 - nodes in this community are weakly interconnected._
 - **Should `test_schema.py` be split into smaller, more focused modules?**
   _Cohesion score 0.03259493670886076 - nodes in this community are weakly interconnected._
