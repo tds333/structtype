@@ -6249,6 +6249,7 @@ structmeta_collect_fields(StructMetaInfo *info, StructspecState *mod, bool kwonl
 
         if (structmeta_process_default(info, mod, field) < 0) goto error;
     }
+    Py_DECREF(annotations);
     return 0;
 error:
     Py_DECREF(annotations);
@@ -9572,7 +9573,7 @@ Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
     }
 
     self->mod = structtype_get_global_state();
-    self->enc_hook = enc_hook;
+    Py_XSETREF(self->enc_hook, enc_hook);
     return 0;
 }
 
@@ -12994,6 +12995,7 @@ json_encode_set(EncoderState *self, PyObject *obj)
         if (status < 0) goto cleanup;
         if (ms_write(self, ",", 1) < 0) goto cleanup;
     }
+    if (PyErr_Occurred()) goto cleanup;
     /* Overwrite trailing comma with ] */
     *(self->output_buffer_raw + self->output_len - 1) = ']';
     status = 0;
@@ -13718,7 +13720,7 @@ JSONDecoder_init(JSONDecoder *self, PyObject *args, PyObject *kwds)
         }
         Py_INCREF(dec_hook);
     }
-    self->dec_hook = dec_hook;
+    Py_XSETREF(self->dec_hook, dec_hook);
 
     /* Handle float_hook */
     if (float_hook == Py_None) {
@@ -13731,7 +13733,7 @@ JSONDecoder_init(JSONDecoder *self, PyObject *args, PyObject *kwds)
         }
         Py_INCREF(float_hook);
     }
-    self->float_hook = float_hook;
+    Py_XSETREF(self->float_hook, float_hook);
 
     /* Handle strict */
     self->strict = strict;
@@ -16612,7 +16614,6 @@ dump_struct(DumpState *self, PyObject *obj, bool is_key) {
             if (val == NULL) goto cleanup;
             PyObject *val2 = dump_obj(self, val, is_key);
             if (val2 == NULL) goto cleanup;
-            Py_INCREF(val2);
             if (is_key) {
                 PyTuple_SET_ITEM(out, i + tagged, val2);
             }
