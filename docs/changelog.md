@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 (Unreleased)
+## 0.4.0 (2026-08-09)
 
 - Remove `struct_force_setattr`. To set fields on a frozen struct inside
   `__post_init__`, use `object.__setattr__(self, ...)` (requires Python 3.13+).
