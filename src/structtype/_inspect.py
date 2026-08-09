@@ -9,7 +9,7 @@ from typing import Any, Final, Literal, TypeVar, Union
 
 try:
     from typing import TypeAliasType as _TypeAliasType  # type: ignore
-except Exception:
+except ImportError:
     _TypeAliasType = type("TypeAliasType", (), {})  # type: ignore
 
 import structtype
@@ -488,8 +488,8 @@ class FrozenDictType(Type):
 
     key_type: Type
     value_type: Type
-    min_length: Union[int, None] = None
-    max_length: Union[int, None] = None
+    min_length: int | None = None
+    max_length: int | None = None
 
 
 class FieldNode(structtype.Struct):
@@ -991,8 +991,6 @@ class _Translator:
             return DecimalType()
         elif t is structtype.Raw:
             return RawType()
-        elif False:  # Ext type removed
-            return ExtType()
         elif t is list:
             return ListType(
                 self.translate(args[0]) if args else AnyType(),

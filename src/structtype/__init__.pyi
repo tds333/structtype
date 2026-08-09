@@ -68,7 +68,7 @@ class _NoDefault(enum.Enum):
 
 NODEFAULT: Final = _NoDefault.NODEFAULT
 
-@dataclass_transform(field_specifiers=(Field,))
+@dataclass_transform(field_specifiers=("Field",))
 class Struct(metaclass=StructMeta):
     __struct_fields__: ClassVar[tuple[str, ...]]
     __struct_config__: ClassVar[StructConfig]
