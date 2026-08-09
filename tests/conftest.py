@@ -1,9 +1,19 @@
 import math
+import os
 import random
 import string
 import struct
 
 import pytest
+
+# Re-inject the ASan runtime for subprocess children. macOS strips
+# DYLD_INSERT_LIBRARIES from the process environment after dyld consumes it,
+# so tests that spawn subprocesses (e.g. test_raw_copy_doesnt_leak) would
+# otherwise run without the sanitizer preload. STRUCTTYPE_ASAN_RUNTIME is set
+# by `make test-sanitize` and survives into the parent environment.
+asan_runtime = os.environ.get("STRUCTTYPE_ASAN_RUNTIME")
+if asan_runtime:
+    os.environ["DYLD_INSERT_LIBRARIES"] = asan_runtime
 
 
 class Rand:

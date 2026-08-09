@@ -40,6 +40,26 @@ test-all: ## Run tests in all supporte Python versions
 		uv run --isolated -p $$py_v pytest; \
 	done
 
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+ASAN_RUNTIME := $(shell clang --print-file-name=libclang_rt.asan_osx_dynamic.dylib)
+SANITIZE_PRELOAD := DYLD_INSERT_LIBRARIES=$(ASAN_RUNTIME)
+else
+ASAN_RUNTIME := $(shell gcc --print-file-name=libasan.so)
+SANITIZE_PRELOAD := LD_PRELOAD=$(ASAN_RUNTIME)
+endif
+
+DEBUG_PY ?= 3.14+debug
+DEBUG_VENV = .venv-debug
+
+.PHONY: test-debug
+test-debug: ## Build core with Py_DEBUG + ASan/UBSan + debug allocator and run all tests
+	uv venv --clear --python $(DEBUG_PY) $(DEBUG_VENV)
+	STRUCTTYPE_SANITIZE=1 uv pip install --python $(DEBUG_VENV) --reinstall --no-cache --group dev -e .
+	$(SANITIZE_PRELOAD) STRUCTTYPE_ASAN_RUNTIME=$(ASAN_RUNTIME) ASAN_OPTIONS=detect_leaks=0 \
+		PYTHONMALLOC=debug PYTHONFAULTHANDLER=1 PYTHONDEVMODE=1 \
+		$(DEBUG_VENV)/bin/python -m pytest
+
 .PHONY: check
 check: ## Run all checks
 	-uvx ty check ${SOURCE_DIR}

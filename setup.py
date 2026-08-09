@@ -27,8 +27,15 @@ DEBUG = os.environ.get("STRUCTTYPE_DEBUG", SANITIZE or COVERAGE)
 extra_compile_args = []
 extra_link_args = []
 if SANITIZE:
-    extra_compile_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
-    extra_link_args.extend(["-lasan", "-lubsan"])
+    extra_compile_args.extend(
+        [
+            "-fsanitize=address",
+            "-fsanitize=undefined",
+            "-fsanitize=signed-integer-overflow",
+        ]
+    )
+    if sys.platform != "darwin":
+        extra_link_args.extend(["-lasan", "-lubsan"])
 if COVERAGE:
     extra_compile_args.append("--coverage")
     extra_link_args.append("-lgcov")
