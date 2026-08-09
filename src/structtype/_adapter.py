@@ -35,7 +35,13 @@ class StructAdapter:
         return _json_decode(buf, type=self._type, strict=strict, dec_hook=dec_hook)
 
     def struct_dump_json(
-        self, obj, *, enc_hook=None, decimal_format=None, uuid_format=None, order=None
+        self,
+        obj,
+        *,
+        enc_hook=None,
+        decimal_format=None,
+        uuid_format=None,
+        sort_keys=False,
     ):
         """Encode a validated object to JSON bytes.
 
@@ -49,15 +55,15 @@ class StructAdapter:
             Controls how ``Decimal`` values are encoded.
         uuid_format : str, optional
             Controls how ``UUID`` values are encoded.
-        order : str, optional
-            Determines key ordering in JSON objects.
+        sort_keys : bool, optional
+            If True, sort dict keys and set elements for deterministic output.
         """
         return _json_encode(
             obj,
             enc_hook=enc_hook,
             decimal_format=decimal_format,
             uuid_format=uuid_format,
-            order=order,
+            sort_keys=sort_keys,
         )
 
     def struct_validate(
@@ -85,7 +91,13 @@ class StructAdapter:
         )
 
     def struct_dump(
-        self, obj, *, enc_hook=None, order=None, str_keys=False, builtin_types=None
+        self,
+        obj,
+        *,
+        enc_hook=None,
+        sort_keys=False,
+        str_keys=False,
+        builtin_types=None,
     ):
         """Convert a validated object to built-in Python types (``dict``, ``list``, etc.)."""
         return _dump(
@@ -93,7 +105,7 @@ class StructAdapter:
             builtin_types=builtin_types,
             str_keys=str_keys,
             enc_hook=enc_hook,
-            order=order,
+            sort_keys=sort_keys,
         )
 
 

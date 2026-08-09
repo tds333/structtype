@@ -4,6 +4,11 @@
 
 - Remove `struct_force_setattr`. To set fields on a frozen struct inside
   `__post_init__`, use `object.__setattr__(self, ...)` (requires Python 3.13+).
+- Replace the encoder `order=` argument with `sort_keys: bool` on
+  `struct_dump`, `struct_dump_json`.
+  `sort_keys=True` sorts dict keys and set elements for deterministic output;
+  struct, dataclass, and object fields keep their declaration order. The
+  previous `order='sorted'` mode is removed.
 - Add `tuple` with all builtin types usable in `struct_dump`.
 - Improved validation error messages.
 - Fix possible memory leak.

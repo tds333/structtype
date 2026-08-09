@@ -115,13 +115,13 @@ class Struct(metaclass=StructMeta):
         | Callable[[Any], Any]
         | None = None,
         uuid_format: Literal["canonical", "hex"] | None = None,
-        order: Literal["deterministic", "sorted"] | None = None,
+        sort_keys: bool = False,
     ) -> bytes: ...
     def struct_dump(
         self,
         *,
         enc_hook: Callable[[Any], Any] | None = None,
-        order: Literal["deterministic", "sorted"] | None = None,
+        sort_keys: bool = False,
         str_keys: bool = False,
         builtin_types: Iterable[type] | None = None,
     ) -> dict[str, Any] | list[Any]: ...
@@ -319,7 +319,7 @@ class StructAdapter:
         | Callable[[Any], Any]
         | None = None,
         uuid_format: Literal["canonical", "hex"] | None = None,
-        order: Literal["deterministic", "sorted"] | None = None,
+        sort_keys: bool = False,
     ) -> bytes: ...
     def struct_validate(
         self,
@@ -334,7 +334,7 @@ class StructAdapter:
         obj: Any,
         *,
         enc_hook: Callable[[Any], Any] | None = None,
-        order: Literal["deterministic", "sorted"] | None = None,
+        sort_keys: bool = False,
         str_keys: bool = False,
         builtin_types: Iterable[type] | None = None,
     ) -> Any: ...

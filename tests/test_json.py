@@ -2102,7 +2102,7 @@ class TestDict:
 
     def test_encode_dict_order_escape(self):
         msg = {"test\nkey": 1, "another\t\rkey": 2}
-        res = _json_encode(msg, order="deterministic")
+        res = _json_encode(msg, sort_keys=True)
         sol = b'{"another\\t\\rkey":2,"test\\nkey":1}'
         assert res == sol
 
