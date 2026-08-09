@@ -2601,7 +2601,8 @@ parse_order_arg(PyObject *order) {
 typedef struct {
     const char *key;
     Py_ssize_t key_size;
-    PyObject *val;
+    PyObject *key_obj;  /* owned ref keeping `key`'s utf8 buffer alive; NULL for CStr keys */
+    PyObject *val;      /* owned ref */
 } AssocItem;
 
 typedef struct {
@@ -2622,6 +2623,12 @@ AssocList_New(Py_ssize_t capacity) {
 
 static void
 AssocList_Free(AssocList *list) {
+    if (list != NULL) {
+        for (Py_ssize_t i = 0; i < list->size; i++) {
+            Py_XDECREF(list->items[i].key_obj);
+            Py_XDECREF(list->items[i].val);
+        }
+    }
     PyMem_Free(list);
 }
 
@@ -2629,6 +2636,8 @@ static void
 AssocList_AppendCStr(AssocList *list, const char *key, PyObject *val) {
     list->items[list->size].key = key;
     list->items[list->size].key_size = strlen(key);
+    list->items[list->size].key_obj = NULL;
+    Py_INCREF(val);
     list->items[list->size].val = val;
     list->size++;
 }
@@ -2639,8 +2648,11 @@ AssocList_Append(AssocList *list, PyObject *key, PyObject *val) {
     const char* key_buf = unicode_str_and_size(key, &key_size);
     if (key_buf == NULL) return -1;
 
+    Py_INCREF(key);
+    Py_INCREF(val);
     list->items[list->size].key = key_buf;
     list->items[list->size].key_size = key_size;
+    list->items[list->size].key_obj = key;
     list->items[list->size].val = val;
     list->size++;
     return 0;
@@ -2648,28 +2660,32 @@ AssocList_Append(AssocList *list, PyObject *key, PyObject *val) {
 
 static AssocList *
 AssocList_FromDict(PyObject *dict) {
-    Py_ssize_t len = PyDict_GET_SIZE(dict);
-    AssocList *out = AssocList_New(len);
-
     PyObject *key, *val;
     Py_ssize_t pos = 0;
     int err = 0;
+    AssocList *out;
     Py_BEGIN_CRITICAL_SECTION(dict);
-    while (PyDict_Next(dict, &pos, &key, &val)) {
-        if (!PyUnicode_Check(key)) {
-            PyErr_SetString(
-                PyExc_TypeError,
-                "Only dicts with str keys are supported when `order` is not `None`"
-            );
-            err = 1;
-            break;
-        }
-        if (AssocList_Append(out, key, val) < 0) {
-            err = 1;
-            break;
+    /* Snapshot the size while holding the critical section so a concurrent
+     * mutation can't change the iteration count between allocation and use. */
+    out = AssocList_New(PyDict_GET_SIZE(dict));
+    if (out != NULL) {
+        while (PyDict_Next(dict, &pos, &key, &val)) {
+            if (!PyUnicode_Check(key)) {
+                PyErr_SetString(
+                    PyExc_TypeError,
+                    "Only dicts with str keys are supported when `order` is not `None`"
+                );
+                err = 1;
+                break;
+            }
+            if (AssocList_Append(out, key, val) < 0) {
+                err = 1;
+                break;
+            }
         }
     }
     Py_END_CRITICAL_SECTION();
+    if (out == NULL) return NULL;
     if (!err) return out;
     AssocList_Free(out);
     return NULL;
@@ -2946,6 +2962,9 @@ typedef struct {
 typedef struct {
     PyObject_VAR_HEAD
     Py_ssize_t nrequired;
+#ifdef Py_GIL_DISABLED
+    _Atomic(uint8_t) initialized;
+#endif
     TypedDictField fields[];
 } TypedDictInfo;
 
@@ -2960,6 +2979,9 @@ typedef struct {
     PyObject *pre_init;
     PyObject *post_init;
     PyObject *defaults;
+#ifdef Py_GIL_DISABLED
+    _Atomic(uint8_t) initialized;
+#endif
     DataclassField fields[];
 } DataclassInfo;
 
@@ -2967,6 +2989,9 @@ typedef struct {
     PyObject_VAR_HEAD
     PyObject *class;
     PyObject *defaults;
+#ifdef Py_GIL_DISABLED
+    _Atomic(uint8_t) initialized;
+#endif
     TypeNode *types[];
 } NamedTupleInfo;
 
@@ -3131,13 +3156,35 @@ TypeNode_get_str_enum_or_literal(TypeNode *type) {
 static MS_INLINE TypedDictInfo *
 TypeNode_get_typeddict_info(TypeNode *type) {
     Py_ssize_t i = ms_popcount(type->types & (SLOT_00 | SLOT_01 | SLOT_02));
-    return type->details[i].pointer;
+    TypedDictInfo *info = type->details[i].pointer;
+#ifdef Py_GIL_DISABLED
+    if (atomic_load(&info->initialized)) {
+        return info;
+    }
+    Py_BEGIN_ALLOW_THREADS
+    /* wait for the TypedDictInfo to be fully initialized by other thread */
+    while (!atomic_load(&info->initialized)) {
+    }
+    Py_END_ALLOW_THREADS
+#endif
+    return info;
 }
 
 static MS_INLINE DataclassInfo *
 TypeNode_get_dataclass_info(TypeNode *type) {
     Py_ssize_t i = ms_popcount(type->types & (SLOT_00 | SLOT_01 | SLOT_02));
-    return type->details[i].pointer;
+    DataclassInfo *info = type->details[i].pointer;
+#ifdef Py_GIL_DISABLED
+    if (atomic_load(&info->initialized)) {
+        return info;
+    }
+    Py_BEGIN_ALLOW_THREADS
+    /* wait for the DataclassInfo to be fully initialized by other thread */
+    while (!atomic_load(&info->initialized)) {
+    }
+    Py_END_ALLOW_THREADS
+#endif
+    return info;
 }
 
 static MS_INLINE NamedTupleInfo *
@@ -3147,7 +3194,18 @@ TypeNode_get_namedtuple_info(TypeNode *type) {
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03
         )
     );
-    return type->details[i].pointer;
+    NamedTupleInfo *info = type->details[i].pointer;
+#ifdef Py_GIL_DISABLED
+    if (atomic_load(&info->initialized)) {
+        return info;
+    }
+    Py_BEGIN_ALLOW_THREADS
+    /* wait for the NamedTupleInfo to be fully initialized by other thread */
+    while (!atomic_load(&info->initialized)) {
+    }
+    Py_END_ALLOW_THREADS
+#endif
+    return info;
 }
 
 static MS_INLINE PyObject *
@@ -8601,7 +8659,7 @@ static PyTypeObject LiteralInfo_Type = {
 };
 
 static PyObject *
-TypedDictInfo_Convert(PyObject *obj) {
+TypedDictInfo_Convert_lock_held(PyObject *obj) {
     PyObject *annotations = NULL, *required = NULL;
     TypedDictInfo *info = NULL;
     StructspecState *mod = structtype_get_global_state();
@@ -8632,6 +8690,9 @@ TypedDictInfo_Convert(PyObject *obj) {
     /* Initialize nrequired to -1 as a flag in case of a recursive TypedDict
     * definition. */
     info->nrequired = -1;
+#ifdef Py_GIL_DISABLED
+    atomic_store(&info->initialized, 0);
+#endif
 
     /* If not already cached, then cache on TypedDict object _before_
     * traversing fields. This is to ensure self-referential TypedDicts work. */
@@ -8657,6 +8718,9 @@ TypedDictInfo_Convert(PyObject *obj) {
     info->nrequired = PySet_GET_SIZE(required);
 
     PyObject_GC_Track(info);
+#ifdef Py_GIL_DISABLED
+    atomic_store(&info->initialized, 1);
+#endif
     succeeded = true;
 
 cleanup:
@@ -8676,6 +8740,15 @@ cleanup:
     Py_XDECREF(annotations);
     Py_XDECREF(required);
     return (PyObject *)info;
+}
+
+static PyObject *
+TypedDictInfo_Convert(PyObject *obj) {
+    PyObject *res = NULL;
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    res = TypedDictInfo_Convert_lock_held(obj);
+    Py_END_CRITICAL_SECTION();
+    return res;
 }
 
 static MS_INLINE PyObject *
@@ -8768,7 +8841,7 @@ static PyTypeObject TypedDictInfo_Type = {
 };
 
 static PyObject *
-DataclassInfo_Convert(PyObject *obj) {
+DataclassInfo_Convert_lock_held(PyObject *obj) {
     PyObject *cls = NULL, *fields = NULL, *field_defaults = NULL;
     PyObject *pre_init = NULL, *post_init = NULL;
     DataclassInfo *info = NULL;
@@ -8821,6 +8894,9 @@ DataclassInfo_Convert(PyObject *obj) {
         Py_INCREF(post_init);
         info->post_init = post_init;
     }
+#ifdef Py_GIL_DISABLED
+    atomic_store(&info->initialized, 0);
+#endif
 
     /* If not already cached, then cache on Dataclass object _before_
     * traversing fields. This is to ensure self-referential Dataclasses work. */
@@ -8844,6 +8920,9 @@ DataclassInfo_Convert(PyObject *obj) {
     }
 
     PyObject_GC_Track(info);
+#ifdef Py_GIL_DISABLED
+    atomic_store(&info->initialized, 1);
+#endif
     succeeded = true;
 
 cleanup:
@@ -8866,6 +8945,15 @@ cleanup:
     Py_XDECREF(pre_init);
     Py_XDECREF(post_init);
     return (PyObject *)info;
+}
+
+static PyObject *
+DataclassInfo_Convert(PyObject *obj) {
+    PyObject *res = NULL;
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    res = DataclassInfo_Convert_lock_held(obj);
+    Py_END_CRITICAL_SECTION();
+    return res;
 }
 
 static MS_INLINE PyObject *
@@ -8988,7 +9076,7 @@ static PyTypeObject DataclassInfo_Type = {
 };
 
 static PyObject *
-NamedTupleInfo_Convert(PyObject *obj) {
+NamedTupleInfo_Convert_lock_held(PyObject *obj) {
     StructspecState *mod = structtype_get_global_state();
     NamedTupleInfo *info = NULL;
     PyObject *annotations = NULL, *cls = NULL, *fields = NULL;
@@ -9027,6 +9115,9 @@ NamedTupleInfo_Convert(PyObject *obj) {
     for (Py_ssize_t i = 0; i < nfields; i++) {
         info->types[i] = NULL;
     }
+#ifdef Py_GIL_DISABLED
+    atomic_store(&info->initialized, 0);
+#endif
 
     /* If not already cached, then cache on NamedTuple object _before_
     * traversing fields. This is to ensure self-referential NamedTuple work. */
@@ -9060,6 +9151,9 @@ NamedTupleInfo_Convert(PyObject *obj) {
     info->defaults = PyList_AsTuple(defaults_list);
     if (info->defaults == NULL) goto cleanup;
     PyObject_GC_Track(info);
+#ifdef Py_GIL_DISABLED
+    atomic_store(&info->initialized, 1);
+#endif
 
     succeeded = true;
 
@@ -9083,6 +9177,15 @@ cleanup:
     Py_XDECREF(defaults);
     Py_XDECREF(defaults_list);
     return (PyObject *)info;
+}
+
+static PyObject *
+NamedTupleInfo_Convert(PyObject *obj) {
+    PyObject *res = NULL;
+    Py_BEGIN_CRITICAL_SECTION(obj);
+    res = NamedTupleInfo_Convert_lock_held(obj);
+    Py_END_CRITICAL_SECTION();
+    return res;
 }
 
 static int
