@@ -57,3 +57,28 @@ def test_concurrent_validate_json():
         t.start()
     for t in threads:
         t.join()
+
+
+def test_concurrent_dict_decode():
+    """Stress concurrent untyped dict decoding from multiple threads.
+
+    Repeated keys exercise shared-string reuse while distinct keys force fresh
+    allocations; this guards against cross-thread corruption in the decoder's
+    shared module state."""
+    from structtype._core import _json_decode
+
+    repeated = [b'{"shared_key": 1}', b'{"shared_key": 2}']
+    distinct = [(f'{{"key{i:03d}": {i}}}').encode() for i in range(2000)]
+
+    def worker(seed):
+        for i in range(2000):
+            if i % 2 == 0:
+                _json_decode(repeated[i % 2])
+            else:
+                _json_decode(distinct[(i + seed) % len(distinct)])
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()

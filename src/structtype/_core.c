@@ -392,19 +392,6 @@ murmur2(const char *p, Py_ssize_t len) {
 }
 
 /*************************************************************************
- * String Cache                                                          *
- *************************************************************************/
-#ifndef STRING_CACHE_SIZE
-#define STRING_CACHE_SIZE 512
-#endif
-#ifndef STRING_CACHE_MAX_STRING_LENGTH
-#define STRING_CACHE_MAX_STRING_LENGTH 32
-#endif
-#ifndef TIMEZONE_CACHE_SIZE
-#define TIMEZONE_CACHE_SIZE 512
-#endif
-
-/*************************************************************************
  * Endian handling macros                                                *
  *************************************************************************/
 
@@ -454,12 +441,6 @@ murmur2(const char *p, Py_ssize_t len) {
 /*************************************************************************
  * Module level state                                                    *
  *************************************************************************/
-
-/* Cache for timezone objects keyed by UTC offset */
-typedef struct {
-    int32_t offset;
-    PyObject *tz;
-} TimezoneCacheItem;
 
 /* State of the structtype module */
 typedef struct {
@@ -531,12 +512,6 @@ typedef struct {
 #endif
     PyObject *astimezone;
     PyObject *re_compile;
-    uint8_t gc_cycle;
-#ifdef Py_GIL_DISABLED
-    PyMutex cache_lock;
-#endif
-    PyObject *string_cache[STRING_CACHE_SIZE];
-    TimezoneCacheItem timezone_cache[TIMEZONE_CACHE_SIZE];
 } StructspecState;
 
 /* Forward declaration of the structtype module definition. */
@@ -10649,28 +10624,11 @@ ms_encode_err_type_unsupported(PyTypeObject *type) {
 
 /* Returns a new reference */
 static PyObject*
-timezone_from_offset(StructspecState *st, int32_t offset) {
-    uint32_t index = ((uint32_t)offset) % TIMEZONE_CACHE_SIZE;
-    if (st->timezone_cache[index].offset == offset) {
-        PyObject *tz = st->timezone_cache[index].tz;
-        Py_INCREF(tz);
-        return tz;
-    }
+timezone_from_offset(int32_t offset) {
     PyObject *delta = PyDelta_FromDSU(0, offset * 60, 0);
     if (delta == NULL) return NULL;
     PyObject *tz = PyTimeZone_FromOffset(delta);
     Py_DECREF(delta);
-    if (tz == NULL) return NULL;
-#ifdef Py_GIL_DISABLED
-    PyMutex_Lock(&st->cache_lock);
-#endif
-    Py_XDECREF(st->timezone_cache[index].tz);
-    st->timezone_cache[index].offset = offset;
-    Py_INCREF(tz);
-    st->timezone_cache[index].tz = tz;
-#ifdef Py_GIL_DISABLED
-    PyMutex_Unlock(&st->cache_lock);
-#endif
     return tz;
 }
 
@@ -11100,7 +11058,7 @@ end_decimal:
             Py_INCREF(tz);
         }
         else {
-            tz = timezone_from_offset(structtype_get_global_state(), offset);
+            tz = timezone_from_offset(offset);
             if (tz == NULL) goto error;
         }
     }
@@ -11275,7 +11233,7 @@ end_decimal:
             Py_INCREF(tz);
         }
         else {
-            tz = timezone_from_offset(structtype_get_global_state(), offset);
+            tz = timezone_from_offset(offset);
             if (tz == NULL) goto error;
         }
     }
@@ -14585,47 +14543,9 @@ json_decode_dict_key(JSONDecoderState *self, TypeNode *type, PathNode *path) {
     bool is_ascii = true;
     char *view = NULL;
     Py_ssize_t size;
-    bool is_str = type->types == MS_TYPE_ANY || type->types == MS_TYPE_STR;
-
     size = json_decode_string_view(self, &view, &is_ascii);
     if (size < 0) return NULL;
-
-    bool cacheable = is_str && is_ascii && size > 0 && size <= STRING_CACHE_MAX_STRING_LENGTH;
-    if (MS_UNLIKELY(!cacheable)) {
-        return json_decode_dict_key_fallback(self, view, size, is_ascii, type, path);
-    }
-
-    uint32_t hash = murmur2(view, size);
-    uint32_t index = hash % STRING_CACHE_SIZE;
-
-    StructspecState *st = structtype_get_global_state();
-    PyObject *existing = st->string_cache[index];
-
-    if (MS_LIKELY(existing != NULL)) {
-        Py_ssize_t e_size = ((PyASCIIObject *)existing)->length;
-        char *e_str = ascii_get_buffer(existing);
-        if (MS_LIKELY(size == e_size && memcmp(view, e_str, size) == 0)) {
-            Py_INCREF(existing);
-            return existing;
-        }
-    }
-
-    /* Create a new ASCII str object */
-    PyObject *new = PyUnicode_New(size, 127);
-    if (MS_UNLIKELY(new == NULL)) return NULL;
-    memcpy(ascii_get_buffer(new), view, size);
-
-    /* Swap out the str in the cache */
-#ifdef Py_GIL_DISABLED
-    PyMutex_Lock(&st->cache_lock);
-#endif
-    Py_XDECREF(existing);
-    Py_INCREF(new);
-    st->string_cache[index] = new;
-#ifdef Py_GIL_DISABLED
-    PyMutex_Unlock(&st->cache_lock);
-#endif
-    return new;
+    return json_decode_dict_key_fallback(self, view, size, is_ascii, type, path);
 }
 
 static PyObject *
@@ -19103,10 +19023,6 @@ structtype_clear(PyObject *m)
 #endif
     Py_CLEAR(st->astimezone);
     Py_CLEAR(st->re_compile);
-    for (Py_ssize_t i = 0; i < STRING_CACHE_SIZE; i++)
-        Py_CLEAR(st->string_cache[i]);
-    for (Py_ssize_t i = 0; i < TIMEZONE_CACHE_SIZE; i++)
-        Py_CLEAR(st->timezone_cache[i].tz);
     return 0;
 }
 
@@ -19120,44 +19036,6 @@ static int
 structtype_traverse(PyObject *m, visitproc visit, void *arg)
 {
     StructspecState *st = structtype_get_state(m);
-
-    /* Clear the string cache every 10 major GC passes.
-     *
-     * The string cache can help improve performance in 2 different situations:
-     *
-     * - Calling untyped `json.decode` on a large message, where many keys are
-     *   repeated within the same message.
-     * - Calling untyped `json.decode` in a hot loop on many messages that
-     *   share the same structure.
-     *
-     * In both cases, the string cache helps because common keys are more
-     * likely to remain in cache. We do want to periodically clear the cache so
-     * the allocator can free up old pages and reduce fragmentation, but we
-     * want to do so as infrequently as possible. I've arbitrarily picked 10
-     * major GC passes here as a heuristic.
-     *
-     * With the current configuration, the string cache may consume up to 20
-     * KiB at a time, but that's with 100% of slots filled (unlikely due to
-     * collisions). 50% filled is more likely, so 12 KiB max is a reasonable
-     * estimate.
-     */
-    st->gc_cycle++;
-    if (st->gc_cycle == 10) {
-        st->gc_cycle = 0;
-        for (Py_ssize_t i = 0; i < STRING_CACHE_SIZE; i++) {
-            PyObject *obj = st->string_cache[i];
-            if (obj != NULL && Py_REFCNT(obj) == 1) {
-                Py_CLEAR(st->string_cache[i]);
-            }
-        }
-        for (Py_ssize_t i = 0; i < TIMEZONE_CACHE_SIZE; i++) {
-            PyObject *tz = st->timezone_cache[i].tz;
-            if (tz != NULL && Py_REFCNT(tz) == 1) {
-                Py_CLEAR(st->timezone_cache[i].tz);
-                st->timezone_cache[i].offset = 0;
-            }
-        }
-    }
 
     Py_VISIT(st->EncodeError);
     Py_VISIT(st->DecodeError);
@@ -19283,9 +19161,6 @@ PyInit__core(void)
     }
 
     st = structtype_get_state(m);
-
-    /* Initialize GC counter */
-    st->gc_cycle = 0;
 
     /* Add NODEFAULT singleton */
     if (PyModule_AddObjectRef(m, "NODEFAULT", NODEFAULT) < 0)

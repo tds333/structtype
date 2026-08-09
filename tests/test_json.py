@@ -784,24 +784,6 @@ class TestDatetime:
         res = _json_decode(json_s, type=datetime.datetime)
         assert res == exp
 
-    @pytest.mark.skipif(
-        hasattr(sys.flags, "gil") and not sys.flags.gil,
-        reason="cache is disabled without GIL",
-    )
-    def test_decode_timezone_cache(self):
-        msg = b'"2000-01-01T00:00:01+03:02"'
-        tz = _json_decode(msg, type=datetime.datetime).tzinfo
-        tz2 = _json_decode(msg, type=datetime.datetime).tzinfo
-        assert tz is tz2
-        del tz2
-        assert sys.getrefcount(tz) <= 3  # 1 tz, 1 cache, 1 func call
-        for _ in range(10):
-            gc.collect()  # cache is cleared every 10 full collections
-
-        # Since tz still has refcnt > 1, shouldn't be cleared
-        tz2 = _json_decode(msg, type=datetime.datetime).tzinfo
-        assert tz is tz2
-
     @pytest.mark.parametrize(
         "s",
         [
@@ -1899,30 +1881,6 @@ class TestDict:
             structtype.ValidationError, match="Expected `str` of length >= 3"
         ):
             dec.decode(b'{"a": 1}')
-
-    @pytest.mark.parametrize("length", [3, 32, 33])
-    @pytest.mark.skipif(
-        hasattr(sys.flags, "gil") and not sys.flags.gil,
-        reason="cache is disabled without GIL",
-    )
-    def test_decode_dict_string_cache(self, length):
-        key = "x" * length
-        msg = [{key: 1}, {key: 2}, {key: 3}]
-        res = _json_decode(_json_encode(msg))
-        assert msg == res
-        ids = {id(k) for d in res for k in d.keys()}
-        if length > 32:
-            assert len(ids) == 3
-        else:
-            assert len(ids) == 1
-
-    def test_decode_dict_string_cache_ascii_only(self):
-        """Short non-ascii strings aren't cached"""
-        s = "123 á 456"
-        msg = [{s: 1}, {s: 2}, {s: 3}]
-        res = _json_decode(_json_encode(msg))
-        ids = {id(k) for d in res for k in d.keys()}
-        assert len(ids) == 3
 
     @pytest.mark.parametrize(
         "key",
