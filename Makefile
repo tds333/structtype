@@ -19,7 +19,7 @@ docs-serve: ## Open built docs in browser
 
 .PHONY: wheels
 wheels: ## build wheels
-	uvx --from cibuildwheel==4.1.1 cibuildwheel
+	uvx --from cibuildwheel==4.2.0 cibuildwheel
 
 ##@ Quality
 .PHONY: test-cov

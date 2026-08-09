@@ -99,7 +99,7 @@ jobs:
     - name: Build wheels
       if: runner.os != 'Windows'
       run: >-
-        uvx --from cibuildwheel==4.1.1
+        uvx --from cibuildwheel==4.2.0
         cibuildwheel
         --output-dir wheelhouse
         dist/${{ needs.build-sdist.outputs.sdist-name }}
@@ -107,7 +107,7 @@ jobs:
     - name: Build wheels
       if: runner.os == 'Windows'
       run: >-
-        uvx --from cibuildwheel==4.1.1
+        uvx --from cibuildwheel==4.2.0
         cibuildwheel
         --output-dir wheelhouse
         $env:SDIST_NAME
