@@ -1455,6 +1455,7 @@ typedef struct Raw {
     char *buf;
     Py_ssize_t len;
     bool is_view;
+    Py_buffer view;
 } Raw;
 
 static PyObject *
@@ -1481,6 +1482,7 @@ Raw_New(PyObject *msg) {
             Py_DECREF(out);
             return NULL;
         }
+        out->view = buffer;
         out->base = buffer.obj;
         out->buf = buffer.buf;
         out->len = buffer.len;
@@ -1556,11 +1558,7 @@ Raw_dealloc(Raw *self)
             Py_DECREF(self->base);
         }
         else {
-            Py_buffer buffer;
-            buffer.obj = self->base;
-            buffer.len = self->len;
-            buffer.buf = self->buf;
-            ms_release_buffer(&buffer);
+            ms_release_buffer(&self->view);
         }
     }
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -1576,6 +1574,7 @@ Raw_FromView(PyObject *buffer_obj, char *data, Py_ssize_t len) {
         Py_DECREF(out);
         return NULL;
     }
+    out->view = buffer;
     out->base = buffer.obj;
     out->buf = data;
     out->len = len;
@@ -14947,7 +14946,7 @@ size_error:
     }
 error:
     Py_LeaveRecursiveCall();
-    Py_DECREF(out);
+    Py_XDECREF(out);
     return NULL;
 }
 
@@ -17704,7 +17703,7 @@ validate_seq_to_namedtuple(
     return out;
 error:
     Py_LeaveRecursiveCall();
-    Py_DECREF(out);
+    Py_XDECREF(out);
     return NULL;
 }
 
@@ -18791,13 +18790,17 @@ Struct_validate_json(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyO
 
     /* Build kwnames: [type, ...user_kw_names...] */
     PyObject *type_str = PyUnicode_InternFromString("type");
+    if (type_str == NULL) {
+        PyMem_Free(new_args);
+        return NULL;
+    }
     PyObject *new_kwnames = PyTuple_New(1 + nkwargs);
     if (new_kwnames == NULL) {
+        Py_DECREF(type_str);
         PyMem_Free(new_args);
         return NULL;
     }
     PyTuple_SET_ITEM(new_kwnames, 0, type_str);
-    Py_INCREF(type_str);
     for (Py_ssize_t i = 0; i < nkwargs; i++) {
         PyObject *name = PyTuple_GET_ITEM(kwnames, i);
         PyTuple_SET_ITEM(new_kwnames, 1 + i, name);

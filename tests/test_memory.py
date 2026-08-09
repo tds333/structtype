@@ -62,3 +62,20 @@ def test_encode_set_iterator_exception_propagates():
 
     with pytest.raises(RuntimeError):
         JSONEncoder().encode(BadSet([1]))
+
+
+@pytest.mark.skipif(
+    sys.version_info >= (3, 12), reason="interned strings are immortal on 3.12+"
+)
+def test_struct_validate_json_type_str_not_leaked():
+    t = sys.intern("type")
+    gc.collect()
+    base = sys.getrefcount(t)
+
+    class P(structtype.Struct):
+        x: int
+
+    for _ in range(200):
+        P.struct_validate_json(b'{"x":1}')
+    gc.collect()
+    assert sys.getrefcount(t) == base
