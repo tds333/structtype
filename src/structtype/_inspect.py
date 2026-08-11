@@ -923,7 +923,7 @@ class _Translator:
             ):
                 if (val := getattr(meta, attr)) is not None:
                     constrs[attr] = val
-            for attr in ("title", "description", "examples"):
+            for attr in ("title", "description", "examples", "deprecated"):
                 if (val := getattr(meta, attr)) is not None:
                     extra_json_schema[attr] = val
             if meta.json_schema_extra is not None:

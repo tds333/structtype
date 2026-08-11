@@ -1271,6 +1271,17 @@ def test_generic_metadata():
     }
 
 
+def test_deprecated_metadata():
+    typ = Annotated[str, Field(deprecated=True)]
+    assert make_schema(typ) == {"type": "string", "deprecated": True}
+
+    typ = Annotated[str, Field(deprecated=False)]
+    assert make_schema(typ) == {"type": "string", "deprecated": False}
+
+    typ = Annotated[str, Field()]
+    assert make_schema(typ) == {"type": "string"}
+
+
 def test_component_names_collide():
     s1 = """
     import structtype

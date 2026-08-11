@@ -782,6 +782,14 @@ def test_metadata():
         mi.IntType(), {"title": "c", "description": "b", "examples": [1, 2]}
     )
 
+    typ = Annotated[int, Field(deprecated=True)]
+
+    assert mi.type_info(typ) == mi.Metadata(mi.IntType(), {"deprecated": True})
+
+    typ = Annotated[int, Field(deprecated=False)]
+
+    assert mi.type_info(typ) == mi.Metadata(mi.IntType(), {"deprecated": False})
+
 
 def test_inspect_with_unhashable_metadata():
     typ = Annotated[int, {"unhashable"}]

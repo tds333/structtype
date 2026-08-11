@@ -174,6 +174,7 @@ class Field:
         description: str | None = None,
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
+        deprecated: bool | None = None,
     ) -> None: ...
     @overload
     def __init__(
@@ -189,6 +190,7 @@ class Field:
         description: str | None = None,
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
+        deprecated: bool | None = None,
     ) -> None: ...
     @overload
     def __init__(
@@ -204,6 +206,7 @@ class Field:
         description: str | None = None,
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
+        deprecated: bool | None = None,
     ) -> None: ...
     @overload
     def __init__(
@@ -219,6 +222,7 @@ class Field:
         description: str | None = None,
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
+        deprecated: bool | None = None,
     ) -> None: ...
     # Other (string/datetime):
     @overload
@@ -236,6 +240,7 @@ class Field:
         description: str | None = None,
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
+        deprecated: bool | None = None,
     ) -> None: ...
     default: Final[Any]
     default_factory: Final[Callable[[], Any] | None]
@@ -252,6 +257,7 @@ class Field:
     title: Final[str | None]
     description: Final[str | None]
     examples: Final[list[Any] | None]
+    deprecated: Final[bool | None]
     json_schema_extra: Final[dict[str, Any] | None]
     def __rich_repr__(self) -> list[tuple[str, Any]]: ...
 

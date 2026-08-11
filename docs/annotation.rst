@@ -315,6 +315,19 @@ Provide example values that appear in generated JSON Schemas:
     >>> class Product(Struct):
     ...     name: Annotated[str, Field(examples=["Widget", "Gadget"])]
 
+``deprecated``
+~~~~~~~~~~~~~~
+
+Mark a field as deprecated in the generated JSON Schema:
+
+.. code-block:: python
+
+    >>> from typing import Annotated
+    >>> from structtype import Struct, Field
+
+    >>> class Product(Struct):
+    ...     sku: Annotated[str, Field(deprecated=True)]
+
 ``json_schema_extra``
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -326,6 +339,6 @@ Add arbitrary extra properties to the generated JSON Schema for a field:
     >>> from structtype import Struct, Field
 
     >>> class Product(Struct):
-    ...     sku: Annotated[str, Field(json_schema_extra={"deprecated": True})]
+    ...     sku: Annotated[str, Field(json_schema_extra={"format": "sku"})]
 
 .. _timezone-aware: https://docs.python.org/3/library/datetime.html#aware-and-naive-objects

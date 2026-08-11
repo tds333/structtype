@@ -33,6 +33,7 @@ FIELDS = {
     "title": "example title",
     "description": "example description",
     "examples": ["example 1", "example 2"],
+    "deprecated": True,
     "json_schema_extra": {"foo": "bar"},
 }
 
@@ -181,7 +182,7 @@ class TestMetaObject:
         with pytest.raises(TypeError, match=f"`{field}` must be a str, got bytes"):
             Field(**{field: b"bad"})
 
-    @pytest.mark.parametrize("field", ["tz"])
+    @pytest.mark.parametrize("field", ["tz", "deprecated"])
     def test_bool_fields(self, field):
         Field(**{field: True})
         Field(**{field: False})

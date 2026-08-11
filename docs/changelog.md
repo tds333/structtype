@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `Field(deprecated=True)` to mark a field as deprecated in the generated
+  JSON Schema.
+
 ## 0.4.0 (2026-08-09)
 
 - Remove `struct_force_setattr`. To set fields on a frozen struct inside

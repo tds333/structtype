@@ -2030,7 +2030,7 @@ typedef struct {
     PyObject *gt, *ge, *lt, *le, *multiple_of;
     PyObject *pattern, *regex;
     PyObject *min_length, *max_length, *tz;
-    PyObject *title, *description, *examples;
+    PyObject *title, *description, *examples, *deprecated;
     PyObject *json_schema_extra;
     /* Field-specific fields */
     PyObject *default_value;
@@ -2083,6 +2083,8 @@ PyDoc_STRVAR(Field__doc__,
 "    json-schema.\n"
 "examples : list, optional\n"
 "    A list of examples to use when generating a json-schema.\n"
+"deprecated : bool, optional\n"
+"    Mark the annotated value as deprecated in the generated json-schema.\n"
 "json_schema_extra : dict, optional\n"
 "    A dict of extra fields to set when generating a json-schema.\n"
 "    This dict is recursively merged with the generated schema,\n"
@@ -2114,6 +2116,7 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
         "pattern", "min_length", "max_length", "tz",
         "default", "default_factory", "alias",
         "title", "description", "examples", "json_schema_extra",
+        "deprecated",
         NULL
     };
     PyObject *gt = NULL, *ge = NULL, *lt = NULL, *le = NULL, *multiple_of = NULL;
@@ -2121,15 +2124,17 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     PyObject *default_value = NODEFAULT, *default_factory = NODEFAULT;
     PyObject *alias = Py_None;
     PyObject *title = NULL, *description = NULL, *examples = NULL;
+    PyObject *deprecated = NULL;
     PyObject *json_schema_extra = NULL;
     PyObject *regex = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|$OOOOOOOOOOOOOOOO:Field.__new__", kwlist,
+            args, kwargs, "|$OOOOOOOOOOOOOOOOO:Field.__new__", kwlist,
             &gt, &ge, &lt, &le, &multiple_of,
             &pattern, &min_length, &max_length, &tz,
             &default_value, &default_factory, &alias,
-            &title, &description, &examples, &json_schema_extra
+            &title, &description, &examples, &json_schema_extra,
+            &deprecated
         )
     )
         return NULL;
@@ -2147,6 +2152,7 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     NONE_TO_NULL(title);
     NONE_TO_NULL(description);
     NONE_TO_NULL(examples);
+    NONE_TO_NULL(deprecated);
     NONE_TO_NULL(json_schema_extra);
 #undef NONE_TO_NULL
 
@@ -2160,6 +2166,7 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
     if (max_length != NULL && !ensure_is_nonnegative_integer(max_length, "max_length")) return NULL;
     if (tz != NULL && !ensure_is_bool(tz, "tz")) return NULL;
+    if (deprecated != NULL && !ensure_is_bool(deprecated, "deprecated")) return NULL;
 
     /* Check multiple constraint restrictions */
     if (gt != NULL && ge != NULL) {
@@ -2256,6 +2263,7 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     SET_FIELD(title);
     SET_FIELD(description);
     SET_FIELD(examples);
+    SET_FIELD(deprecated);
     SET_FIELD(json_schema_extra);
 #undef SET_FIELD
 #undef SET_FIELD_OWNED
@@ -2287,6 +2295,7 @@ Field_repr(Field *self) {
     DO_REPR(title);
     DO_REPR(description);
     DO_REPR(examples);
+    DO_REPR(deprecated);
     DO_REPR(json_schema_extra);
     if (self->default_value != NODEFAULT) {
         if (!_meta_repr_part(&builder, "default=", 8, self->default_value, &first)) {
@@ -2332,6 +2341,7 @@ Field_rich_repr(PyObject *py_self, PyObject *args) {
     DO_REPR(title);
     DO_REPR(description);
     DO_REPR(examples);
+    DO_REPR(deprecated);
     DO_REPR(json_schema_extra);
     if (self->default_value != NODEFAULT) {
         PyObject *part = Py_BuildValue("(UO)", "default", self->default_value);
@@ -2387,6 +2397,7 @@ Field_richcompare(Field *self, PyObject *py_other, int op) {
         DO_COMPARE(title);
         DO_COMPARE(description);
         DO_COMPARE(examples);
+        DO_COMPARE(deprecated);
         DO_COMPARE(json_schema_extra);
         /* default_value uses NODEFAULT sentinel, not NULL */
         equal = (self->default_value == other->default_value) ||
@@ -2438,6 +2449,7 @@ Field_hash(Field *self) {
     DO_HASH(tz);
     DO_HASH(title);
     DO_HASH(description);
+    DO_HASH(deprecated);
     /* Leave out examples & json_schema_extra, since they could be unhashable */
     /* Also hash default_value and default_factory if not NODEFAULT */
     if (self->default_value != NODEFAULT) {
@@ -2483,6 +2495,7 @@ Field_traverse(Field *self, visitproc visit, void *arg)
     Py_VISIT(self->title);
     Py_VISIT(self->description);
     Py_VISIT(self->examples);
+    Py_VISIT(self->deprecated);
     Py_VISIT(self->json_schema_extra);
     Py_VISIT(self->default_value);
     Py_VISIT(self->default_factory);
@@ -2506,6 +2519,7 @@ Field_clear(Field *self)
     Py_CLEAR(self->title);
     Py_CLEAR(self->description);
     Py_CLEAR(self->examples);
+    Py_CLEAR(self->deprecated);
     Py_CLEAR(self->json_schema_extra);
     if (self->default_value != NODEFAULT) Py_CLEAR(self->default_value);
     if (self->default_factory != NODEFAULT) Py_CLEAR(self->default_factory);
@@ -2534,6 +2548,7 @@ static PyMemberDef Field_members[] = {
     {"title", T_OBJECT, offsetof(Field, title), READONLY, NULL},
     {"description", T_OBJECT, offsetof(Field, description), READONLY, NULL},
     {"examples", T_OBJECT, offsetof(Field, examples), READONLY, NULL},
+    {"deprecated", T_OBJECT, offsetof(Field, deprecated), READONLY, NULL},
     {"json_schema_extra", T_OBJECT, offsetof(Field, json_schema_extra), READONLY, NULL},
     {"default", T_OBJECT_EX, offsetof(Field, default_value), READONLY,
      "The default value, or NODEFAULT if no default"},

@@ -133,8 +133,8 @@ Customizing the Schema
 ----------------------
 
 You can enrich the generated JSON Schema using several ``Field`` parameters
-(``title``, ``description``, ``examples``, ``json_schema_extra``). These are
-covered on the :doc:`Field Annotations <annotation>` page.
+(``title``, ``description``, ``examples``, ``deprecated``, ``json_schema_extra``).
+These are covered on the :doc:`Field Annotations <annotation>` page.
 
 .. _JSON Schema: https://json-schema.org/
 .. _OpenAPI: https://www.openapis.org/
