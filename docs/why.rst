@@ -25,6 +25,13 @@ following:
   Validation and serialization is very fast. (in C)
   It is easy to learn without to much features.
 
+- **Clean and minimal interface**
+
+  It has a simple interface. If a method is named valide it validates and decodes data.
+  If it is named dump it encodes the data and dumps out.
+  No feature overbloat.
+
+
 
 Relationship to msgspec
 -----------------------
@@ -56,3 +63,13 @@ It has less features by intend.
 
 .. _mypy: https://mypy.readthedocs.io/en/stable/
 .. _pyright: https://github.com/microsoft/pyright
+
+
+Relationship to std lib and std json
+------------------------------------
+
+If it makes sense parameters are the same.
+It does not provide extra methods for copy, replace, ... it implements
+std protocol to support it (like __copy__, __replace__). So builtin functions
+can be used. 
+

@@ -1,22 +1,22 @@
 structtype
 ==========
 
-``structtype`` is a *fast* struct validation and JSON serialization library for
+``structtype`` is a *fast* data structure validation and JSON serialization library for
 Python. It features:
 
-- 🚀 **High performance JSON encoder/decoder**. Regularly :doc:`benchmarks
+- **A speedy Struct type** for representing structured data. If you already
+  use dataclasses_ or attrs_, pydantic BaseModel, :doc:`Structs <usage>` should feel familiar.
+
+- **High performance JSON encoder/decoder**. Regularly :doc:`benchmarks
   <benchmarks>` as the fastest option for Python.
 
-- 🎉 **Support for a wide variety of Python types**. Additional types may
+- **Support for a wide variety of Python types**. Additional types may
   be supported through :doc:`extensions <extending>`.
 
-- 🔍 **Zero-cost schema validation** using familiar Python type annotations.
+- **Nearly zero-cost schema validation** using familiar Python type annotations.
   In :doc:`benchmarks <benchmarks>` ``structtype`` decodes *and* validates JSON
-  faster than orjson_ can decode it alone.
+  faster than other libraries like pydantic. 
 
-- ✨ **A speedy Struct type** for representing structured data. If you already
-  use dataclasses_ or attrs_, :doc:`Structs <usage>` should feel familiar. However,
-  they're :ref:`5-60x <struct-benchmark>` faster for common operations.
 
 All of this is included in a lightweight library
 with no required dependencies.

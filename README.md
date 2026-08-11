@@ -49,7 +49,13 @@ Full documentation is available at **https://tds333.github.io/structtype/**.
 
 ## Benchmarks
 
-structtype is as fast as msgspec and about 3-5x faster than pydantic.
+structtype is as fast as msgspec and about 3-5x faster than pydantic. See the
+[benchmarks page](https://tds333.github.io/structtype/benchmarks.html) for the full numbers.
+
+## Links
+
+- [Changelog](https://tds333.github.io/structtype/changelog.html)
+- [Source code](https://github.com/tds333/structtype)
 
 ## License
 
