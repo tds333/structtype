@@ -771,6 +771,27 @@ class TestRepr:
         assert repr(x) == "Test(a=0, b=1, c='two')"
         assert x.__rich_repr__() == [("a", 0), ("b", 1), ("c", "two")]
 
+    def test_omit_defaults_factory_collections(self):
+        class Test(Struct, omit_defaults=True):
+            a: list = Factory(list)
+            b: tuple = Factory(tuple)
+            c: frozenset = Factory(frozenset)
+
+        assert Test().struct_dump() == {}
+        assert Test([1], (1,), frozenset({1})).struct_dump() == {
+            "a": [1],
+            "b": (1,),
+            "c": [1],
+        }
+
+    def test_repr_omit_defaults_factory_collections(self):
+        class Test(Struct, repr_omit_defaults=True):
+            a: tuple = Factory(tuple)
+            b: frozenset = Factory(frozenset)
+
+        assert repr(Test()) == "Test()"
+        assert repr(Test((1,), frozenset({2}))) == "Test(a=(1,), b=frozenset({2}))"
+
     def test_repr_recursive(self):
         class Test(Struct):
             a: int

@@ -716,20 +716,21 @@ detection logic is as follows:
 
 .. code-block:: python
 
+    >>> from structtype import Factory
     >>> def matches_default(value: Any, default: Any) -> bool:
     ...     """Whether a value matches the default for a field"""
     ...     if value is default:
     ...         return True
-    ...     if type(value) != type(default):
-    ...         return False
-    ...     if type(value) in (list, set, dict) and (len(value) == len(default) == 0):
-    ...         return True
+    ...     if type(default) is Factory:
+    ...         if type(value) is not default.factory:
+    ...             return False
+    ...         return default.factory in (list, set, dict, tuple, frozenset) and len(value) == 0
     ...     return False
 
-This detection never calls a ``default_factory``. A field configured with a
-``Factory`` is only omitted when the factory is one of the builtin collection
-constructors (``list``, ``dict``, ``set``, ``tuple``, or ``frozenset``). Any
-other callable (a user-defined function, a ``lambda``, or a
+This detection never calls the callable wrapped by ``Factory``. A field
+configured with a ``Factory`` is only omitted when the factory is one of the
+builtin collection constructors (``list``, ``dict``, ``set``, ``tuple``, or
+``frozenset``). Any other callable (a user-defined function, a ``lambda``, or a
 ``Struct``/``dataclass``/``attrs`` type) is treated as opaque, so the field is
 always encoded, even when the value it produces is empty. To omit an empty
 collection default, configure the builtin constructor directly:

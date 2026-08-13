@@ -7370,6 +7370,8 @@ is_default(PyObject *x, PyObject *d) {
         if (factory == &PyList_Type && PyList_GET_SIZE(x) == 0) return true;
         if (factory == &PyDict_Type && PyDict_GET_SIZE(x) == 0) return true;
         if (factory == &PySet_Type && PySet_GET_SIZE(x) == 0) return true;
+        if (factory == &PyTuple_Type && PyTuple_GET_SIZE(x) == 0) return true;
+        if (factory == &PyFrozenSet_Type && PySet_GET_SIZE(x) == 0) return true;
     }
     return false;
 }
