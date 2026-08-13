@@ -1925,7 +1925,7 @@ typedef struct {
 static PyObject *
 Factory_New(PyObject *factory) {
     if (!PyCallable_Check(factory)) {
-        PyErr_SetString(PyExc_TypeError, "default_factory must be callable");
+        PyErr_SetString(PyExc_TypeError, "factory must be callable");
         return NULL;
     }
 
@@ -2006,7 +2006,7 @@ static PyMemberDef Factory_members[] = {
 
 static PyTypeObject Factory_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype._core.Factory",
+    .tp_name = "structtype.Factory",
     .tp_basicsize = sizeof(Factory),
     .tp_itemsize = 0,
     .tp_new = Factory_new,
@@ -2033,8 +2033,6 @@ typedef struct {
     PyObject *title, *description, *examples, *deprecated;
     PyObject *json_schema_extra;
     /* Field-specific fields */
-    PyObject *default_value;
-    PyObject *default_factory;
     PyObject *alias;
 } Field;
 
@@ -2043,11 +2041,6 @@ PyDoc_STRVAR(Field__doc__,
 "\n"
 "Parameters\n"
 "----------\n"
-"default : Any, optional\n"
-"    A default value to use for this field.\n"
-"default_factory : callable, optional\n"
-"    A zero-argument function called to generate a new default value\n"
-"    per-instance, rather than using a constant value as in ``default``.\n"
 "alias : str, optional\n"
 "    An alternative name to use when encoding/decoding this field.\n"
 "    If present, this will override any struct-level configuration using\n"
@@ -2114,14 +2107,13 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     char *kwlist[] = {
         "gt", "ge", "lt", "le", "multiple_of",
         "pattern", "min_length", "max_length", "tz",
-        "default", "default_factory", "alias",
+        "alias",
         "title", "description", "examples", "json_schema_extra",
         "deprecated",
         NULL
     };
     PyObject *gt = NULL, *ge = NULL, *lt = NULL, *le = NULL, *multiple_of = NULL;
     PyObject *pattern = NULL, *min_length = NULL, *max_length = NULL, *tz = NULL;
-    PyObject *default_value = NODEFAULT, *default_factory = NODEFAULT;
     PyObject *alias = Py_None;
     PyObject *title = NULL, *description = NULL, *examples = NULL;
     PyObject *deprecated = NULL;
@@ -2129,10 +2121,10 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     PyObject *regex = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|$OOOOOOOOOOOOOOOOO:Field.__new__", kwlist,
+            args, kwargs, "|$OOOOOOOOOOOOOOO:Field.__new__", kwlist,
             &gt, &ge, &lt, &le, &multiple_of,
             &pattern, &min_length, &max_length, &tz,
-            &default_value, &default_factory, &alias,
+            &alias,
             &title, &description, &examples, &json_schema_extra,
             &deprecated
         )
@@ -2189,18 +2181,6 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     }
 
     /* Check Field-specific defaults */
-    if (default_value != NODEFAULT && default_factory != NODEFAULT) {
-        PyErr_SetString(
-            PyExc_TypeError, "Cannot set both `default` and `default_factory`"
-        );
-        return NULL;
-    }
-    if (default_factory != NODEFAULT) {
-        if (!PyCallable_Check(default_factory)) {
-            PyErr_SetString(PyExc_TypeError, "default_factory must be callable");
-            return NULL;
-        }
-    }
     if (alias == Py_None) {
         alias = NULL;
     }
@@ -2254,10 +2234,6 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     SET_FIELD(min_length);
     SET_FIELD(max_length);
     SET_FIELD(tz);
-    Py_INCREF(default_value);
-    self->default_value = default_value;
-    Py_INCREF(default_factory);
-    self->default_factory = default_factory;
     Py_XINCREF(alias);
     self->alias = alias;
     SET_FIELD(title);
@@ -2297,16 +2273,6 @@ Field_repr(Field *self) {
     DO_REPR(examples);
     DO_REPR(deprecated);
     DO_REPR(json_schema_extra);
-    if (self->default_value != NODEFAULT) {
-        if (!_meta_repr_part(&builder, "default=", 8, self->default_value, &first)) {
-            goto error;
-        }
-    }
-    if (self->default_factory != NODEFAULT) {
-        if (!_meta_repr_part(&builder, "default_factory=", 16, self->default_factory, &first)) {
-            goto error;
-        }
-    }
     DO_REPR(alias);
 #undef DO_REPR
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
@@ -2343,20 +2309,6 @@ Field_rich_repr(PyObject *py_self, PyObject *args) {
     DO_REPR(examples);
     DO_REPR(deprecated);
     DO_REPR(json_schema_extra);
-    if (self->default_value != NODEFAULT) {
-        PyObject *part = Py_BuildValue("(UO)", "default", self->default_value);
-        if (part == NULL) goto error;
-        int ret = PyList_Append(out, part);
-        Py_DECREF(part);
-        if (ret < 0) goto error;
-    }
-    if (self->default_factory != NODEFAULT) {
-        PyObject *part = Py_BuildValue("(UO)", "default_factory", self->default_factory);
-        if (part == NULL) goto error;
-        int ret = PyList_Append(out, part);
-        Py_DECREF(part);
-        if (ret < 0) goto error;
-    }
     DO_REPR(alias);
 #undef DO_REPR
     return out;
@@ -2399,17 +2351,6 @@ Field_richcompare(Field *self, PyObject *py_other, int op) {
         DO_COMPARE(examples);
         DO_COMPARE(deprecated);
         DO_COMPARE(json_schema_extra);
-        /* default_value uses NODEFAULT sentinel, not NULL */
-        equal = (self->default_value == other->default_value) ||
-                (self->default_value != NODEFAULT && other->default_value != NODEFAULT &&
-                 PyObject_RichCompareBool(self->default_value, other->default_value, Py_EQ));
-        if (equal < 0) return NULL;
-        if (!equal) goto done;
-        equal = (self->default_factory == other->default_factory) ||
-                (self->default_factory != NODEFAULT && other->default_factory != NODEFAULT &&
-                 PyObject_RichCompareBool(self->default_factory, other->default_factory, Py_EQ));
-        if (equal < 0) return NULL;
-        if (!equal) goto done;
         DO_COMPARE(alias);
     }
 #undef DO_COMPARE
@@ -2451,23 +2392,6 @@ Field_hash(Field *self) {
     DO_HASH(description);
     DO_HASH(deprecated);
     /* Leave out examples & json_schema_extra, since they could be unhashable */
-    /* Also hash default_value and default_factory if not NODEFAULT */
-    if (self->default_value != NODEFAULT) {
-        Py_uhash_t lane = PyObject_Hash(self->default_value);
-        if (lane == (Py_uhash_t)-1) return -1;
-        acc += lane * MS_HASH_XXPRIME_2;
-        acc = MS_HASH_XXROTATE(acc);
-        acc *= MS_HASH_XXPRIME_1;
-        nfields += 1;
-    }
-    if (self->default_factory != NODEFAULT) {
-        Py_uhash_t lane = PyObject_Hash(self->default_factory);
-        if (lane == (Py_uhash_t)-1) return -1;
-        acc += lane * MS_HASH_XXPRIME_2;
-        acc = MS_HASH_XXROTATE(acc);
-        acc *= MS_HASH_XXPRIME_1;
-        nfields += 1;
-    }
     DO_HASH(alias);
 #undef DO_HASH
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
@@ -2497,8 +2421,6 @@ Field_traverse(Field *self, visitproc visit, void *arg)
     Py_VISIT(self->examples);
     Py_VISIT(self->deprecated);
     Py_VISIT(self->json_schema_extra);
-    Py_VISIT(self->default_value);
-    Py_VISIT(self->default_factory);
     Py_VISIT(self->alias);
     return 0;
 }
@@ -2521,8 +2443,6 @@ Field_clear(Field *self)
     Py_CLEAR(self->examples);
     Py_CLEAR(self->deprecated);
     Py_CLEAR(self->json_schema_extra);
-    if (self->default_value != NODEFAULT) Py_CLEAR(self->default_value);
-    if (self->default_factory != NODEFAULT) Py_CLEAR(self->default_factory);
     Py_CLEAR(self->alias);
     return 0;
 }
@@ -2550,10 +2470,6 @@ static PyMemberDef Field_members[] = {
     {"examples", T_OBJECT, offsetof(Field, examples), READONLY, NULL},
     {"deprecated", T_OBJECT, offsetof(Field, deprecated), READONLY, NULL},
     {"json_schema_extra", T_OBJECT, offsetof(Field, json_schema_extra), READONLY, NULL},
-    {"default", T_OBJECT_EX, offsetof(Field, default_value), READONLY,
-     "The default value, or NODEFAULT if no default"},
-    {"default_factory", T_OBJECT_EX, offsetof(Field, default_factory), READONLY,
-     "The default_factory, or NODEFAULT if no default"},
     {"alias", T_OBJECT, offsetof(Field, alias), READONLY,
      "An alternative name to use when encoding/decoding this field"},
     {NULL},
@@ -6020,58 +5936,14 @@ static int
 structmeta_process_default(StructMetaInfo *info, StructspecState *mod, PyObject *name) {
     PyObject *obj = PyDict_GetItem(info->namespace, name);
     PyObject *default_val = NULL;
-    Field *annot_field = NULL;
     PyTypeObject *type;
     if (structmeta_process_rename(info, mod, name, obj) < 0) return -1;
-
-    /* Extract Field from annotation metadata */
-    if (info->resolved_annotations != NULL) {
-        PyObject *annotation = PyDict_GetItem(info->resolved_annotations, name);
-        if (annotation != NULL) {
-            annot_field = extract_field_from_annotated(annotation, mod);
-        }
-    }
 
     /* Error: Field used outside Annotated */
     if (obj != NULL && Py_TYPE(obj) == &Field_Type) {
         PyErr_SetString(PyExc_TypeError,
             "`Field` can only be used inside `typing.Annotated`");
         return -1;
-    }
-
-    /* Error: conflict between annotation Field default and class-body value */
-    if (obj != NULL && annot_field != NULL) {
-        if (annot_field->default_value != NODEFAULT ||
-            annot_field->default_factory != NODEFAULT) {
-            PyErr_Format(PyExc_TypeError,
-                "Cannot combine a Field default with a class-body default "
-                "for field '%U'", name);
-            return -1;
-        }
-    }
-
-    /* Use annotation Field's default if no class-body value */
-    if (obj == NULL && annot_field != NULL) {
-        if (annot_field->default_factory != NODEFAULT) {
-            if (annot_field->default_factory == (PyObject *)&PyTuple_Type) {
-                default_val = PyTuple_New(0);
-            }
-            else if (annot_field->default_factory == (PyObject *)&PyFrozenSet_Type) {
-                default_val = PyFrozenSet_New(NULL);
-            }
-            else {
-                default_val = Factory_New(annot_field->default_factory);
-            }
-            if (default_val == NULL) return -1;
-            if (dict_discard(info->namespace, name) < 0) {
-                Py_DECREF(default_val);
-                return -1;
-            }
-            return PyDict_SetItem(info->defaults_lk, name, default_val);
-        }
-        else if (annot_field->default_value != NODEFAULT) {
-            obj = annot_field->default_value;
-        }
     }
 
     if (obj == NULL) {
@@ -6123,7 +5995,7 @@ error_nonempty:
     PyErr_Format(
         PyExc_TypeError,
         "Using a non-empty mutable collection (%R) as a default value is unsafe. "
-        "Instead configure a `default_factory` for this field.",
+        "Instead configure a `Factory` for this field.",
         obj
     );
     return -1;
@@ -6132,7 +6004,7 @@ error_mutable_struct:
     PyErr_Format(
         PyExc_TypeError,
         "Using a mutable struct object (%R) as a default value is unsafe. "
-        "Either configure a `default_factory` for this field, or set "
+        "Either configure a `Factory` for this field, or set "
         "`frozen=True` on `%.200s`",
         obj, type->tp_name
     );

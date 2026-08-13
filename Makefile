@@ -37,7 +37,7 @@ test-doc: ## Run doctests
 .PHONY: test-all
 test-all: ## Run tests in all supporte Python versions
 	for py_v in $(PY_VERSIONS); do \
-		uv run --isolated -p $$py_v pytest; \
+		uv run --isolated --reinstall-package structtype -p $$py_v pytest; \
 	done
 
 UNAME_S := $(shell uname -s)

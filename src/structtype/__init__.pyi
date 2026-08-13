@@ -158,6 +158,11 @@ class Raw(bytes):
 _NonNegativeInt: TypeAlias = int
 
 @final
+class Factory:
+    def __init__(self, factory: Callable[[], Any]) -> None: ...
+    factory: Final[Callable[[], Any]]
+
+@final
 class Field:
     # Numeric:
     @overload
@@ -167,8 +172,6 @@ class Field:
         gt: int | float | None = None,
         lt: int | float | None = None,
         multiple_of: int | float | None = None,
-        default: Any = NODEFAULT,
-        default_factory: Callable[[], Any] | None = None,
         alias: str | None = None,
         title: str | None = None,
         description: str | None = None,
@@ -183,8 +186,6 @@ class Field:
         gt: int | float | None = None,
         le: int | float | None = None,
         multiple_of: int | float | None = None,
-        default: Any = NODEFAULT,
-        default_factory: Callable[[], Any] | None = None,
         alias: str | None = None,
         title: str | None = None,
         description: str | None = None,
@@ -199,8 +200,6 @@ class Field:
         ge: int | float | None = None,
         lt: int | float | None = None,
         multiple_of: int | float | None = None,
-        default: Any = NODEFAULT,
-        default_factory: Callable[[], Any] | None = None,
         alias: str | None = None,
         title: str | None = None,
         description: str | None = None,
@@ -215,8 +214,6 @@ class Field:
         ge: int | float | None = None,
         le: int | float | None = None,
         multiple_of: int | float | None = None,
-        default: Any = NODEFAULT,
-        default_factory: Callable[[], Any] | None = None,
         alias: str | None = None,
         title: str | None = None,
         description: str | None = None,
@@ -233,8 +230,6 @@ class Field:
         min_length: _NonNegativeInt | None = None,
         max_length: _NonNegativeInt | None = None,
         tz: bool | None = None,
-        default: Any = NODEFAULT,
-        default_factory: Callable[[], Any] | None = None,
         alias: str | None = None,
         title: str | None = None,
         description: str | None = None,
@@ -242,8 +237,6 @@ class Field:
         examples: list[Any] | None = None,
         deprecated: bool | None = None,
     ) -> None: ...
-    default: Final[Any]
-    default_factory: Final[Callable[[], Any] | None]
     alias: Final[str | None]
     gt: Final[int | float | None]
     ge: Final[int | float | None]

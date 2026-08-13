@@ -98,15 +98,14 @@ type annotation.
 
 .. code-block:: python
 
-    >>> from typing import Annotated
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, Factory
     >>> import uuid
 
     >>> fixed_uuid = uuid.UUID("f63219d5-e9ca-4ae8-afd0-cba30e84222d")
 
     >>> class Example(Struct):
     ...     a: int = 1
-    ...     b: Annotated[uuid.UUID, Field(default_factory=lambda: fixed_uuid)]
+    ...     b: uuid.UUID = Factory(lambda: fixed_uuid)
     ...     c: list[int] = []
 
     >>> Example()
@@ -126,26 +125,26 @@ Default values may be one of 3 kinds:
   this variety.
 
 - A "dynamic" default value. Here a new default value is used for every
-  instance. These are specified by passing a 0-argument callable to the
-  ``default_factory`` argument of `structtype.Field` (as in ``b`` above). This
+  instance. These are specified by wrapping a 0-argument callable in
+  `structtype.Factory` as the class-body default (as in ``b`` above). This
   function will be called as needed to create a new default value per instance.
   These are mainly useful for occasions where you need dynamic defaults, or
   when a default value is a mutable object that you don't want to share between
   all instances of the struct (a `common gotcha
   <https://docs.python-guide.org/writing/gotchas/#mutable-default-arguments>`_
-  in Python). Note that since the ``default_factory`` callables take no
+  in Python). Note that since the ``Factory`` callables take no
   arguments, you might need to make use of a lambda_ or `functools.partial` to
   forward any additional parameters needed to the default factory.
 
 - Builtin *empty* mutable collections (``[]``, ``{}``, ``set()``, and
   ``bytearray()``) may be used as default values (as in ``c`` above). Since
   defaults of these types are so common, these are "syntactic sugar" for
-  specifying the corresponding ``default_factory`` (to avoid accidental sharing
-  of mutable values). A default of ``[]`` is identical to a default of
-  ``Field(default_factory=list)``, with a new list instance used each time.
+  ``Factory(list)`` and friends (to avoid accidental sharing of mutable
+  values). A default of ``[]`` is identical to a default of
+  ``Factory(list)``, with a new list instance used each time.
   Specifying a non-empty mutable collection (e.g. ``[1, 2, 3]``) as a default
-  value will cause the struct definition to error (you should manually define a
-  ``default_factory`` in this case).
+  value will cause the struct definition to error (you should wrap a callable
+  in ``Factory`` in this case).
 
 .. _struct-post-init:
 
@@ -728,23 +727,22 @@ detection logic is as follows:
     ...     return False
 
 This detection never calls a ``default_factory``. A field configured with a
-custom ``default_factory`` is only omitted when the factory is one of the
-builtin collection constructors (``list``, ``dict``, ``set``, ``tuple``, or
-``frozenset``). Any other callable (a user-defined function, a ``lambda``, or a
+``Factory`` is only omitted when the factory is one of the builtin collection
+constructors (``list``, ``dict``, ``set``, ``tuple``, or ``frozenset``). Any
+other callable (a user-defined function, a ``lambda``, or a
 ``Struct``/``dataclass``/``attrs`` type) is treated as opaque, so the field is
 always encoded, even when the value it produces is empty. To omit an empty
 collection default, configure the builtin constructor directly:
 
 .. code-block:: python
 
-    >>> from typing import Annotated
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, Factory
     >>> class Basket(Struct, omit_defaults=True):
-    ...     items: Annotated[list[int], Field(default_factory=list)]
+    ...     items: list[int] = Factory(list)
 
-The field annotation supplies the element type, so ``default_factory=list``
-still type checks. Specifying ``default=[]`` works too: ``structtype`` doesn't
-share mutable default values between instances.
+The field annotation supplies the element type, so ``Factory(list)`` still type
+checks. Specifying a ``Factory`` wrapping a custom callable works too:
+``structtype`` never shares mutable default values between instances.
 
 
 .. _forbid-unknown-fields:

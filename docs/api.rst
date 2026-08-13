@@ -183,6 +183,13 @@ Field
     :members:
 
 
+Factory
+-------
+
+.. autoclass:: Factory
+    :members:
+
+
 Raw
 ---
 

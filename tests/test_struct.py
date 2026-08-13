@@ -14,7 +14,7 @@ from typing import Annotated, Any, Generic, TypeVar
 import pytest
 
 import structtype
-from structtype import NODEFAULT, UNSET, Field, Struct, StructConfig
+from structtype import NODEFAULT, UNSET, Factory, Field, Struct, StructConfig
 
 from .utils import temp_module
 
@@ -66,34 +66,43 @@ def test_singletons(obj, str_obj, protocol):
 
 def test_field():
     f1 = structtype.Field()
-    assert f1.default is NODEFAULT
-    assert f1.default_factory is NODEFAULT
     assert f1.alias is None
 
-    f2 = structtype.Field(default=1)
-    assert f2.default == 1
-    assert f2.default_factory is NODEFAULT
-    assert f2.alias is None
+    f2 = structtype.Field(alias="foo")
+    assert f2.alias == "foo"
 
-    f3 = structtype.Field(default_factory=int)
-    assert f3.default is NODEFAULT
-    assert f3.default_factory is int
+    f3 = structtype.Field(alias=None)
     assert f3.alias is None
 
-    f4 = structtype.Field(alias="foo")
-    assert f4.alias == "foo"
+    with pytest.raises(TypeError, match="keyword argument"):
+        structtype.Field(default=1)
 
-    f5 = structtype.Field(alias=None)
-    assert f5.alias is None
-
-    with pytest.raises(TypeError, match="Cannot set both"):
-        structtype.Field(default=1, default_factory=int)
-
-    with pytest.raises(TypeError, match="must be callable"):
-        structtype.Field(default_factory=1)
+    with pytest.raises(TypeError, match="keyword argument"):
+        structtype.Field(default_factory=int)
 
     with pytest.raises(TypeError, match="must be a str or None"):
         structtype.Field(alias=b"bad")
+
+
+def test_field_repr_roundtrip():
+    f = structtype.Field(gt=0)
+    assert "gt=0" in repr(f)
+    assert "default" not in repr(f)
+    assert "default_factory" not in repr(f)
+
+
+def test_factory():
+    f = structtype.Factory(list)
+    assert f.factory is list
+
+    with pytest.raises(TypeError, match="factory must be callable"):
+        structtype.Factory(1)
+
+    with pytest.raises(TypeError, match="expected 1 argument"):
+        structtype.Factory()
+
+    with pytest.raises(TypeError, match="no keyword arguments"):
+        structtype.Factory(factory=list)
 
 
 def test_struct_class_attributes():
@@ -899,10 +908,10 @@ def test_struct_defaults_from_field():
     default = []
 
     class Test(Struct):
-        req: Annotated[int, Field()]
-        x: Annotated[int, Field(default=1)]
-        y: Annotated[int, Field(default_factory=lambda: 2)]
-        z: Annotated[list[int], Field(default=default)]
+        req: int
+        x: int = 1
+        y: int = Factory(lambda: 2)
+        z: list[int] = default
 
     t = Test(100)
     assert t.req == 100
@@ -915,12 +924,12 @@ def test_struct_defaults_from_field():
 def test_struct_defaults_from_field_annotated():
     source = """
     from typing import Annotated
-    from structtype import Struct, Field
+    from structtype import Struct, Field, Factory
 
     class Test(Struct):
-        a: Annotated[int, Field(default=42)]
-        b: Annotated[list, Field(default_factory=list)]
-        c: Annotated[str, Field(alias="ccc", default="hello")]
+        a: int = 42
+        b: list = Factory(list)
+        c: Annotated[str, Field(alias="ccc")] = "hello"
     """
     with temp_module(source) as mod:
         t = mod.Test()
@@ -946,14 +955,14 @@ def test_field_outside_annotated_errors():
     with pytest.raises(TypeError, match="Annotated"):
 
         class Test(Struct):
-            x: int = Field(default=0)
+            x: int = Field(gt=0)
 
 
-def test_field_default_conflict_with_class_body():
-    with pytest.raises(TypeError, match="Field default"):
+def test_field_default_kwargs_removed():
+    with pytest.raises(TypeError, match="keyword argument"):
 
         class Test(Struct):
-            x: Annotated[int, Field(default=0)] = 5
+            x: Annotated[int, Field(default=0)]
 
 
 def test_struct_default_factory_errors():
@@ -961,7 +970,7 @@ def test_struct_default_factory_errors():
         raise ValueError("Oh no")
 
     class Test(Struct):
-        x: Annotated[int, Field(default_factory=bad)]
+        x: int = Factory(bad)
 
     with pytest.raises(ValueError):
         Test()
@@ -2357,7 +2366,7 @@ class TestInspectFields:
         class Example(structtype.Struct):
             x: int
             y: int = 0
-            z: Annotated[int, structtype.Field(default_factory=factory)]
+            z: int = structtype.Factory(factory)
 
         arg = Example(1, 2, 3) if instance else Example
         fields = structtype.fields(arg)

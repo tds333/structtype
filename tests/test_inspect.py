@@ -413,7 +413,7 @@ def test_struct(kw):
     class Example(structtype.Struct, **kw):
         x: int
         y: int = 0
-        z: Annotated[int, structtype.Field(default_factory=factory)]
+        z: int = structtype.Factory(factory)
 
     sol = mi.StructType(
         cls=Example,

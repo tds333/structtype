@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Remove `Field(default=...)` and `Field(default_factory=...)`. Defaults are now
+  always specified on the class body: a constant via `x: int = 3`, and a
+  per-instance default by wrapping a callable in the new `structtype.Factory`,
+  e.g. `x: list = Factory(list)`. `Field` is now a pure constraints/metadata
+  object and may only be used inside `typing.Annotated`.
+- Add `structtype.Factory(func)`, a wrapper for per-instance default values.
+  `= Factory(list)` is equivalent to the previous `Field(default_factory=list)`.
 - Add `Field(deprecated=True)` to mark a field as deprecated in the generated
   JSON Schema.
 
