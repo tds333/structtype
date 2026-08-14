@@ -2904,11 +2904,19 @@ typedef struct {
 struct StructInfo;
 
 typedef struct {
+    const char *buf;
+    Py_ssize_t size;
+} MS_StrView;
+
+typedef struct {
     PyHeapTypeObject base;
     PyObject *struct_fields;
     PyObject *struct_defaults;
     Py_ssize_t *struct_offsets;
     PyObject *struct_encode_fields;
+    MS_StrView *struct_encode_keys;   /* raw UTF-8 views of encode fields, NULL if none */
+    MS_StrView struct_tag_field_view; /* raw UTF-8 view of tag field, valid if tag_field set */
+    PyObject *struct_module;          /* owning structtype module, or NULL */
     struct StructInfo *struct_info;
     Py_ssize_t nkwonly;
     Py_ssize_t n_trailing_defaults;
@@ -6326,6 +6334,46 @@ structmeta_construct_encode_fields(StructMetaInfo *info)
     return 0;
 }
 
+/* Precompute raw UTF-8 views of the struct's encode field names and tag field
+ * so the JSON encoder can write keys without touching Python str objects at
+ * encode time. Field names are guaranteed to be escape-free (identifiers, or
+ * validated by structmeta_construct_encode_fields), so callers may write them
+ * with the noescape path. The tag field may contain arbitrary characters and
+ * must be written with the escaping path. */
+static int
+structmeta_construct_encode_key_views(StructMetaObject *cls)
+{
+    cls->struct_encode_keys = NULL;
+    cls->struct_tag_field_view.buf = NULL;
+    cls->struct_tag_field_view.size = 0;
+
+    if (cls->struct_tag_field != NULL) {
+        cls->struct_tag_field_view.buf = unicode_str_and_size(
+            cls->struct_tag_field, &cls->struct_tag_field_view.size
+        );
+        if (cls->struct_tag_field_view.buf == NULL) return -1;
+    }
+
+    Py_ssize_t nfields = PyTuple_GET_SIZE(cls->struct_encode_fields);
+    if (nfields == 0) return 0;
+
+    cls->struct_encode_keys = PyMem_Malloc(nfields * sizeof(MS_StrView));
+    if (cls->struct_encode_keys == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+
+    for (Py_ssize_t i = 0; i < nfields; i++) {
+        PyObject *field = PyTuple_GET_ITEM(cls->struct_encode_fields, i);
+        /* Use the checked variant to force UTF-8 materialization for
+         * non-ASCII names; the nocheck variant may return a NULL utf8
+         * pointer before the cache is populated. */
+        cls->struct_encode_keys[i].buf = unicode_str_and_size(field, &cls->struct_encode_keys[i].size);
+        if (cls->struct_encode_keys[i].buf == NULL) return -1;
+    }
+    return 0;
+}
+
 /* Extracts the qualname for a class, and strips off any leading bits from a
  * function namespace. Examples:
  *
@@ -6677,6 +6725,16 @@ StructMeta_new_inner(
     cls->struct_tag_value = info.tag_value;
     Py_XINCREF(info.rename);
     cls->rename = info.rename;
+
+    if (structmeta_construct_encode_key_views(cls) < 0) goto cleanup;
+
+    /* Cache the module on the type so methods like struct_dump_json /
+     * struct_validate_json / struct_dump avoid a PyState_FindModule lookup
+     * on every call. Types are per-interpreter heap objects, so this is
+     * sub-interpreter safe. */
+    cls->struct_module = PyState_FindModule(&structtypemodule);
+    Py_XINCREF(cls->struct_module);
+
     cls->hash_offset = info.hash_offset;
     cls->frozen = info.frozen;
     cls->eq = info.eq;
@@ -6712,6 +6770,13 @@ cleanup:
     if (!ok) {
         if (info.offsets != NULL) {
             PyMem_Free(info.offsets);
+            /* cls->struct_offsets aliases info.offsets; NULL it so dealloc
+             * doesn't double-free if the error happened after assignment. */
+            if (cls != NULL) cls->struct_offsets = NULL;
+        }
+        if (cls != NULL && cls->struct_encode_keys != NULL) {
+            PyMem_Free(cls->struct_encode_keys);
+            cls->struct_encode_keys = NULL;
         }
         Py_XDECREF(cls);
         return NULL;
@@ -6941,6 +7006,7 @@ StructMeta_traverse(StructMetaObject *self, visitproc visit, void *arg)
     Py_VISIT(self->struct_fields);
     Py_VISIT(self->struct_defaults);
     Py_VISIT(self->struct_encode_fields);
+    Py_VISIT(self->struct_module);
     Py_VISIT(self->struct_tag);  /* May be a function */
     Py_VISIT(self->rename);  /* May be a function */
     Py_VISIT(self->post_init);
@@ -6957,6 +7023,7 @@ StructMeta_clear(StructMetaObject *self)
     Py_CLEAR(self->struct_fields);
     Py_CLEAR(self->struct_defaults);
     Py_CLEAR(self->struct_encode_fields);
+    Py_CLEAR(self->struct_module);
     Py_CLEAR(self->struct_tag_field);
     Py_CLEAR(self->struct_tag_value);
     Py_CLEAR(self->struct_tag);
@@ -6967,6 +7034,10 @@ StructMeta_clear(StructMetaObject *self)
     if (self->struct_offsets != NULL) {
         PyMem_Free(self->struct_offsets);
         self->struct_offsets = NULL;
+    }
+    if (self->struct_encode_keys != NULL) {
+        PyMem_Free(self->struct_encode_keys);
+        self->struct_encode_keys = NULL;
     }
     return PyType_Type.tp_clear((PyObject *)self);
 }
@@ -13038,10 +13109,9 @@ static int
 json_encode_struct_object(
     EncoderState *self, StructMetaObject *struct_type, PyObject *obj
 ) {
-    PyObject *key, *val, *fields, *defaults, *tag_field, *tag_value;
+    PyObject *val, *fields, *defaults, *tag_value;
     Py_ssize_t i, nfields, nunchecked;
     int status = -1;
-    tag_field = struct_type->struct_tag_field;
     tag_value = struct_type->struct_tag_value;
     fields = struct_type->struct_encode_fields;
     defaults = struct_type->struct_defaults;
@@ -13055,30 +13125,31 @@ json_encode_struct_object(
     Py_ssize_t start_len = self->output_len;
     if (Py_EnterRecursiveCall(" while serializing an object")) return -1;
     if (tag_value != NULL) {
-        if (json_encode_str(self, tag_field) < 0) goto cleanup;
+        MS_StrView tv = struct_type->struct_tag_field_view;
+        if (json_encode_cstr_inline(self, tv.buf, tv.size) < 0) goto cleanup;
         if (ms_write(self, ":", 1) < 0) goto cleanup;
         if (json_encode_struct_tag(self, tag_value) < 0) goto cleanup;
         if (ms_write(self, ",", 1) < 0) goto cleanup;
     }
 
     for (i = 0; i < nunchecked; i++) {
-        key = PyTuple_GET_ITEM(fields, i);
         val = Struct_get_index(obj, i);
         if (MS_UNLIKELY(val == NULL)) goto cleanup;
         if (MS_UNLIKELY(val == UNSET)) continue;
-        if (json_encode_str_noescape(self, key) < 0) goto cleanup;
+        MS_StrView kv = struct_type->struct_encode_keys[i];
+        if (json_encode_cstr_noescape(self, kv.buf, kv.size) < 0) goto cleanup;
         if (ms_write(self, ":", 1) < 0) goto cleanup;
         if (json_encode(self, val) < 0) goto cleanup;
         if (ms_write(self, ",", 1) < 0) goto cleanup;
     }
     for (i = nunchecked; i < nfields; i++) {
-        key = PyTuple_GET_ITEM(fields, i);
         val = Struct_get_index(obj, i);
         if (MS_UNLIKELY(val == NULL)) goto cleanup;
         if (MS_UNLIKELY(val == UNSET)) continue;
         PyObject *default_val = PyTuple_GET_ITEM(defaults, i - nunchecked);
         if (!is_default(val, default_val)) {
-            if (json_encode_str_noescape(self, key) < 0) goto cleanup;
+            MS_StrView kv = struct_type->struct_encode_keys[i];
+            if (json_encode_cstr_noescape(self, kv.buf, kv.size) < 0) goto cleanup;
             if (ms_write(self, ":", 1) < 0) goto cleanup;
             if (json_encode(self, val) < 0) goto cleanup;
             if (ms_write(self, ",", 1) < 0) goto cleanup;
@@ -13149,9 +13220,6 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     }
     else if (obj == Py_False) {
         return ms_write(self, "false", 5);
-    }
-    else if (ms_is_struct_type(type)) {
-        return json_encode_struct(self, obj);
     }
     else if (PyTuple_Check(obj)) {
         return json_encode_tuple(self, obj);
@@ -13299,6 +13367,12 @@ json_encode_inline(EncoderState *self, PyObject *obj)
         return json_encode_dict(self, obj);
     }
 #endif
+    else if (ms_is_struct_type(type)) {
+        /* Structs are common in the payload; check before the uncommon
+         * dispatch so they avoid the MS_NOINLINE call and its chain of
+         * type checks. */
+        return json_encode_struct(self, obj);
+    }
     else {
         return json_encode_uncommon(self, type, obj);
     }
@@ -15903,46 +15977,16 @@ static PyTypeObject JSONDecoder_Type = {
     .tp_members = JSONDecoder_members,
 };
 
-static PyObject*
-structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
+/* Shared decode core: parse `buf` as JSON into `type` with the given
+ * `strict` / `dec_hook` options. Used both by the module-level
+ * `structtype_json_decode` and by the `Struct.struct_validate_json` method
+ * (which supplies the struct type directly, avoiding keyword re-marshaling). */
+static PyObject *
+json_decode_common(
+    StructspecState *mod, PyObject *buf, PyObject *type, int strict, PyObject *dec_hook
+)
 {
-    PyObject *res = NULL, *buf = NULL, *type = NULL, *dec_hook = NULL, *strict_obj = NULL;
-    int strict = 1;
-    StructspecState *mod = structtype_get_state(self);
-
-    /* Parse arguments */
-    if (!check_positional_nargs(nargs, 1, 1)) return NULL;
-    buf = args[0];
-    if (kwnames != NULL) {
-        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
-        if ((type = find_keyword(kwnames, args + nargs, mod->str_type)) != NULL) nkwargs--;
-        if ((strict_obj = find_keyword(kwnames, args + nargs, mod->str_strict)) != NULL) nkwargs--;
-        if ((dec_hook = find_keyword(kwnames, args + nargs, mod->str_dec_hook)) != NULL) nkwargs--;
-        if (nkwargs > 0) {
-            PyErr_SetString(
-                PyExc_TypeError,
-                "Extra keyword arguments provided"
-            );
-            return NULL;
-        }
-    }
-
-    /* Handle dec_hook */
-    if (dec_hook == Py_None) {
-        dec_hook = NULL;
-    }
-    if (dec_hook != NULL) {
-        if (!PyCallable_Check(dec_hook)) {
-            PyErr_SetString(PyExc_TypeError, "dec_hook must be callable");
-            return NULL;
-        }
-    }
-
-    /* Handle strict */
-    if (strict_obj != NULL) {
-        strict = PyObject_IsTrue(strict_obj);
-        if (strict < 0) return NULL;
-    }
+    PyObject *res = NULL;
 
     JSONDecoderState state = {
         .strict = strict,
@@ -16000,6 +16044,50 @@ structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
     }
 
     return res;
+}
+
+static PyObject*
+structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
+{
+    PyObject *buf = NULL, *type = NULL, *dec_hook = NULL, *strict_obj = NULL;
+    int strict = 1;
+    StructspecState *mod = structtype_get_state(self);
+
+    /* Parse arguments */
+    if (!check_positional_nargs(nargs, 1, 1)) return NULL;
+    buf = args[0];
+    if (kwnames != NULL) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
+        if ((type = find_keyword(kwnames, args + nargs, mod->str_type)) != NULL) nkwargs--;
+        if ((strict_obj = find_keyword(kwnames, args + nargs, mod->str_strict)) != NULL) nkwargs--;
+        if ((dec_hook = find_keyword(kwnames, args + nargs, mod->str_dec_hook)) != NULL) nkwargs--;
+        if (nkwargs > 0) {
+            PyErr_SetString(
+                PyExc_TypeError,
+                "Extra keyword arguments provided"
+            );
+            return NULL;
+        }
+    }
+
+    /* Handle dec_hook */
+    if (dec_hook == Py_None) {
+        dec_hook = NULL;
+    }
+    if (dec_hook != NULL) {
+        if (!PyCallable_Check(dec_hook)) {
+            PyErr_SetString(PyExc_TypeError, "dec_hook must be callable");
+            return NULL;
+        }
+    }
+
+    /* Handle strict */
+    if (strict_obj != NULL) {
+        strict = PyObject_IsTrue(strict_obj);
+        if (strict < 0) return NULL;
+    }
+
+    return json_decode_common(mod, buf, type, strict, dec_hook);
 }
 
 /*************************************************************************
@@ -18435,17 +18523,26 @@ Struct_dump_json(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObje
         return PyErr_Format(PyExc_TypeError,
             "struct_dump_json() takes no positional arguments (%zd given)", nargs);
     }
-    PyObject *mod = PyState_FindModule(&structtypemodule);
+    PyObject *mod = ((StructMetaObject *)Py_TYPE(self))->struct_module;
+    if (mod == NULL) {
+        mod = PyState_FindModule(&structtypemodule);
+    }
     if (mod == NULL) return NULL;
     Py_ssize_t nkwargs = (kwnames != NULL) ? PyTuple_GET_SIZE(kwnames) : 0;
-    PyObject **new_args = PyMem_Malloc((1 + nkwargs) * sizeof(PyObject *));
-    if (new_args == NULL) return PyErr_NoMemory();
+    PyObject *stack_args[8], **new_args;
+    if (nkwargs < 8) {
+        new_args = stack_args;
+    }
+    else {
+        new_args = PyMem_Malloc((1 + nkwargs) * sizeof(PyObject *));
+        if (new_args == NULL) return PyErr_NoMemory();
+    }
     new_args[0] = self;
     for (Py_ssize_t i = 0; i < nkwargs; i++) {
         new_args[1 + i] = args[nargs + i];
     }
     PyObject *result = structtype_json_encode(mod, new_args, 1, kwnames);
-    PyMem_Free(new_args);
+    if (new_args != stack_args) PyMem_Free(new_args);
     return result;
 }
 
@@ -18456,45 +18553,44 @@ Struct_validate_json(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyO
         return PyErr_Format(PyExc_TypeError,
             "struct_validate_json() takes exactly 1 positional argument (%zd given)", nargs);
     }
-    PyObject *mod = PyState_FindModule(&structtypemodule);
+    PyObject *mod = ((StructMetaObject *)cls)->struct_module;
+    if (mod == NULL) {
+        mod = PyState_FindModule(&structtypemodule);
+    }
     if (mod == NULL) return NULL;
+    StructspecState *state = structtype_get_state(mod);
 
-    /* structtype_json_decode expects nargs=1 (buf) with keyword values at args[1+] */
-    Py_ssize_t nkwargs = (kwnames != NULL) ? PyTuple_GET_SIZE(kwnames) : 0;
-
-    /* Allocate new_args: buf + cls (for type=cls) + user keyword values */
-    PyObject **new_args = PyMem_Malloc((1 + 1 + nkwargs) * sizeof(PyObject *));
-    if (new_args == NULL) return PyErr_NoMemory();
-    new_args[0] = args[0];  /* buf is the only positional arg */
-    new_args[1] = cls;       /* type=cls goes as keyword value at args[1] */
-    for (Py_ssize_t i = 0; i < nkwargs; i++) {
-        new_args[2 + i] = args[nargs + i];  /* user keyword values after */
+    /* Parse the strict / dec_hook keyword arguments directly, avoiding the
+     * kwnames re-marshaling that a call through structtype_json_decode
+     * would require. `type` is always cls. */
+    PyObject *dec_hook = NULL, *strict_obj = NULL;
+    int strict = 1;
+    if (kwnames != NULL) {
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
+        if ((strict_obj = find_keyword(kwnames, args + nargs, state->str_strict)) != NULL) nkwargs--;
+        if ((dec_hook = find_keyword(kwnames, args + nargs, state->str_dec_hook)) != NULL) nkwargs--;
+        if (nkwargs > 0) {
+            PyErr_SetString(
+                PyExc_TypeError,
+                "Extra keyword arguments provided"
+            );
+            return NULL;
+        }
     }
 
-    /* Build kwnames: [type, ...user_kw_names...] */
-    PyObject *type_str = PyUnicode_InternFromString("type");
-    if (type_str == NULL) {
-        PyMem_Free(new_args);
+    if (dec_hook == Py_None) {
+        dec_hook = NULL;
+    }
+    if (dec_hook != NULL && !PyCallable_Check(dec_hook)) {
+        PyErr_SetString(PyExc_TypeError, "dec_hook must be callable");
         return NULL;
     }
-    PyObject *new_kwnames = PyTuple_New(1 + nkwargs);
-    if (new_kwnames == NULL) {
-        Py_DECREF(type_str);
-        PyMem_Free(new_args);
-        return NULL;
-    }
-    PyTuple_SET_ITEM(new_kwnames, 0, type_str);
-    for (Py_ssize_t i = 0; i < nkwargs; i++) {
-        PyObject *name = PyTuple_GET_ITEM(kwnames, i);
-        PyTuple_SET_ITEM(new_kwnames, 1 + i, name);
-        Py_INCREF(name);
+    if (strict_obj != NULL) {
+        strict = PyObject_IsTrue(strict_obj);
+        if (strict < 0) return NULL;
     }
 
-    /* Pass nargs=1 (buf is positional), with all keyword args */
-    PyObject *result = structtype_json_decode(mod, new_args, 1, new_kwnames);
-    Py_DECREF(new_kwnames);
-    PyMem_Free(new_args);
-    return result;
+    return json_decode_common(state, args[0], cls, strict, dec_hook);
 }
 
 static PyObject *
@@ -18504,7 +18600,14 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
         return PyErr_Format(PyExc_TypeError,
             "struct_dump() takes no positional arguments (%zd given)", nargs);
     }
-    StructspecState *mod = structtype_get_global_state();
+    StructspecState *mod = NULL;
+    PyObject *cached = ((StructMetaObject *)Py_TYPE(self))->struct_module;
+    if (cached != NULL) {
+        mod = structtype_get_state(cached);
+    }
+    if (mod == NULL) {
+        mod = structtype_get_global_state();
+    }
     if (mod == NULL) return NULL;
     PyObject *enc_hook = NULL, *sort_keys = NULL, *builtin_types = NULL;
     int str_keys = 0;
