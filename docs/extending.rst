@@ -173,6 +173,113 @@ use the protocol methods on the type there, or a :class:`Struct`:
     # on the type, or a `Struct` instead.
     StructAdapter(Annotated[complex, Field(dump=dump, validate=validate)])
 
+Recipes
+-------
+
+The escape hatch can be defined once as an annotated alias and reused across a
+project. These are the common Python stdlib types that ``structtype`` doesn't
+:doc:`natively support <supported-types>`, with a ``Field`` codec for each:
+
+.. code-block:: python
+
+    import fractions
+    import ipaddress
+    import pathlib
+    import re
+    import types
+    from collections import deque
+    from typing import Annotated
+    from structtype import Field
+
+    Complex = Annotated[complex, Field(
+        dump=lambda c: (c.real, c.imag),
+        validate=lambda o: complex(o[0], o[1]))]
+
+    Fraction = Annotated[fractions.Fraction, Field(
+        dump=lambda f: (f.numerator, f.denominator),
+        validate=lambda o: fractions.Fraction(o[0], o[1]))]
+
+    Deque = Annotated[deque, Field(
+        dump=lambda d: list(d),
+        validate=lambda o: deque(o))]
+
+    Path = Annotated[pathlib.Path, Field(
+        dump=lambda p: str(p),
+        validate=lambda o: pathlib.Path(o))]
+
+    Pattern = Annotated[re.Pattern, Field(
+        dump=lambda p: p.pattern,
+        validate=lambda o: re.compile(o))]
+
+    Range = Annotated[range, Field(
+        dump=lambda r: (r.start, r.stop, r.step),
+        validate=lambda o: range(o[0], o[1], o[2]))]
+
+    SimpleNamespace = Annotated[types.SimpleNamespace, Field(
+        dump=lambda n: vars(n),
+        validate=lambda o: types.SimpleNamespace(**o))]
+
+    IPv4Address = Annotated[ipaddress.IPv4Address, Field(
+        dump=str, validate=ipaddress.IPv4Address)]
+
+These aliases nest (``list[Complex]``, ``dict[str, Fraction]``), and the
+``dump`` / ``validate`` callables must map to :doc:`natively supported
+<supported-types>` values. Codec aliases are supported on :class:`Struct`
+fields only — :class:`StructAdapter` rejects them (see above). For types you
+control, prefer the ``struct_dump`` / ``struct_validate`` protocol methods.
+Single-argument string-constructible types such as ``IPv4Address`` may also use
+:class:`StrAdapter`.
+
+Pydantic custom types
+~~~~~~~~~~~~~~~~~~~~~
+
+pydantic lets you define *custom types* via the ``__get_pydantic_core_schema__``
+protocol. ``structtype`` has no runtime dependency on pydantic, so these are
+bridged from the user side with a :class:`Field` codec and
+``pydantic.TypeAdapter``:
+
+.. code-block:: python
+
+    from typing import Annotated
+    from pydantic import TypeAdapter
+    from structtype import Field
+
+    class Zip:  # a pydantic custom type whose core schema defines validation
+        def __init__(self, code: str):
+            self.code = code
+
+    # `validate` always works — it's pydantic's own validation/coercion.
+    # Provide a small `dump` when the type has no serializer.
+    PostalCode = Annotated[Zip, Field(
+        dump=lambda p: p.code,
+        validate=TypeAdapter(Zip).validate_python)]
+
+    # ...or, if the custom type defines a serializer in its core schema,
+    # both sides can use TypeAdapter directly:
+    PostalCode = Annotated[Zip, Field(
+        dump=TypeAdapter(Zip).dump_python,
+        validate=TypeAdapter(Zip).validate_python)]
+
+.. note::
+
+    Many pydantic custom types define *validation-only* schemas (no
+    serializer), and ``TypeAdapter.dump_python`` fails on those — so prefer
+    providing a small ``dump`` callable yourself.
+
+A reusable helper:
+
+.. code-block:: python
+
+    def pydantic_type(t, dump=None):
+        ta = TypeAdapter(t)
+        return Annotated[t, Field(dump=dump or ta.dump_python,
+                                  validate=ta.validate_python)]
+
+Like the stdlib recipes above, this applies to :class:`Struct` fields only
+(``StructAdapter`` rejects codec'd annotations). pydantic ``BaseModel`` types
+themselves are handled automatically via the ``model_dump`` /
+``model_validate`` protocol described above.
+
 Migrating from hooks
 --------------------
 
