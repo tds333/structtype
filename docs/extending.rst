@@ -1,105 +1,188 @@
 Extending
 =========
 
-To allow encoding/decoding types other than those :doc:`natively supported
-<supported-types>`, ``structtype`` provides a few callbacks. These may be
-passed to ``struct_dump_json`` / ``struct_validate_json``
-or to the ``struct_dump`` / ``struct_validate`` as keyword arguments.
+To encode and decode types other than those :doc:`natively supported
+<supported-types>`, ``structtype`` provides two mechanisms:
 
-- ``enc_hook``, for transforming custom types into values
-  that ``structtype`` :doc:`natively supports <supported-types>`.
-- ``dec_hook``, for converting natively supported types back into
-  a custom type when using :ref:`typed decoding <typed-decoding>`.
+- **Custom-type protocol** — the type itself declares ``struct_dump`` /
+  ``struct_validate`` methods. Pydantic's ``model_dump`` / ``model_validate``
+  are also recognized. This is the primary mechanism: it works for any custom
+  type and nests automatically.
+- **Per-field codecs** — an ``Annotated[X, Field(dump=..., validate=...)]``
+  attaches codecs to a single field. This is the escape hatch for types that
+  can't declare methods, such as builtins or third-party types you don't
+  control.
 
+Custom type protocol
+--------------------
 
-These should have the following signatures:
+Types are extended by implementing two methods:
 
-.. code-block:: python
+- ``struct_dump`` — an instance method converting the object into a value
+  composed of :doc:`natively supported <supported-types>` types.
+- ``struct_validate`` — a classmethod converting a value composed of natively
+  supported types back into an instance of the custom type.
 
-    def enc_hook(obj: Any) -> Any:
-        """Given an object that structtype doesn't know how to serialize by
-        default, convert it into an object that it does know how to
-        serialize"""
-        pass
+Both are detected by duck-typing, so no base class or registration is
+required. During encoding, the object's ``struct_dump`` result is serialized
+normally; during decoding, the decoded value is passed to ``struct_validate``.
 
-    def dec_hook(type: Type, obj: Any) -> Any:
-        """Given a type in a schema, convert ``obj`` (composed of natively
-        supported objects) into an object of type ``type``.
+.. note::
 
-        Any `TypeError` or `ValueError` exceptions raised by this method will
-        be considered "user facing" and converted into a `ValidationError` with
-        additional context. All other exceptions will be raised directly.
-        """
-        pass
+    Since no custom-type information is carried in the message itself,
+    decoding requires :ref:`typed decoding <typed-decoding>` — the custom type
+    must appear in the schema (e.g. as a field annotation).
 
-These can be composed together to form complex behaviors as needed.
-However, most use cases follow one of these patterns:
-
-- Mapping a custom type to/from natively supported types via ``enc_hook`` and
-  ``dec_hook`` callbacks.
-
-Both methods are illustrated below.
-
-Mapping to/from native types
-----------------------------
-
-This method uses messages composed only of natively supported types. During
-encoding, custom types are mapped to natively supported types, which are then
-serialized. This process is then reversed during decoding.
-
-.. code-block::
-
-    custom type -> native types -> encoded message -> native types -> custom type
-
-This means that :ref:`typed decoding <typed-decoding>` is required to roundtrip
-a message, since no custom type info is sent as part of the message.
-
-This method works best for types that are similar to a natively supported type
-(e.g. a `collections.deque` is similar to a `list`).  This can be accomplished
-by defining two callback functions:
-
-- ``enc_hook`` in ``struct_dump``, for transforming custom types into values
-  that ``structtype`` already knows how to serialize.
-- ``dec_hook`` in ``struct_validate``, for converting natively supported types back
-  into a custom type when using :ref:`typed decoding <typed-decoding>`.
-
-Here we define ``enc_hook`` and ``dec_hook`` callbacks to convert `complex`
-objects to/from objects, which are then natively handled by ``structtype``.
+Here we define a ``MyType`` that serializes as a pair of floats, similar to
+the pair-of-floats representation of a ``complex``:
 
 .. code-block:: python
 
     from structtype import Struct
-    from typing import Any, Type
+    from typing import Any
 
-    def enc_hook(obj: Any) -> Any:
-        if isinstance(obj, complex):
-            # convert the complex to a tuple of real, imag
-            return (obj.real, obj.imag)
-        else:
-            # Raise a NotImplementedError for other types
-            raise NotImplementedError(f"Objects of type {type(obj)} are not supported")
+    class MyType:
+        def __init__(self, real: float, imag: float) -> None:
+            self.real = real
+            self.imag = imag
 
+        def struct_dump(self) -> Any:
+            # Return a value composed of natively supported types
+            return (self.real, self.imag)
 
-    def dec_hook(type: Type, obj: Any) -> Any:
-        # `type` here is the value of the custom type annotation being decoded.
-        if type is complex:
-            # Convert ``obj`` (which should be a ``tuple``) to a complex
-            real, imag = obj
-            return complex(real, imag)
-        else:
-            # Raise a NotImplementedError for other types
-            raise NotImplementedError(f"Objects of type {type} are not supported")
+        @classmethod
+        def struct_validate(cls, obj: Any) -> "MyType":
+            # ``obj`` is composed of natively supported types
+            return cls(obj[0], obj[1])
 
+    class Message(Struct):
+        value: MyType
 
-    # Define a message that contains a complex type
-    class MyMessage(Struct):
-        field_1: str
-        field_2: complex
+    msg = Message(MyType(1.0, 2.0))
 
-    # An example message
-    msg = MyMessage("some string", complex(1, 2))
+    # Encode and decode a message using the protocol
+    buf = msg.struct_dump_json()
+    msg2 = Message.struct_validate_json(buf)
+    assert msg2.value.real == 1.0 and msg2.value.imag == 2.0
 
-    # Encode and decode the message using struct methods with custom hooks
-    buf = msg.struct_dump_json(enc_hook=enc_hook)
-    msg2 = MyMessage.struct_validate_json(buf, dec_hook=dec_hook)
-    assert msg == msg2  # True
+The protocol works wherever the type appears — nested inside containers,
+inside other structs, or behind optional types:
+
+.. code-block:: python
+
+    class Container(Struct):
+        values: list[MyType]
+        maybe: MyType | None = None
+
+    c = Container([MyType(1.0, 2.0)])
+    assert c.struct_dump_json() == b'{"values":[[1.0,2.0]],"maybe":null}'
+
+    c2 = Container.struct_validate_json(b'{"values":[[3.0,4.0]],"maybe":null}')
+    assert c2.values[0].real == 3.0 and c2.values[0].imag == 4.0
+
+Pydantic models
+~~~~~~~~~~~~~~~
+
+`pydantic` models are supported out of the box. They use pydantic's native
+``model_dump`` / ``model_validate`` methods, which ``structtype`` recognizes
+automatically:
+
+.. code-block:: python
+
+    from pydantic import BaseModel
+
+    class User(BaseModel):
+        name: str
+        age: int = 0
+
+    class Message(Struct):
+        user: User
+
+    msg = Message(User(name="Alice", age=30))
+    assert msg.struct_dump_json() == b'{"user":{"name":"Alice","age":30}}'
+
+    msg2 = Message.struct_validate_json(b'{"user":{"name":"Bob"}}')
+    assert msg2.user.name == "Bob"
+
+Annotation escape hatch
+-----------------------
+
+Some types can't implement the protocol. This includes builtins like
+`complex` and third-party types you don't control. For these, attach codecs
+to the field itself with :class:`Field`:
+
+.. code-block:: python
+
+    from typing import Annotated
+    from structtype import Struct, Field
+
+    def dump(c: complex) -> tuple[float, float]:
+        # Convert the value into natively supported types
+        return (c.real, c.imag)
+
+    def validate(obj) -> complex:
+        # Convert natively supported types back into the value
+        return complex(obj[0], obj[1])
+
+    class Message(Struct):
+        value: Annotated[complex, Field(dump=dump, validate=validate)]
+
+    msg = Message(complex(1.0, 2.0))
+    assert msg.struct_dump_json() == b'{"value":[1.0,2.0]}'
+
+    msg2 = Message.struct_validate_json(b'{"value":[1.0,2.0]}')
+    assert msg2.value == complex(1.0, 2.0)
+
+``dump`` and ``validate`` may be provided independently:
+
+- A ``dump``-only codec controls encoding; decoding falls back to the
+  protocol (if the type implements one), or fails with a ``ValidationError``.
+- A ``validate``-only codec controls decoding; encoding falls back to the
+  protocol, or fails with a ``TypeError``.
+
+Codecs are per-field. Different fields may use different codecs for the same
+type, and a field's codec applies wherever the annotated type appears within
+that field — including nested inside lists, dicts, and tuples:
+
+.. code-block:: python
+
+    class Message(Struct):
+        a: Annotated[complex, Field(dump=dump_pair)]        # -> [real, imag]
+        b: Annotated[complex, Field(dump=dump_real)]        # -> real
+        values: list[Annotated[complex, Field(dump=dump_pair)]]
+
+Codecs may only be attached to a *custom* type. ``structtype`` validates
+this when the class is created, raising a ``TypeError`` when:
+
+- the type is natively supported — ``Annotated[int, Field(dump=...)]``,
+- the type is a union — including optional types such as
+  ``Annotated[complex | None, Field(dump=...)]``
+  (``Annotated[int | str, Field(dump=...)]``),
+- two different ``dump`` codecs apply within a single field, e.g.
+  ``tuple[Annotated[complex, Field(dump=a)], Annotated[complex, Field(dump=b)]]``.
+
+Codecs are only supported on :class:`Struct` fields.
+:class:`StructAdapter` rejects annotations containing a ``Field`` codec —
+use the protocol methods on the type there, or a :class:`Struct`:
+
+.. code-block:: python
+
+    from structtype import StructAdapter
+
+    # Raises TypeError — use a `struct_dump`/`struct_validate` protocol method
+    # on the type, or a `Struct` instead.
+    StructAdapter(Annotated[complex, Field(dump=dump, validate=validate)])
+
+Migrating from hooks
+--------------------
+
+The previous ``enc_hook`` / ``dec_hook`` callbacks were removed. Replace them
+with a protocol method or a ``Field`` codec:
+
+- For types you control, implement ``struct_dump`` and ``struct_validate``
+  directly on the type.
+- For types that can't declare methods, attach a
+  ``Field(dump=..., validate=...)`` codec to the field's annotation.
+- The hooks were passed as keyword arguments to ``struct_dump`` /
+  ``struct_dump_json`` / ``struct_validate`` / ``struct_validate_json``.
+  Those arguments no longer exist; passing them raises a ``TypeError``.

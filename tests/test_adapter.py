@@ -1,13 +1,14 @@
 import datetime
 import decimal
 import enum
+import sys
 import uuid
 
 import pytest
 
 import structtype
 from structtype import ALL_BUILTIN_TYPES, Field, Struct, StructAdapter
-from typing import Annotated
+from typing import Annotated, Final, NewType
 
 
 def test_validate_json_simple():
@@ -257,3 +258,89 @@ def test_dump_builtin_types_nested():
     r = obj.struct_dump(builtin_types=ALL_BUILTIN_TYPES)
     assert isinstance(r["inner"], dict)
     assert isinstance(r["inner"]["ts"], datetime.datetime)
+
+
+def test_adapter_rejects_codec_annotation():
+    def dump(c):
+        return (c.real, c.imag)
+
+    def validate(obj):
+        return complex(obj[0], obj[1])
+
+    with pytest.raises(TypeError, match="not supported on StructAdapter"):
+        StructAdapter(Annotated[complex, Field(dump=dump)])
+    with pytest.raises(TypeError, match="not supported on StructAdapter"):
+        StructAdapter(Annotated[complex, Field(validate=validate)])
+    with pytest.raises(TypeError, match="not supported on StructAdapter"):
+        StructAdapter(list[Annotated[complex, Field(dump=dump, validate=validate)]])
+
+
+def test_adapter_rejects_newtype_wrapped_codec():
+    def dump(c):
+        return (c.real, c.imag)
+
+    T = NewType("T", Annotated[complex, Field(dump=dump)])
+    with pytest.raises(TypeError, match="not supported on StructAdapter"):
+        StructAdapter(T)
+
+
+def test_adapter_rejects_final_wrapped_codec():
+    def dump(c):
+        return (c.real, c.imag)
+
+    with pytest.raises(TypeError, match="not supported on StructAdapter"):
+        StructAdapter(Final[Annotated[complex, Field(dump=dump)]])
+
+
+def test_adapter_rejects_type_alias_wrapped_codec():
+    if sys.version_info < (3, 12):
+        return
+    from typing import TypeAliasType
+
+    def dump(c):
+        return (c.real, c.imag)
+
+    def validate(obj):
+        return complex(obj[0], obj[1])
+
+    C = TypeAliasType("C", Annotated[complex, Field(dump=dump, validate=validate)])
+    with pytest.raises(TypeError, match="not supported on StructAdapter"):
+        StructAdapter(C)
+
+
+def test_adapter_newtype_constraint_only_accepted():
+    NT = NewType("NT", Annotated[int, Field(gt=0)])
+    ta = StructAdapter(NT)
+    assert ta.struct_validate_json(b"42") == 42
+
+
+def test_adapter_rejects_hooks():
+    ta = StructAdapter(int)
+    with pytest.raises(TypeError):
+        ta.struct_validate_json(b"1", dec_hook=str)
+    with pytest.raises(TypeError):
+        ta.struct_dump_json(1, enc_hook=str)
+
+
+def test_adapter_protocol_roundtrip():
+    class Point:
+        def __init__(self, x, y):
+            self.x = x
+            self.y = y
+
+        def __eq__(self, other):
+            return (self.x, self.y) == (other.x, other.y)
+
+        def struct_dump(self):
+            return {"x": self.x, "y": self.y}
+
+        @classmethod
+        def struct_validate(cls, obj):
+            return cls(obj["x"], obj["y"])
+
+    ta = StructAdapter(Point)
+    buf = ta.struct_dump_json(Point(1, 2))
+    assert buf == b'{"x":1,"y":2}'
+    assert ta.struct_validate_json(buf) == Point(1, 2)
+    assert ta.struct_dump(Point(3, 4)) == {"x": 3, "y": 4}
+    assert ta.struct_validate({"x": 3, "y": 4}) == Point(3, 4)

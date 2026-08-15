@@ -1,6 +1,32 @@
-from typing import Any
+from typing import Any, get_args
 
-from ._core import _dump, _json_decode, _json_encode, _validate
+from ._core import (  # type: ignore
+    Field as _Field,
+)
+from ._core import (
+    _dump,
+    _json_decode,
+    _json_encode,
+    _validate,
+)
+
+
+def _has_codec(ann):
+    """True if the annotation carries a ``Field`` with ``dump``/``validate``."""
+    metadata = getattr(ann, "__metadata__", None)
+    if metadata is not None:
+        for meta in metadata:
+            if isinstance(meta, _Field) and (
+                meta.dump is not None or meta.validate is not None
+            ):
+                return True
+    supertype = getattr(ann, "__supertype__", None)  # NewType
+    if supertype is not None and _has_codec(supertype):
+        return True
+    value = getattr(ann, "__value__", None)  # PEP 695 type alias
+    if value is not None and _has_codec(value):
+        return True
+    return any(_has_codec(arg) for arg in get_args(ann))
 
 
 class StructAdapter:
@@ -8,6 +34,11 @@ class StructAdapter:
 
     Useful when you want to validate or serialize plain Python types
     (e.g. ``list[int]``) without defining a full ``Struct`` subclass.
+
+    ``Field(dump=...)`` / ``Field(validate=...)`` codecs are not supported on
+    ``StructAdapter`` — annotations carrying one are rejected. Implement the
+    ``struct_dump`` / ``struct_validate`` protocol methods on the custom type,
+    or use a ``Struct``.
 
     >>> from structtype import StructAdapter
     >>> adapter = StructAdapter(list[int])
@@ -18,9 +49,15 @@ class StructAdapter:
     __slots__ = ("_type",)
 
     def __init__(self, type: Any):
+        if _has_codec(type):
+            raise TypeError(
+                "`Field(dump=...)`/`Field(validate=...)` codecs are not supported "
+                "on StructAdapter; define `struct_dump`/`struct_validate` methods "
+                "on the custom type, or use a `Struct` instead"
+            )
         self._type = type
 
-    def struct_validate_json(self, buf, *, strict=True, dec_hook=None):
+    def struct_validate_json(self, buf, *, strict=True):
         """Validate JSON bytes and decode into the adapter's type.
 
         Parameters
@@ -29,16 +66,13 @@ class StructAdapter:
             The JSON message to decode.
         strict : bool, optional
             If True (default), unmatched fields cause an error.
-        dec_hook : callable, optional
-            A callback for customizing decoding of specific types.
         """
-        return _json_decode(buf, type=self._type, strict=strict, dec_hook=dec_hook)
+        return _json_decode(buf, type=self._type, strict=strict)
 
     def struct_dump_json(
         self,
         obj,
         *,
-        enc_hook=None,
         decimal_format=None,
         uuid_format=None,
         sort_keys=False,
@@ -49,8 +83,6 @@ class StructAdapter:
         ----------
         obj : Any
             A value to encode. Must match the adapter's type.
-        enc_hook : callable, optional
-            A callback for customizing encoding of specific types.
         decimal_format : str or callable, optional
             Controls how ``Decimal`` values are encoded.
         uuid_format : str, optional
@@ -60,15 +92,12 @@ class StructAdapter:
         """
         return _json_encode(
             obj,
-            enc_hook=enc_hook,
             decimal_format=decimal_format,
             uuid_format=uuid_format,
             sort_keys=sort_keys,
         )
 
-    def struct_validate(
-        self, obj, *, strict=True, dec_hook=None, from_attributes=False
-    ):
+    def struct_validate(self, obj, *, strict=True, from_attributes=False):
         """Validate a Python object against the adapter's type.
 
         Parameters
@@ -77,8 +106,6 @@ class StructAdapter:
             A Python object to validate and convert.
         strict : bool, optional
             If True (default), unmatched fields cause an error.
-        dec_hook : callable, optional
-            A callback for customizing decoding of specific types.
         from_attributes : bool, optional
             If True, accept objects with attributes instead of dict keys.
         """
@@ -86,7 +113,6 @@ class StructAdapter:
             obj,
             self._type,
             strict=strict,
-            dec_hook=dec_hook,
             from_attributes=from_attributes,
         )
 
@@ -94,7 +120,6 @@ class StructAdapter:
         self,
         obj,
         *,
-        enc_hook=None,
         sort_keys=False,
         str_keys=False,
         builtin_types=None,
@@ -104,7 +129,6 @@ class StructAdapter:
             obj,
             builtin_types=builtin_types,
             str_keys=str_keys,
-            enc_hook=enc_hook,
             sort_keys=sort_keys,
         )
 

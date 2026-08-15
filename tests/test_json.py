@@ -22,6 +22,7 @@ from structtype._core import (
 )
 
 import structtype
+from structtype import Field, Struct
 
 from .utils import emscripten_stack_limited
 
@@ -2992,3 +2993,347 @@ class TestRaw:
 
         res = _json_decode(b'{"x": [1, 2]}', type=Test, dec_hook=dec_hook)
         assert res == Test(Custom(1, 2))
+
+
+class TestFieldCodecAPI:
+    def test_dump_validate_construction(self):
+        f = Field(dump=lambda c: (c.real, c.imag), validate=lambda o: complex(*o))
+        assert callable(f.dump)
+        assert callable(f.validate)
+
+    def test_only_dump(self):
+        f = Field(dump=repr)
+        assert callable(f.dump)
+        assert f.validate is None
+
+    def test_only_validate(self):
+        f = Field(validate=complex)
+        assert f.dump is None
+        assert callable(f.validate)
+
+    def test_non_callable_dump(self):
+        with pytest.raises(TypeError):
+            Field(dump=42)
+
+    def test_non_callable_validate(self):
+        with pytest.raises(TypeError):
+            Field(validate="nope")
+
+    def test_repr_roundtrip(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        def validate(o):
+            return complex(*o)
+
+        f = Field(dump=dump, validate=validate)
+        r = repr(f)
+        assert "dump=" in r and "validate=" in r
+
+    def test_equality(self):
+        a = Field(dump=repr)
+        b = Field(dump=repr)
+        assert a == b
+        assert hash(a) == hash(b)
+
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __eq__(self, other):
+        return (self.x, self.y) == (other.x, other.y)
+
+    def struct_dump(self):
+        return {"x": self.x, "y": self.y}
+
+    @classmethod
+    def struct_validate(cls, obj):
+        return cls(obj["x"], obj["y"])
+
+
+class TestFieldCodecDecode:
+    def test_validate_roundtrip(self):
+        def validate(obj):
+            return complex(obj[0], obj[1])
+
+        class Msg(Struct):
+            value: Annotated[complex, Field(validate=validate)]
+
+        out = Msg.struct_validate_json(b'{"value":[1.0,2.0]}')
+        assert out.value == complex(1.0, 2.0)
+
+    def test_validate_python_obj(self):
+        def validate(obj):
+            return complex(obj[0], obj[1])
+
+        class Msg(Struct):
+            value: Annotated[complex, Field(validate=validate)]
+
+        out = Msg.struct_validate({"value": [1.0, 2.0]})
+        assert out.value == complex(1.0, 2.0)
+
+    def test_nested_validate(self):
+        def validate(obj):
+            return complex(obj[0], obj[1])
+
+        class Msg(Struct):
+            values: list[Annotated[complex, Field(validate=validate)]]
+
+        out = Msg.struct_validate_json(b'{"values":[[1.0,2.0],[3.0,4.0]]}')
+        assert out.values == [complex(1.0, 2.0), complex(3.0, 4.0)]
+
+    def test_protocol_fallback_when_no_validate(self):
+        # A Field codec with only `dump` must not break decode of a protocol type
+        class Msg(Struct):
+            value: Annotated[Point, Field(dump=lambda p: p.struct_dump())]
+
+        out = Msg.struct_validate_json(b'{"value":{"x":1,"y":2}}')
+        assert out.value == Point(1, 2)
+
+    def test_validate_errors_wrap(self):
+        def validate(obj):
+            raise ValueError("bad")
+
+        class Msg(Struct):
+            value: Annotated[complex, Field(validate=validate)]
+
+        with pytest.raises(structtype.ValidationError):
+            Msg.struct_validate_json(b'{"value":[1.0,2.0]}')
+
+    def test_validate_self_preserved(self):
+        def validate(obj):
+            return complex(obj[0], obj[1])
+
+        class Msg(Struct):
+            value: Annotated[complex, Field(validate=validate)]
+
+        m = Msg(complex(1.0, 2.0))
+        m.struct_validate_self()  # must not call validate on the already-valid value
+
+    def test_native_type_codec_errors(self):
+        # Raised at class definition: the class-creation codec walker
+        # (Task 3) validates the annotation eagerly.
+        with pytest.raises(TypeError):
+
+            class Bad(Struct):
+                value: Annotated[int, Field(dump=str)]
+
+    def test_union_codec_errors(self):
+        with pytest.raises(TypeError):
+
+            class Bad(Struct):
+                value: Annotated[int | str, Field(dump=str)]
+
+
+class TestFieldCodecClassCreation:
+    def test_native_type_errors_at_definition(self):
+        with pytest.raises(TypeError):
+
+            class Bad(Struct):
+                value: Annotated[int, Field(dump=str)]
+
+    def test_union_errors_at_definition(self):
+        with pytest.raises(TypeError):
+
+            class Bad(Struct):
+                value: Annotated[int | str, Field(dump=str)]
+
+    def test_conflicting_dump_same_field_errors(self):
+        def dump_a(c):
+            return (c.real,)
+
+        def dump_b(c):
+            return (c.imag,)
+
+        with pytest.raises(TypeError):
+
+            class Bad(Struct):
+                value: Annotated[
+                    tuple[
+                        Annotated[complex, Field(dump=dump_a)],
+                        Annotated[complex, Field(dump=dump_b)],
+                    ],
+                    None,
+                ]
+
+    def test_same_dump_same_field_ok(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Msg(Struct):
+            a: Annotated[complex, Field(dump=dump)]
+            b: Annotated[complex, Field(dump=dump)]
+
+        assert Msg(complex(1, 2), complex(3, 4)) is not None
+
+    def test_inheritance(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Base(Struct):
+            value: Annotated[complex, Field(dump=dump)]
+
+        class Sub(Base):
+            other: int
+
+        assert (
+            Sub(complex(1, 2), 3).struct_dump_json() == b'{"value":[1.0,2.0],"other":3}'
+        )
+
+    def test_union_with_none_errors_at_definition(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        with pytest.raises(TypeError):
+
+            class Bad(Struct):
+                value: Annotated[complex | None, Field(dump=dump)]
+
+    def test_codec_union_outside_works(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Msg(Struct):
+            value: Annotated[complex, Field(dump=dump)] | None
+
+        assert Msg(complex(1, 2)).struct_dump_json() == b'{"value":[1.0,2.0]}'
+        assert Msg(None).struct_dump_json() == b'{"value":null}'
+
+
+class TestFieldCodecEncode:
+    def test_dump_roundtrip(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Msg(Struct):
+            value: Annotated[complex, Field(dump=dump)]
+
+        assert Msg(complex(1.0, 2.0)).struct_dump_json() == b'{"value":[1.0,2.0]}'
+
+    def test_dump_builtins_path(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Msg(Struct):
+            value: Annotated[complex, Field(dump=dump)]
+
+        assert Msg(complex(1.0, 2.0)).struct_dump() == {"value": (1.0, 2.0)}
+
+    def test_nested_dump(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Msg(Struct):
+            values: list[Annotated[complex, Field(dump=dump)]]
+
+        assert Msg([complex(1.0, 2.0)]).struct_dump_json() == b'{"values":[[1.0,2.0]]}'
+
+    def test_dict_value_dump(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Msg(Struct):
+            mapping: dict[str, Annotated[complex, Field(dump=dump)]]
+
+        assert Msg({"a": complex(1.0, 2.0)}).struct_dump_json() == b'{"mapping":{"a":[1.0,2.0]}}'
+
+    def test_mro_subclass_dispatch(self):
+        class Base:
+            def __init__(self, v):
+                self.v = v
+
+        class Sub(Base):
+            pass
+
+        def dump(b):
+            return b.v
+
+        class Msg(Struct):
+            value: Annotated[Base, Field(dump=dump)]
+
+        assert Msg(Sub(5)).struct_dump_json() == b'{"value":5}'
+
+    def test_array_like_struct(self):
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Msg(Struct, array_like=True):
+            value: Annotated[complex, Field(dump=dump)]
+
+        assert Msg(complex(1.0, 2.0)).struct_dump_json() == b'[[1.0,2.0]]'
+
+    def test_per_field_different_codecs(self):
+        def dump_a(c):
+            return (c.real, c.imag)
+
+        def dump_b(c):
+            return c.real
+
+        class Msg(Struct):
+            a: Annotated[complex, Field(dump=dump_a)]
+            b: Annotated[complex, Field(dump=dump_b)]
+
+        assert Msg(complex(1.0, 2.0), complex(3.0, 4.0)).struct_dump_json() == \
+            b'{"a":[1.0,2.0],"b":3.0}'
+
+    def test_codec_miss_falls_through_to_protocol(self):
+        class Point:
+            def __init__(self, x, y):
+                self.x, self.y = x, y
+
+            def struct_dump(self):
+                return {"x": self.x, "y": self.y}
+
+            @classmethod
+            def struct_validate(cls, o):
+                return cls(o["x"], o["y"])
+
+        def dump(c):
+            return (c.real, c.imag)
+
+        class Msg(Struct):
+            value: Annotated[tuple[Annotated[complex, Field(dump=dump)], Point], None]
+
+        assert (
+            Msg((complex(1, 2), Point(3, 4))).struct_dump_json()
+            == b'{"value":[[1.0,2.0],{"x":3,"y":4}]}'
+        )
+        assert Msg((complex(1, 2), Point(3, 4))).struct_dump() == {
+            "value": ((1.0, 2.0), {"x": 3, "y": 4})
+        }
+
+
+class TestHooksRemovedFromStruct:
+    def test_struct_dump_json_rejects_enc_hook(self):
+        class Msg(Struct):
+            x: int
+        with pytest.raises(TypeError, match="Annotated"):
+            Msg(1).struct_dump_json(enc_hook=str)
+
+    def test_struct_dump_rejects_enc_hook(self):
+        class Msg(Struct):
+            x: int
+        with pytest.raises(TypeError):
+            Msg(1).struct_dump(enc_hook=str)
+
+    def test_struct_validate_json_rejects_dec_hook(self):
+        class Msg(Struct):
+            x: int
+        with pytest.raises(TypeError):
+            Msg.struct_validate_json(b'{"x":1}', dec_hook=str)
+
+    def test_struct_validate_rejects_dec_hook(self):
+        class Msg(Struct):
+            x: int
+        with pytest.raises(TypeError):
+            Msg.struct_validate({"x": 1}, dec_hook=str)
+
+    def test_other_kwargs_still_work(self):
+        class Msg(Struct):
+            x: int
+        assert Msg(1).struct_dump_json(sort_keys=True) == b'{"x":1}'
+        assert Msg(1).struct_dump(sort_keys=True) == {"x": 1}
+        assert Msg.struct_validate_json(b'{"x":1}', strict=False).x == 1
+        assert Msg.struct_validate({"x": 1}, strict=False, from_attributes=True).x == 1

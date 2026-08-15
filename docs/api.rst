@@ -181,6 +181,31 @@ Field
 
 .. autoclass:: Field
     :members:
+    :exclude-members: dump, validate
+
+    .. attribute:: dump
+
+        :type: Callable[[Any], Any] | None
+
+        A callable converting a custom-type value into a value composed of
+        :doc:`natively supported <supported-types>` types. Used during
+        encoding. Only valid for custom types; attaching a ``dump`` codec to a
+        natively supported type or a union (including optional types such as
+        ``Annotated[complex | None, Field(...)]``) raises a ``TypeError`` — at
+        class creation time for ``Struct``, at construction for
+        ``StructAdapter``. See :doc:`extending`.
+
+    .. attribute:: validate
+
+        :type: Callable[[Any], Any] | None
+
+        A callable converting a value composed of natively supported types
+        back into a custom-type value. Used during decoding. Only valid for
+        custom types; attaching a ``validate`` codec to a natively supported
+        type or a union (including optional types such as
+        ``Annotated[complex | None, Field(...)]``) raises a ``TypeError`` — at
+        class creation time for ``Struct``, at construction for
+        ``StructAdapter``. See :doc:`extending`.
 
 
 Factory

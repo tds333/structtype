@@ -2034,6 +2034,9 @@ typedef struct {
     PyObject *json_schema_extra;
     /* Field-specific fields */
     PyObject *alias;
+    /* Codec callables: custom <-> native conversion */
+    PyObject *dump;      /* custom object -> serializable value */
+    PyObject *validate;  /* serializable value -> custom object */
 } Field;
 
 PyDoc_STRVAR(Field__doc__,
@@ -2110,6 +2113,7 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
         "alias",
         "title", "description", "examples", "json_schema_extra",
         "deprecated",
+        "dump", "validate",
         NULL
     };
     PyObject *gt = NULL, *ge = NULL, *lt = NULL, *le = NULL, *multiple_of = NULL;
@@ -2119,14 +2123,16 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     PyObject *deprecated = NULL;
     PyObject *json_schema_extra = NULL;
     PyObject *regex = NULL;
+    PyObject *dump = NULL, *validate = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|$OOOOOOOOOOOOOOO:Field.__new__", kwlist,
+            args, kwargs, "|$OOOOOOOOOOOOOOOOO:Field.__new__", kwlist,
             &gt, &ge, &lt, &le, &multiple_of,
             &pattern, &min_length, &max_length, &tz,
             &alias,
             &title, &description, &examples, &json_schema_extra,
-            &deprecated
+            &deprecated,
+            &dump, &validate
         )
     )
         return NULL;
@@ -2146,7 +2152,18 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     NONE_TO_NULL(examples);
     NONE_TO_NULL(deprecated);
     NONE_TO_NULL(json_schema_extra);
+    NONE_TO_NULL(dump);
+    NONE_TO_NULL(validate);
 #undef NONE_TO_NULL
+
+    if (dump != NULL && !PyCallable_Check(dump)) {
+        PyErr_SetString(PyExc_TypeError, "dump must be callable");
+        return NULL;
+    }
+    if (validate != NULL && !PyCallable_Check(validate)) {
+        PyErr_SetString(PyExc_TypeError, "validate must be callable");
+        return NULL;
+    }
 
     /* Check constraint parameter types/values */
     if (gt != NULL && !ensure_is_finite_numeric(gt, "gt", false)) return NULL;
@@ -2241,6 +2258,8 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     SET_FIELD(examples);
     SET_FIELD(deprecated);
     SET_FIELD(json_schema_extra);
+    SET_FIELD(dump);
+    SET_FIELD(validate);
 #undef SET_FIELD
 #undef SET_FIELD_OWNED
 
@@ -2274,6 +2293,8 @@ Field_repr(Field *self) {
     DO_REPR(deprecated);
     DO_REPR(json_schema_extra);
     DO_REPR(alias);
+    DO_REPR(dump);
+    DO_REPR(validate);
 #undef DO_REPR
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
@@ -2310,6 +2331,8 @@ Field_rich_repr(PyObject *py_self, PyObject *args) {
     DO_REPR(deprecated);
     DO_REPR(json_schema_extra);
     DO_REPR(alias);
+    DO_REPR(dump);
+    DO_REPR(validate);
 #undef DO_REPR
     return out;
 error:
@@ -2352,6 +2375,8 @@ Field_richcompare(Field *self, PyObject *py_other, int op) {
         DO_COMPARE(deprecated);
         DO_COMPARE(json_schema_extra);
         DO_COMPARE(alias);
+        DO_COMPARE(dump);
+        DO_COMPARE(validate);
     }
 #undef DO_COMPARE
 done:
@@ -2393,6 +2418,8 @@ Field_hash(Field *self) {
     DO_HASH(deprecated);
     /* Leave out examples & json_schema_extra, since they could be unhashable */
     DO_HASH(alias);
+    DO_HASH(dump);
+    DO_HASH(validate);
 #undef DO_HASH
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
@@ -2422,6 +2449,8 @@ Field_traverse(Field *self, visitproc visit, void *arg)
     Py_VISIT(self->deprecated);
     Py_VISIT(self->json_schema_extra);
     Py_VISIT(self->alias);
+    Py_VISIT(self->dump);
+    Py_VISIT(self->validate);
     return 0;
 }
 
@@ -2444,6 +2473,8 @@ Field_clear(Field *self)
     Py_CLEAR(self->deprecated);
     Py_CLEAR(self->json_schema_extra);
     Py_CLEAR(self->alias);
+    Py_CLEAR(self->dump);
+    Py_CLEAR(self->validate);
     return 0;
 }
 
@@ -2472,6 +2503,10 @@ static PyMemberDef Field_members[] = {
     {"json_schema_extra", T_OBJECT, offsetof(Field, json_schema_extra), READONLY, NULL},
     {"alias", T_OBJECT, offsetof(Field, alias), READONLY,
      "An alternative name to use when encoding/decoding this field"},
+    {"dump", T_OBJECT, offsetof(Field, dump), READONLY,
+     "A callable converting a custom type value to a serializable value"},
+    {"validate", T_OBJECT, offsetof(Field, validate), READONLY,
+     "A callable converting a serializable value to a custom type value"},
     {NULL},
 };
 
@@ -2753,6 +2788,7 @@ AssocList_Sort(AssocList* list) {
 #define MS_CONSTR_MAP_MAX_LENGTH    (1ull << 58)
 #define MS_CONSTR_TZ_AWARE          (1ull << 59)
 #define MS_CONSTR_TZ_NAIVE          (1ull << 60)
+#define MS_CONSTR_CODEC             (1ull << 61)
 /* Extra flag bit, used by TypedDict/dataclass implementations */
 #define MS_EXTRA_FLAG               (1ull << 63)
 
@@ -2794,7 +2830,8 @@ AssocList_Sort(AssocList* list) {
  * S | ARRAY_MAX_LENGTH |
  * S | MAP_MIN_LENGTH |
  * S | MAP_MAX_LENGTH |
- * T | FIXTUPLE [size, types ...] |
+ * C | CODEC |
+ * T | FIXTUPLE [size, types ...]
  * */
 
 #define SLOT_00 ( \
@@ -2926,6 +2963,7 @@ typedef struct {
     PyObject *match_args;
     PyObject *rename;
     PyObject *post_init;
+    PyObject *struct_field_codecs;  /* tuple of per-field {type: dump} dicts, or NULL */
     Py_ssize_t hash_offset;  /* 0 for no caching, otherwise offset */
     int8_t frozen;
     int8_t order;
@@ -3053,6 +3091,13 @@ static MS_INLINE PyObject *
 TypeNode_get_custom(TypeNode *type) {
     /* Custom types can't be mixed with anything */
     return type->details[0].pointer;
+}
+
+static MS_INLINE PyObject *
+TypeNode_get_codec(TypeNode *type) {
+    /* Codecs are only valid on custom types, which occupy the first detail
+     * slot; the codec (a Field*) is therefore always the next one. */
+    return type->details[1].pointer;
 }
 
 static MS_INLINE IntLookup *
@@ -3333,6 +3378,9 @@ TypeNode_get_traverse_ranges(
     /* Custom types cannot share a union with anything except `None` */
     if (type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC)) {
         n_obj = 1;
+        if (type->types & MS_CONSTR_CODEC) {
+            n_obj += 1;
+        }
     }
     else if (!(type->types & MS_TYPE_ANY)) {
         /* Number of pyobject details */
@@ -3481,6 +3529,7 @@ typedef struct {
     PyObject *min_length;
     PyObject *max_length;
     PyObject *tz;
+    PyObject *codec;  /* the Field carrying dump/validate, or NULL */
 } Constraints;
 
 typedef struct {
@@ -3516,6 +3565,7 @@ typedef struct {
     double c_float_max;
     double c_float_multiple_of;
     PyObject *c_str_regex;
+    PyObject *codec_obj;  /* Field* with dump/validate, or NULL */
     Py_ssize_t c_str_min_length;
     Py_ssize_t c_str_max_length;
     Py_ssize_t c_bytes_min_length;
@@ -3537,7 +3587,8 @@ constraints_is_empty(Constraints *self) {
         self->regex == NULL &&
         self->min_length == NULL &&
         self->max_length == NULL &&
-        self->tz == NULL
+        self->tz == NULL &&
+        self->codec == NULL
     );
 }
 
@@ -3571,6 +3622,9 @@ constraints_update(Constraints *self, Field *meta, PyObject *type) {
     set_constraint(min_length);
     set_constraint(max_length);
     set_constraint(tz);
+    if (meta->dump != NULL || meta->validate != NULL) {
+        if (_set_constraint((PyObject *)meta, &(self->codec), "dump", type) < 0) return -1;
+    }
     if (self->gt != NULL && self->ge != NULL) {
         PyErr_Format(
             PyExc_TypeError,
@@ -3685,6 +3739,26 @@ typenode_collect_constraints(
     /* If no constraints, do nothing */
     if (constraints == NULL) return 0;
     if (constraints_is_empty(constraints)) return 0;
+
+    /* Codecs are only supported on custom (non-native) types */
+    if (constraints->codec != NULL) {
+        bool is_custom = (
+            state->custom_obj != NULL &&
+            (state->types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_NONE)) == 0
+        );
+        if (!is_custom) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "`Field(dump=...)`/`Field(validate=...)` codecs can only be used "
+                "on custom types - type `%R` is invalid",
+                obj
+            );
+            return -1;
+        }
+        state->types |= MS_CONSTR_CODEC;
+        Py_INCREF(constraints->codec);
+        state->codec_obj = constraints->codec;
+    }
 
     /* Check that the constraints are valid for the corresponding type */
     if (kind != CK_INT && kind != CK_FLOAT) {
@@ -3840,7 +3914,8 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
             MS_CONSTR_ARRAY_MIN_LENGTH |
             MS_CONSTR_ARRAY_MAX_LENGTH |
             MS_CONSTR_MAP_MIN_LENGTH |
-            MS_CONSTR_MAP_MAX_LENGTH
+            MS_CONSTR_MAP_MAX_LENGTH |
+            MS_CONSTR_CODEC
         )
     );
     if (state->types & MS_TYPE_FIXTUPLE) {
@@ -3964,6 +4039,10 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
         if (info == NULL) goto error;
         out->details[e_ind++].pointer = info;
     }
+    if (state->types & MS_CONSTR_CODEC) {
+        Py_INCREF(state->codec_obj);
+        out->details[e_ind++].pointer = state->codec_obj;
+    }
     if (state->types & MS_CONSTR_STR_REGEX) {
         Py_INCREF(state->c_str_regex);
         out->details[e_ind++].pointer = state->c_str_regex;
@@ -4081,7 +4160,7 @@ typenode_collect_check_invariants(TypeNodeCollectState *state) {
     /* If a custom type is used, this node may only contain that type and `None */
     if (
         state->custom_obj != NULL &&
-        state->types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_NONE)
+        state->types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_NONE | MS_CONSTR_CODEC)
     ) {
         PyErr_Format(
             PyExc_TypeError,
@@ -4751,6 +4830,7 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
     Py_CLEAR(state->literal_str_values);
     Py_CLEAR(state->literal_str_lookup);
     Py_CLEAR(state->c_str_regex);
+    Py_CLEAR(state->codec_obj);
 }
 
 /* This decomposes an input type `obj`, stripping out any "wrapper" types
@@ -5682,6 +5762,7 @@ typedef struct {
     Py_ssize_t hash_offset;
     bool has_non_slots_bases;
     PyObject *resolved_annotations;
+    PyObject *codec_maps;  /* tuple of per-field codec dicts, or NULL */
 } StructMetaInfo;
 
 static int
@@ -6067,6 +6148,227 @@ structmeta_is_classvar(
         return 0;
     }
     return 0;
+}
+
+static bool
+ms_is_single_custom_type(PyObject *t, StructspecState *mod) {
+    TypeNodeCollectState state = {0};
+    state.mod = mod;
+    state.context = t;
+    bool out = false;
+    if (typenode_collect_type(&state, t) < 0) {
+        PyErr_Clear();
+        goto done;
+    }
+    out = (
+        state.custom_obj != NULL &&
+        (state.types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_CONSTR_CODEC)) == 0
+    );
+done:
+    typenode_collect_clear_state(&state);
+    return out;
+}
+
+/* Add `dump` for `base_type` to a per-field codec map, erroring when the same
+ * base type is registered with a different `dump` within one field. */
+static int
+codec_map_set(PyObject *codecs, PyObject *base_type, PyObject *dump, PyObject *ctx) {
+    PyObject *existing = PyDict_GetItem(codecs, base_type);
+    if (existing != NULL) {
+        if (existing != dump) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "`Field(dump=...)` codecs for type `%R` conflict within a single "
+                "field - type `%R` is invalid",
+                base_type, ctx
+            );
+            return -1;
+        }
+        return 0;
+    }
+    return PyDict_SetItem(codecs, base_type, dump);
+}
+
+/* Recursively walk an annotation, collecting Field codecs into a per-field
+ * codec map and validating that each codec is attached to a custom type. */
+static int
+codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyObject *ctx) {
+    PyObject *t = ann;
+    Py_INCREF(t);
+    int out = -1;
+
+    /* Strip Annotated wrappers, collecting Field metadata at this level. */
+    while (Py_TYPE(t) == (PyTypeObject *)(mod->typing_annotated_alias)) {
+        PyObject *origin = PyObject_GetAttr(t, mod->str___origin__);
+        if (origin == NULL) goto error;
+        PyObject *metadata = PyObject_GetAttr(t, mod->str___metadata__);
+        if (metadata == NULL) {
+            Py_DECREF(origin);
+            goto error;
+        }
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(metadata); i++) {
+            PyObject *item = PyTuple_GET_ITEM(metadata, i);
+            if (Py_TYPE(item) != &Field_Type) continue;
+            Field *field = (Field *)item;
+            if (field->dump == NULL && field->validate == NULL) continue;
+            if (!ms_is_single_custom_type(origin, mod)) {
+                PyErr_Format(
+                    PyExc_TypeError,
+                    "`Field(dump=...)`/`Field(validate=...)` codecs can only be "
+                    "used on custom types - type `%R` is invalid",
+                    origin
+                );
+                Py_DECREF(metadata);
+                Py_DECREF(origin);
+                goto error;
+            }
+            if (field->dump != NULL) {
+                if (codec_map_set(codecs, origin, field->dump, ctx) < 0) {
+                    Py_DECREF(metadata);
+                    Py_DECREF(origin);
+                    goto error;
+                }
+            }
+        }
+        Py_DECREF(metadata);
+        Py_SETREF(t, origin);
+    }
+
+    /* Strip NewType / TypeAliasType / Final wrappers. */
+    PyObject *supertype = PyObject_GetAttr(t, mod->str___supertype__);
+    if (supertype != NULL) {
+        Py_SETREF(t, supertype);
+    }
+    else {
+        PyErr_Clear();
+    }
+#if PY312_PLUS
+    if (Py_TYPE(t) == (PyTypeObject *)(mod->typing_typealiastype)) {
+        PyObject *value = PyObject_GetAttr(t, mod->str___value__);
+        if (value == NULL) goto error;
+        Py_SETREF(t, value);
+    }
+#endif
+
+    /* Recurse into container/union args. */
+    PyObject *origin = PyObject_GetAttr(t, mod->str___origin__);
+    if (origin != NULL) {
+        PyObject *args = PyObject_GetAttr(t, mod->str___args__);
+        if (args != NULL && PyTuple_Check(args)) {
+            for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(args); i++) {
+                PyObject *arg = PyTuple_GET_ITEM(args, i);
+                if (arg == Py_Ellipsis) continue;
+                if (codec_walk_annotation(arg, codecs, mod, ctx) < 0) {
+                    Py_DECREF(args);
+                    Py_DECREF(origin);
+                    goto error;
+                }
+            }
+            Py_DECREF(args);
+        }
+        else {
+            Py_XDECREF(args);
+            PyErr_Clear();
+        }
+        Py_DECREF(origin);
+    }
+    else {
+        PyErr_Clear();
+    }
+
+    out = 0;
+error:
+    Py_DECREF(t);
+    return out;
+}
+
+/* Build per-field codec maps ({base_type: dump}) from field annotations.
+ * Validates at class creation that codecs are on custom types and that a
+ * single field doesn't register two different dumps for one type. Fields
+ * inherited from struct base classes keep their base codec maps. */
+static int
+structmeta_collect_codecs(StructMetaInfo *info, StructspecState *mod, PyObject *bases) {
+    Py_ssize_t nfields = PyTuple_GET_SIZE(info->fields);
+    PyObject *maps = NULL;
+    int out = -1;
+
+    if (nfields == 0) return 0;
+
+    /* Build a {field: codec map} lookup from struct base classes so inherited
+     * fields keep their codecs. Bases are merged in reverse order so the
+     * primary base wins on conflicts, matching structmeta_collect_base. */
+    PyObject *inherited = PyDict_New();
+    if (inherited == NULL) goto done;
+    for (Py_ssize_t b = PyTuple_GET_SIZE(bases) - 1; b >= 0; b--) {
+        PyObject *base = PyTuple_GET_ITEM(bases, b);
+        if (!ms_is_struct_cls(base)) continue;
+        StructMetaObject *st_type = (StructMetaObject *)base;
+        if (st_type->struct_field_codecs == NULL) continue;
+        PyObject *base_fields = st_type->struct_fields;
+        PyObject *base_codecs = st_type->struct_field_codecs;
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(base_fields); i++) {
+            PyObject *map = PyTuple_GET_ITEM(base_codecs, i);
+            if (map == NULL) continue;
+            PyObject *field = PyTuple_GET_ITEM(base_fields, i);
+            if (PyDict_SetItem(inherited, field, map) < 0) {
+                Py_DECREF(inherited);
+                goto done;
+            }
+        }
+    }
+
+    maps = PyTuple_New(nfields);
+    if (maps == NULL) {
+        Py_DECREF(inherited);
+        goto done;
+    }
+    bool any = false;
+    for (Py_ssize_t i = 0; i < nfields; i++) {
+        PyObject *field = PyTuple_GET_ITEM(info->fields, i);
+        PyObject *ann = (info->resolved_annotations != NULL)
+            ? PyDict_GetItem(info->resolved_annotations, field)
+            : NULL;
+        PyObject *map = NULL;
+        if (ann != NULL) {
+            map = PyDict_New();
+            if (map == NULL) {
+                Py_DECREF(inherited);
+                Py_DECREF(maps);
+                goto done;
+            }
+            if (codec_walk_annotation(ann, map, mod, field) < 0) {
+                Py_DECREF(map);
+                Py_DECREF(inherited);
+                Py_DECREF(maps);
+                goto done;
+            }
+            if (PyDict_GET_SIZE(map) != 0) {
+                any = true;
+            }
+            else {
+                Py_DECREF(map);
+                map = NULL;
+            }
+        }
+        else {
+            PyObject *inh = PyDict_GetItem(inherited, field);
+            if (inh != NULL) {
+                Py_INCREF(inh);
+                map = inh;
+                any = true;
+            }
+        }
+        PyTuple_SET_ITEM(maps, i, map);
+    }
+    Py_DECREF(inherited);
+    if (!any) {
+        Py_DECREF(maps);
+        maps = NULL;
+    }
+    Py_XSETREF(info->codec_maps, maps);
+    out = 0;
+done:
+    return out;
 }
 
 static int
@@ -6645,6 +6947,9 @@ StructMeta_new_inner(
     /* Construct fields and defaults */
     if (structmeta_construct_fields(&info, mod) < 0) goto cleanup;
 
+    /* Collect per-field codec maps from the resolved annotations */
+    if (structmeta_collect_codecs(&info, mod, bases) < 0) goto cleanup;
+
     /* Construct encode_fields */
     if (structmeta_construct_encode_fields(&info) < 0) goto cleanup;
 
@@ -6711,6 +7016,8 @@ StructMeta_new_inner(
     cls->struct_offsets = info.offsets;
     Py_INCREF(info.fields);
     cls->struct_fields = info.fields;
+    Py_XINCREF(info.codec_maps);
+    cls->struct_field_codecs = info.codec_maps;
     Py_INCREF(info.defaults);
     cls->struct_defaults = info.defaults;
     Py_INCREF(info.encode_fields);
@@ -6759,6 +7066,7 @@ cleanup:
     Py_XDECREF(info.namespace);
     Py_XDECREF(info.renamed_fields);
     Py_XDECREF(info.resolved_annotations);
+    Py_XDECREF(info.codec_maps);
     /* Constructed outputs */
     Py_XDECREF(info.fields);
     Py_XDECREF(info.encode_fields);
@@ -7010,6 +7318,7 @@ StructMeta_traverse(StructMetaObject *self, visitproc visit, void *arg)
     Py_VISIT(self->struct_tag);  /* May be a function */
     Py_VISIT(self->rename);  /* May be a function */
     Py_VISIT(self->post_init);
+    Py_VISIT(self->struct_field_codecs);
     Py_VISIT(self->struct_info);
     return PyType_Type.tp_traverse((PyObject *)self, visit, arg);
 }
@@ -7029,6 +7338,7 @@ StructMeta_clear(StructMetaObject *self)
     Py_CLEAR(self->struct_tag);
     Py_CLEAR(self->rename);
     Py_CLEAR(self->post_init);
+    Py_CLEAR(self->struct_field_codecs);
     Py_CLEAR(self->struct_info);
     Py_CLEAR(self->match_args);
     if (self->struct_offsets != NULL) {
@@ -8201,17 +8511,13 @@ PyDoc_STRVAR(Struct_rich_repr__doc__,
 );
 
 PyDoc_STRVAR(Struct_dump_json__doc__,
-"struct_dump_json(self, *, enc_hook=None, decimal_format=None, uuid_format=None, sort_keys=False)\n"
+"struct_dump_json(self, *, decimal_format=None, uuid_format=None, sort_keys=False)\n"
 "--\n"
 "\n"
 "Serialize this struct to JSON bytes.\n"
 "\n"
 "Parameters\n"
 "----------\n"
-"enc_hook : callable, optional\n"
-"    A callable to call for objects that aren't supported structtype types.\n"
-"    Takes the unsupported object and should return a supported object,\n"
-"    or raise a ``NotImplementedError`` if unsupported.\n"
 "decimal_format : str or callable, optional\n"
 "    Controls how ``decimal.Decimal`` values are encoded. If ``\"string\"``\n"
 "    (default), encodes as JSON strings. If ``\"number\"``, encodes as JSON\n"
@@ -8234,7 +8540,7 @@ PyDoc_STRVAR(Struct_dump_json__doc__,
 );
 
 PyDoc_STRVAR(Struct_validate_json__doc__,
-"struct_validate_json(cls, buf, *, strict=True, dec_hook=None)\n"
+"struct_validate_json(cls, buf, *, strict=True)\n"
 "--\n"
 "\n"
 "Deserialize JSON bytes to an instance of this struct type.\n"
@@ -8247,11 +8553,6 @@ PyDoc_STRVAR(Struct_validate_json__doc__,
 "    Whether type coercion rules should be strict. If ``False``, enables a\n"
 "    wider set of coercion rules from string to non-string types for all\n"
 "    values. Default is ``True``.\n"
-"dec_hook : callable, optional\n"
-"    A callable taking ``(type, obj)`` arguments. ``type`` is the type found\n"
-"    in the schema, and ``obj`` is the decoded representation. This hook\n"
-"    should transform ``obj`` into type ``type``, or raise\n"
-"    ``NotImplementedError`` if unsupported.\n"
 "\n"
 "Returns\n"
 "-------\n"
@@ -8260,7 +8561,7 @@ PyDoc_STRVAR(Struct_validate_json__doc__,
 );
 
 PyDoc_STRVAR(Struct_dump__doc__,
-"struct_dump(self, *, enc_hook=None, sort_keys=False, str_keys=False, builtin_types=None)\n"
+"struct_dump(self, *, sort_keys=False, str_keys=False, builtin_types=None)\n"
 "--\n"
 "\n"
 "Convert this struct to built-in Python types.\n"
@@ -8278,10 +8579,6 @@ PyDoc_STRVAR(Struct_dump__doc__,
 "\n"
 "Parameters\n"
 "----------\n"
-"enc_hook : callable, optional\n"
-"    A callable to call for objects that aren't supported structtype types.\n"
-"    Takes the unsupported object and should return a supported object,\n"
-"    or raise a ``NotImplementedError`` if unsupported.\n"
 "sort_keys : bool, optional\n"
 "    If ``True``, dict keys and set elements are sorted so that equal\n"
 "    values produce identical output. Struct, dataclass, and object fields\n"
@@ -8305,7 +8602,7 @@ PyDoc_STRVAR(Struct_dump__doc__,
 );
 
 PyDoc_STRVAR(Struct_validate__doc__,
-"struct_validate(cls, obj, *, strict=True, from_attributes=False, dec_hook=None)\n"
+"struct_validate(cls, obj, *, strict=True, from_attributes=False)\n"
 "--\n"
 "\n"
 "Convert built-in types to an instance of this struct type.\n"
@@ -8323,11 +8620,6 @@ PyDoc_STRVAR(Struct_validate__doc__,
 "    If ``True``, input objects may be coerced to struct, dataclass, or\n"
 "    attrs types by extracting attributes matching output field names.\n"
 "    Default is ``False``.\n"
-"dec_hook : callable, optional\n"
-"    A callable taking ``(type, obj)`` arguments. ``type`` is the type found\n"
-"    in the schema, and ``obj`` is the decoded representation. This hook\n"
-"    should transform ``obj`` into type ``type``, or raise\n"
-"    ``NotImplementedError`` if unsupported.\n"
 "\n"
 "Returns\n"
 "-------\n"
@@ -9257,6 +9549,7 @@ enum uuid_format {
 typedef struct EncoderState {
     StructspecState *mod;          /* module reference */
     PyObject *enc_hook;         /* `enc_hook` callback */
+    PyObject *codecs;           /* current per-field {type: dump} map, or NULL */
     PyObject *decimal_callable; /* `decimal_format` callable */
     enum decimal_format decimal_format;
     enum uuid_format uuid_format;
@@ -9505,6 +9798,7 @@ encoder_encode_into_common(
     EncoderState state = {
         .mod = self->mod,
         .enc_hook = self->enc_hook,
+        .codecs = NULL,
         .decimal_format = self->decimal_format,
         .decimal_callable = self->decimal_callable,
         .in_decimal_callable = false,
@@ -9554,6 +9848,7 @@ encoder_encode_common(
     EncoderState state = {
         .mod = self->mod,
         .enc_hook = self->enc_hook,
+        .codecs = NULL,
         .decimal_format = self->decimal_format,
         .decimal_callable = self->decimal_callable,
         .in_decimal_callable = false,
@@ -9676,6 +9971,7 @@ encode_common(
     EncoderState state = {
         .mod = mod,
         .enc_hook = enc_hook,
+        .codecs = NULL,
         .decimal_format = dec_fmt,
         .decimal_callable = dec_callable,
         .in_decimal_callable = false,
@@ -9884,6 +10180,31 @@ ms_decode_custom(PyObject *obj, PyObject *dec_hook, TypeNode* type, PathNode *pa
         custom_cls = custom_obj;
     }
 
+    /* Field codec (Annotated[X, Field(validate=...)]) takes precedence over the
+     * protocol fallback chain, but only when the value isn't already the type. */
+    if (type->types & MS_CONSTR_CODEC) {
+        Field *codec = (Field *)TypeNode_get_codec(type);
+        if (codec->validate != NULL) {
+            int is_inst = PyObject_IsInstance(out, custom_cls);
+            if (is_inst < 0) {
+                Py_DECREF(out);
+                if (generic) Py_DECREF(custom_cls);
+                return NULL;
+            }
+            if (!is_inst) {
+                PyObject *temp = PyObject_CallOneArg(codec->validate, out);
+                Py_DECREF(out);
+                if (temp == NULL) {
+                    ms_maybe_wrap_validation_error(path);
+                    if (generic) Py_DECREF(custom_cls);
+                    return NULL;
+                }
+                out = temp;
+                goto done;
+            }
+        }
+    }
+
     /* Custom type — struct_validate(dict) */
     if (PyObject_HasAttrString(custom_cls, "struct_validate") && out != Py_None) {
         int is_inst = PyObject_IsInstance(out, custom_cls);
@@ -9962,6 +10283,7 @@ ms_decode_custom(PyObject *obj, PyObject *dec_hook, TypeNode* type, PathNode *pa
         Py_CLEAR(out);
     }
 
+done:
     if (generic) {
         Py_DECREF(custom_cls);
     }
@@ -12819,6 +13141,45 @@ cleanup:
     return status;
 }
 
+/* Look up a dump callable for a runtime type in the current codec map,
+ * walking the MRO so subclasses of a registered type resolve. Returns NULL
+ * when no codec applies (any raised error is cleared). */
+static MS_INLINE PyObject *
+codecs_lookup(PyObject *codecs, PyTypeObject *type) {
+    if (codecs == NULL) return NULL;
+    PyObject *out = PyDict_GetItemWithError(codecs, (PyObject *)type);
+    if (out != NULL) return out;
+    if (PyErr_Occurred()) {
+        PyErr_Clear();
+        return NULL;
+    }
+    PyObject *mro = type->tp_mro;
+    if (mro == NULL) {
+        PyTypeObject *base = type->tp_base;
+        while (base != NULL) {
+            out = PyDict_GetItemWithError(codecs, (PyObject *)base);
+            if (out != NULL) return out;
+            if (PyErr_Occurred()) {
+                PyErr_Clear();
+                return NULL;
+            }
+            base = base->tp_base;
+        }
+        return NULL;
+    }
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); i++) {
+        PyObject *entry = PyTuple_GET_ITEM(mro, i);
+        if (entry == (PyObject *)type) continue;
+        out = PyDict_GetItemWithError(codecs, entry);
+        if (out != NULL) return out;
+        if (PyErr_Occurred()) {
+            PyErr_Clear();
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
 static MS_INLINE int
 json_encode_dict_key(EncoderState *self, PyObject *key) {
     if (MS_LIKELY(PyUnicode_Check(key))) {
@@ -12861,7 +13222,17 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
     else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
         return json_encode_uuid(self, obj);
     }
-    else if (self->enc_hook != NULL) {
+    if (self->codecs != NULL) {
+        PyObject *dump = codecs_lookup(self->codecs, type);
+        if (dump != NULL) {
+            PyObject *temp = PyObject_CallOneArg(dump, obj);
+            if (temp == NULL) return -1;
+            int status = json_encode_dict_key(self, temp);
+            Py_DECREF(temp);
+            return status;
+        }
+    }
+    if (self->enc_hook != NULL) {
         int status = -1;
         PyObject *temp;
         temp = PyObject_CallOneArg(self->enc_hook, obj);
@@ -13120,6 +13491,9 @@ json_encode_struct_object(
     if (struct_type->omit_defaults == OPT_TRUE) {
         nunchecked -= PyTuple_GET_SIZE(defaults);
     }
+    PyObject *field_codecs = struct_type->struct_field_codecs;
+    PyObject *saved_codecs = self->codecs;
+    bool has_codecs = (field_codecs != NULL);
 
     if (ms_write(self, "{", 1) < 0) return -1;
     Py_ssize_t start_len = self->output_len;
@@ -13139,7 +13513,9 @@ json_encode_struct_object(
         MS_StrView kv = struct_type->struct_encode_keys[i];
         if (json_encode_cstr_noescape(self, kv.buf, kv.size) < 0) goto cleanup;
         if (ms_write(self, ":", 1) < 0) goto cleanup;
+        if (has_codecs) self->codecs = PyTuple_GET_ITEM(field_codecs, i);
         if (json_encode(self, val) < 0) goto cleanup;
+        if (has_codecs) self->codecs = saved_codecs;
         if (ms_write(self, ",", 1) < 0) goto cleanup;
     }
     for (i = nunchecked; i < nfields; i++) {
@@ -13151,10 +13527,13 @@ json_encode_struct_object(
             MS_StrView kv = struct_type->struct_encode_keys[i];
             if (json_encode_cstr_noescape(self, kv.buf, kv.size) < 0) goto cleanup;
             if (ms_write(self, ":", 1) < 0) goto cleanup;
+            if (has_codecs) self->codecs = PyTuple_GET_ITEM(field_codecs, i);
             if (json_encode(self, val) < 0) goto cleanup;
+            if (has_codecs) self->codecs = saved_codecs;
             if (ms_write(self, ",", 1) < 0) goto cleanup;
         }
     }
+    self->codecs = saved_codecs;
     if (MS_UNLIKELY(start_len == self->output_len)) {
         /* Empty struct, append "}" */
         if (ms_write(self, "}", 1) < 0) goto cleanup;
@@ -13177,6 +13556,9 @@ json_encode_struct_array(
     PyObject *tag_value = struct_type->struct_tag_value;
     PyObject *fields = struct_type->struct_encode_fields;
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
+    PyObject *field_codecs = struct_type->struct_field_codecs;
+    PyObject *saved_codecs = self->codecs;
+    bool has_codecs = (field_codecs != NULL);
 
     if (nfields == 0 && tag_value == NULL) return ms_write(self, "[]", 2);
     if (ms_write(self, "[", 1) < 0) return -1;
@@ -13188,9 +13570,12 @@ json_encode_struct_array(
     for (Py_ssize_t i = 0; i < nfields; i++) {
         PyObject *val = Struct_get_index(obj, i);
         if (val == NULL) goto cleanup;
+        if (has_codecs) self->codecs = PyTuple_GET_ITEM(field_codecs, i);
         if (json_encode(self, val) < 0) goto cleanup;
+        if (has_codecs) self->codecs = saved_codecs;
         if (ms_write(self, ",", 1) < 0) goto cleanup;
     }
+    self->codecs = saved_codecs;
     /* Overwrite trailing comma with ] */
     *(self->output_buffer_raw + self->output_len - 1) = ']';
     status = 0;
@@ -13260,7 +13645,17 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     else if (PyAnySet_Check(obj)) {
         return json_encode_set(self, obj);
     }
-    else if (PyObject_HasAttrString(obj, "struct_dump")) {
+    if (self->codecs != NULL) {
+        PyObject *dump = codecs_lookup(self->codecs, type);
+        if (dump != NULL) {
+            PyObject *temp = PyObject_CallOneArg(dump, obj);
+            if (temp == NULL) return -1;
+            int status = json_encode_inline(self, temp);
+            Py_DECREF(temp);
+            return status;
+        }
+    }
+    if (PyObject_HasAttrString(obj, "struct_dump")) {
         /* Custom type — struct_dump() to a base type, then re-encode */
         PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
         if (dumped == NULL) return -1;
@@ -16109,6 +16504,7 @@ structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
 typedef struct {
     StructspecState *mod;
     PyObject *enc_hook;
+    PyObject *codecs;           /* current per-field {type: dump} map, or NULL */
     bool str_keys;
     bool sort_keys;
     uint32_t builtin_types;
@@ -16368,6 +16764,9 @@ dump_struct(DumpState *self, PyObject *obj, bool is_key) {
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
     Py_ssize_t npos = nfields - PyTuple_GET_SIZE(defaults);
     bool omit_defaults = struct_type->omit_defaults == OPT_TRUE;
+    PyObject *field_codecs = struct_type->struct_field_codecs;
+    PyObject *saved_codecs = self->codecs;
+    bool has_codecs = (field_codecs != NULL);
 
     if (struct_type->array_like == OPT_TRUE) {
         Py_ssize_t tagged = (tag_value != NULL);
@@ -16392,7 +16791,9 @@ dump_struct(DumpState *self, PyObject *obj, bool is_key) {
         for (Py_ssize_t i = 0; i < nfields; i++) {
             PyObject *val = Struct_get_index(obj, i);
             if (val == NULL) goto cleanup;
+            if (has_codecs) self->codecs = PyTuple_GET_ITEM(field_codecs, i);
             PyObject *val2 = dump_obj(self, val, is_key);
+            if (has_codecs) self->codecs = saved_codecs;
             if (val2 == NULL) goto cleanup;
             if (is_key) {
                 PyTuple_SET_ITEM(out, i + tagged, val2);
@@ -16418,7 +16819,9 @@ dump_struct(DumpState *self, PyObject *obj, bool is_key) {
                 i < npos ||
                 !is_default(val, PyTuple_GET_ITEM(defaults, i - npos))
             ) {
+                if (has_codecs) self->codecs = PyTuple_GET_ITEM(field_codecs, i);
                 PyObject *val2 = dump_obj(self, val, false);
+                if (has_codecs) self->codecs = saved_codecs;
                 if (val2 == NULL) goto cleanup;
                 int status = PyDict_SetItem(out, key, val2);
                 Py_DECREF(val2);
@@ -16426,6 +16829,7 @@ dump_struct(DumpState *self, PyObject *obj, bool is_key) {
             }
         }
     }
+    self->codecs = saved_codecs;
     ok = true;
 
 cleanup:
@@ -16683,7 +17087,17 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
     else if (PyAnySet_Check(obj)) {
         return dump_set(self, obj, is_key);
     }
-    else if (PyObject_HasAttrString(obj, "struct_dump")) {
+    if (self->codecs != NULL) {
+        PyObject *dump = codecs_lookup(self->codecs, type);
+        if (dump != NULL) {
+            PyObject *temp = PyObject_CallOneArg(dump, obj);
+            if (temp == NULL) return NULL;
+            PyObject *result = dump_obj(self, temp, is_key);
+            Py_DECREF(temp);
+            return result;
+        }
+    }
+    if (PyObject_HasAttrString(obj, "struct_dump")) {
         /* Custom type — struct_dump() to a base type, then re-process */
         PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
         if (dumped == NULL) return NULL;
@@ -16847,6 +17261,7 @@ structtype_dump(PyObject *self, PyObject *args, PyObject *kwargs)
     state.str_keys = str_keys;
     state.builtin_types = 0;
     state.builtin_types_seq = NULL;
+    state.codecs = NULL;
 
     if (parse_sort_keys_arg(sort_keys, &state.sort_keys) < 0) return NULL;
 
@@ -18523,6 +18938,17 @@ Struct_dump_json(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObje
         return PyErr_Format(PyExc_TypeError,
             "struct_dump_json() takes no positional arguments (%zd given)", nargs);
     }
+    if (kwnames != NULL) {
+        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(kwnames); i++) {
+            PyObject *name = PyTuple_GET_ITEM(kwnames, i);
+            if (PyUnicode_CompareWithASCIIString(name, "enc_hook") == 0) {
+                return PyErr_Format(PyExc_TypeError,
+                    "`enc_hook` has been removed; use "
+                    "`Annotated[T, Field(dump=...)]` or a `struct_dump` method "
+                    "on the custom type instead");
+            }
+        }
+    }
     PyObject *mod = ((StructMetaObject *)Py_TYPE(self))->struct_module;
     if (mod == NULL) {
         mod = PyState_FindModule(&structtypemodule);
@@ -18560,15 +18986,14 @@ Struct_validate_json(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyO
     if (mod == NULL) return NULL;
     StructspecState *state = structtype_get_state(mod);
 
-    /* Parse the strict / dec_hook keyword arguments directly, avoiding the
+    /* Parse the strict keyword argument directly, avoiding the
      * kwnames re-marshaling that a call through structtype_json_decode
      * would require. `type` is always cls. */
-    PyObject *dec_hook = NULL, *strict_obj = NULL;
+    PyObject *strict_obj = NULL;
     int strict = 1;
     if (kwnames != NULL) {
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
         if ((strict_obj = find_keyword(kwnames, args + nargs, state->str_strict)) != NULL) nkwargs--;
-        if ((dec_hook = find_keyword(kwnames, args + nargs, state->str_dec_hook)) != NULL) nkwargs--;
         if (nkwargs > 0) {
             PyErr_SetString(
                 PyExc_TypeError,
@@ -18578,19 +19003,12 @@ Struct_validate_json(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyO
         }
     }
 
-    if (dec_hook == Py_None) {
-        dec_hook = NULL;
-    }
-    if (dec_hook != NULL && !PyCallable_Check(dec_hook)) {
-        PyErr_SetString(PyExc_TypeError, "dec_hook must be callable");
-        return NULL;
-    }
     if (strict_obj != NULL) {
         strict = PyObject_IsTrue(strict_obj);
         if (strict < 0) return NULL;
     }
 
-    return json_decode_common(state, args[0], cls, strict, dec_hook);
+    return json_decode_common(state, args[0], cls, strict, NULL);
 }
 
 static PyObject *
@@ -18609,20 +19027,14 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
         mod = structtype_get_global_state();
     }
     if (mod == NULL) return NULL;
-    PyObject *enc_hook = NULL, *sort_keys = NULL, *builtin_types = NULL;
+    PyObject *sort_keys = NULL, *builtin_types = NULL;
     int str_keys = 0;
     if (kwnames != NULL) {
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
         for (Py_ssize_t i = 0; i < nkwargs; i++) {
             PyObject *name = PyTuple_GET_ITEM(kwnames, i);
             PyObject *val = args[nargs + i];
-            if (PyUnicode_CompareWithASCIIString(name, "enc_hook") == 0) {
-                if (val != Py_None && !PyCallable_Check(val)) {
-                    return PyErr_Format(PyExc_TypeError,
-                        "enc_hook must be callable");
-                }
-                enc_hook = (val == Py_None) ? NULL : val;
-            } else if (PyUnicode_CompareWithASCIIString(name, "sort_keys") == 0) {
+            if (PyUnicode_CompareWithASCIIString(name, "sort_keys") == 0) {
                 sort_keys = val;
             } else if (PyUnicode_CompareWithASCIIString(name, "str_keys") == 0) {
                 str_keys = PyObject_IsTrue(val);
@@ -18640,7 +19052,8 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
     state.builtin_types = 0;
     state.builtin_types_seq = NULL;
     if (parse_sort_keys_arg(sort_keys, &state.sort_keys) < 0) return NULL;
-    state.enc_hook = enc_hook;
+    state.enc_hook = NULL;
+    state.codecs = NULL;
     if (ms_process_builtin_types(mod, builtin_types,
             &(state.builtin_types), &(state.builtin_types_seq)) < 0) {
         return NULL;
@@ -18661,7 +19074,6 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
 
     StructspecState *mod = structtype_get_global_state();
     if (mod == NULL) return NULL;
-    PyObject *dec_hook = NULL;
     int strict = 1, from_attributes = 0;
     if (kwnames != NULL) {
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
@@ -18670,11 +19082,6 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
             PyObject *val = args[nargs + i];
             if (PyUnicode_CompareWithASCIIString(name, "strict") == 0) {
                 strict = PyObject_IsTrue(val);
-            } else if (PyUnicode_CompareWithASCIIString(name, "dec_hook") == 0) {
-                if (val != Py_None && !PyCallable_Check(val)) {
-                    return PyErr_Format(PyExc_TypeError, "dec_hook must be callable");
-                }
-                dec_hook = (val == Py_None) ? NULL : val;
             } else if (PyUnicode_CompareWithASCIIString(name, "from_attributes") == 0) {
                 from_attributes = PyObject_IsTrue(val);
             } else {
@@ -18688,7 +19095,7 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
     state.mod = mod;
     state.strict = strict;
     state.from_attributes = from_attributes;
-    state.dec_hook = dec_hook;
+    state.dec_hook = NULL;
     state.str_keys = strict ? false : true;
     state.builtin_types = 0;
 

@@ -628,8 +628,9 @@ An error is raised if the elements don't match the specified element type (if
 provided).
 
 Subclasses of these types are also supported for encoding only. To decode into
-a ``list`` subclass you'll need to implement a ``dec_hook`` (see
-:doc:`extending`).
+a ``list`` subclass you'll need to implement a ``struct_validate``
+classmethod, or attach a ``Field(validate=...)`` codec to the field
+annotation (see :doc:`extending`).
 
 .. code-block:: python
 
@@ -716,7 +717,8 @@ Dicts encode/decode as objects in JSON.
 
 Dict subclasses (`collections.OrderedDict`, for example) are also supported for
 encoding only. To decode into a ``dict`` subclass you'll need to implement a
-``dec_hook`` (see :doc:`extending`).
+``struct_validate`` classmethod, or attach a ``Field(validate=...)`` codec to
+the field annotation (see :doc:`extending`).
 
 JSON only supports key types that encode as strings or numbers (for
 example `str`, `int`, `float`, `enum.Enum`, `datetime.datetime`, `uuid.UUID`,

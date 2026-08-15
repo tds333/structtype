@@ -110,7 +110,6 @@ class Struct(metaclass=StructMeta):
     def struct_dump_json(
         self,
         *,
-        enc_hook: Callable[[Any], Any] | None = None,
         decimal_format: Literal["string", "number"]
         | Callable[[Any], Any]
         | None = None,
@@ -120,7 +119,6 @@ class Struct(metaclass=StructMeta):
     def struct_dump(
         self,
         *,
-        enc_hook: Callable[[Any], Any] | None = None,
         sort_keys: bool = False,
         str_keys: bool = False,
         builtin_types: Iterable[type] | None = None,
@@ -132,7 +130,6 @@ class Struct(metaclass=StructMeta):
         buf: str | Buffer,
         *,
         strict: bool = True,
-        dec_hook: Callable[[type[Any], Any], Any] | None = None,
     ) -> _T: ...
     @classmethod
     def struct_validate(
@@ -141,7 +138,6 @@ class Struct(metaclass=StructMeta):
         *,
         strict: bool = True,
         from_attributes: bool = False,
-        dec_hook: Callable[[type[Any], Any], Any] | None = None,
     ) -> _T: ...
 
 # Lie and say `Raw` is a subclass of `bytes`, so mypy will accept it in most
@@ -178,6 +174,8 @@ class Field:
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
         deprecated: bool | None = None,
+        dump: Callable[[Any], Any] | None = None,
+        validate: Callable[[Any], Any] | None = None,
     ) -> None: ...
     @overload
     def __init__(
@@ -192,6 +190,8 @@ class Field:
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
         deprecated: bool | None = None,
+        dump: Callable[[Any], Any] | None = None,
+        validate: Callable[[Any], Any] | None = None,
     ) -> None: ...
     @overload
     def __init__(
@@ -206,6 +206,8 @@ class Field:
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
         deprecated: bool | None = None,
+        dump: Callable[[Any], Any] | None = None,
+        validate: Callable[[Any], Any] | None = None,
     ) -> None: ...
     @overload
     def __init__(
@@ -220,6 +222,8 @@ class Field:
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
         deprecated: bool | None = None,
+        dump: Callable[[Any], Any] | None = None,
+        validate: Callable[[Any], Any] | None = None,
     ) -> None: ...
     # Other (string/datetime):
     @overload
@@ -236,6 +240,8 @@ class Field:
         json_schema_extra: dict[str, Any] | None = None,
         examples: list[Any] | None = None,
         deprecated: bool | None = None,
+        dump: Callable[[Any], Any] | None = None,
+        validate: Callable[[Any], Any] | None = None,
     ) -> None: ...
     alias: Final[str | None]
     gt: Final[int | float | None]
@@ -252,6 +258,8 @@ class Field:
     examples: Final[list[Any] | None]
     deprecated: Final[bool | None]
     json_schema_extra: Final[dict[str, Any] | None]
+    dump: Final[Callable[[Any], Any] | None]
+    validate: Final[Callable[[Any], Any] | None]
     def __rich_repr__(self) -> list[tuple[str, Any]]: ...
 
 class StructConfig:
@@ -307,13 +315,11 @@ class StructAdapter:
         buf: str | Buffer,
         *,
         strict: bool = True,
-        dec_hook: Callable[[type[Any], Any], Any] | None = None,
     ) -> Any: ...
     def struct_dump_json(
         self,
         obj: Any,
         *,
-        enc_hook: Callable[[Any], Any] | None = None,
         decimal_format: Literal["string", "number"]
         | Callable[[Any], Any]
         | None = None,
@@ -325,14 +331,12 @@ class StructAdapter:
         obj: Any,
         *,
         strict: bool = True,
-        dec_hook: Callable[[type[Any], Any], Any] | None = None,
         from_attributes: bool = False,
     ) -> Any: ...
     def struct_dump(
         self,
         obj: Any,
         *,
-        enc_hook: Callable[[Any], Any] | None = None,
         sort_keys: bool = False,
         str_keys: bool = False,
         builtin_types: Iterable[type] | None = None,

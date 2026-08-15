@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking:** remove the `enc_hook` / `dec_hook` keyword arguments from
+  `struct_dump`, `struct_dump_json`, `struct_validate`, and
+  `struct_validate_json` on both `Struct` and `StructAdapter`. Custom types
+  now implement the `struct_dump` / `struct_validate` protocol methods
+  (pydantic's `model_dump` / `model_validate` are also recognized), or use the
+  new per-field codecs. Passing these arguments now raises a `TypeError`.
+- Add `Field(dump=...)` and `Field(validate=...)` codecs, used as
+  `Annotated[X, Field(dump=..., validate=...)]`. Codecs may only be attached
+  to custom types; attaching one to a natively supported type or to a union
+  raises a `TypeError` at class creation time, as does attaching two
+  conflicting `dump` codecs within a single field. Codecs are supported on
+  `Struct` fields only — `StructAdapter` rejects codec'd annotations (use a
+  `struct_dump` / `struct_validate` protocol method there).
 - Remove `Field(default=...)` and `Field(default_factory=...)`. Defaults are now
   always specified on the class body: a constant via `x: int = 3`, and a
   per-instance default by wrapping a callable in the new `structtype.Factory`,

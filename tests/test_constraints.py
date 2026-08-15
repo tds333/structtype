@@ -60,6 +60,11 @@ class TestMetaObject:
         for f in FIELDS:
             assert getattr(c, f) is None
 
+    def test_init_dump_validate_explicit_none(self):
+        c = Field(dump=None, validate=None)
+        assert c.dump is None
+        assert c.validate is None
+
     @pytest.mark.parametrize("field", FIELDS)
     def test_init(self, field):
         c = Field(**{field: FIELDS[field]})

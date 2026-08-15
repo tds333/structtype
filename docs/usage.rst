@@ -1235,8 +1235,11 @@ several configuration options:
   query results (ORM or otherwise) to structtype structured types. The default is
   False.
 
-- ``enc_hook`` / ``dec_hook``: the standard keyword arguments used for
-  :doc:`extending` structtype to support additional types.
+Custom types — types other than those :doc:`natively supported
+<supported-types>` — are handled by implementing the ``struct_dump`` /
+``struct_validate`` protocol methods on the type, or by attaching a
+``Field(dump=..., validate=...)`` codec to the field annotation. See
+:doc:`extending`.
 
 Mapping Protocol
 ----------------
@@ -1303,8 +1306,9 @@ StrAdapter
 ~~~~~~~~~~
 
 For types that validate from and serialize to strings, :class:`StrAdapter`
-provides a simpler alternative to ``enc_hook`` / ``dec_hook``. It creates a
-``str`` subclass that validates values via the wrapped type's constructor:
+provides a simpler alternative to writing a custom :doc:`extension
+<extending>`. It creates a ``str`` subclass that validates values via the
+wrapped type's constructor:
 
 .. code-block:: python
 
