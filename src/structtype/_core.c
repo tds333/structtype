@@ -12925,6 +12925,30 @@ json_encode_raw(EncoderState *self, PyObject *obj)
 
 static int json_encode_dict_key_noinline(EncoderState *, PyObject *);
 
+/* Extract an enum member's value. Enum members store their value as a plain
+ * data attribute `_value_` in the instance `__dict__`, so read it directly to
+ * skip the full `PyObject_GetAttr` descriptor machinery. Falls back to
+ * attribute access for exotic enum subclasses that don't store `_value_` in
+ * `__dict__`. */
+static PyObject *
+dump_enum_value(StructspecState *mod, PyObject *obj)
+{
+    PyObject *dict = PyObject_GenericGetDict(obj, NULL);
+    if (dict != NULL) {
+        PyObject *value = PyDict_GetItemWithError(dict, mod->str__value_);
+        Py_DECREF(dict);
+        if (value != NULL) {
+            Py_INCREF(value);
+            return value;
+        }
+        if (PyErr_Occurred()) return NULL;
+    }
+    else {
+        PyErr_Clear();
+    }
+    return PyObject_GetAttr(obj, mod->str__value_);
+}
+
 static int
 json_encode_enum(EncoderState *self, PyObject *obj, bool is_key)
 {
@@ -12935,7 +12959,7 @@ json_encode_enum(EncoderState *self, PyObject *obj, bool is_key)
         return json_encode_str(self, obj);
     }
 
-    PyObject *value = PyObject_GetAttr(obj, self->mod->str__value_);
+    PyObject *value = dump_enum_value(self->mod, obj);
     if (value == NULL) return -1;
 
     int status;
@@ -16516,7 +16540,7 @@ static PyObject * dump_obj(DumpState *, PyObject *, bool);
 static PyObject *
 dump_enum(DumpState *self, PyObject *obj)
 {
-    return PyObject_GetAttr(obj, self->mod->str__value_);
+    return dump_enum_value(self->mod, obj);
 }
 
 static PyObject *
@@ -16630,23 +16654,41 @@ cleanup:
 
 static PyObject *
 dump_set(DumpState *self, PyObject *obj, bool is_key) {
-    PyObject *out = NULL;
+    PyObject *out = NULL, *list = NULL, *iter = NULL, *item;
     if (Py_EnterRecursiveCall(" while serializing an object")) return NULL;
 
-    PyObject *list = PySequence_List(obj);
+    list = PyList_New(PySet_GET_SIZE(obj));
     if (list == NULL) goto cleanup;
+
+    iter = PyObject_GetIter(obj);
+    if (iter == NULL) goto cleanup;
+
+    Py_ssize_t i = 0;
+    while ((item = PyIter_Next(iter)) != NULL) {
+        if (self->sort_keys) {
+            PyList_SET_ITEM(list, i++, item);
+        }
+        else {
+            PyObject *new_item = dump_obj(self, item, is_key);
+            Py_DECREF(item);
+            if (new_item == NULL) goto cleanup;
+            PyList_SET_ITEM(list, i++, new_item);
+        }
+    }
+    if (PyErr_Occurred()) goto cleanup;
+
     if (self->sort_keys) {
         if (PyList_Sort(list) < 0) goto cleanup;
+        Py_ssize_t size = PyList_GET_SIZE(list);
+        for (i = 0; i < size; i++) {
+            item = PyList_GET_ITEM(list, i);
+            PyObject *new_item = dump_obj(self, item, is_key);
+            if (new_item == NULL) goto cleanup;
+            PyList_SET_ITEM(list, i, new_item);
+            Py_DECREF(item);
+        }
     }
 
-    Py_ssize_t size = PyList_GET_SIZE(list);
-    for (Py_ssize_t i = 0; i < size; i++) {
-        PyObject *orig_item = PyList_GET_ITEM(list, i);
-        PyObject *new_item = dump_obj(self, orig_item, is_key);
-        if (new_item == NULL) goto cleanup;
-        PyList_SET_ITEM(list, i, new_item);
-        Py_DECREF(orig_item);
-    }
     if (is_key) {
         out = PyList_AsTuple(list);
     }
@@ -16657,6 +16699,7 @@ dump_set(DumpState *self, PyObject *obj, bool is_key) {
 
 cleanup:
     Py_LeaveRecursiveCall();
+    Py_XDECREF(iter);
     Py_XDECREF(list);
     return out;
 }
