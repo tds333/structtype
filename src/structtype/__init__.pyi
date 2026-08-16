@@ -2,7 +2,16 @@
 import enum
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from inspect import Signature
-from typing import Any, ClassVar, Final, Literal, TypeAlias, TypeVar, final, overload
+from typing import (
+    Any,
+    ClassVar,
+    Final,
+    Literal,
+    TypeAlias,
+    TypeVar,
+    final,
+    overload,
+)
 
 from typing_extensions import Buffer, Self, dataclass_transform
 
@@ -168,7 +177,7 @@ _NonNegativeInt: TypeAlias = int
 
 @final
 class Factory:
-    def __init__(self, factory: Callable[[], Any]) -> None: ...
+    def __new__(cls, factory: Callable[[], Any]) -> Any: ...
     factory: Final[Callable[[], Any]]
 
 @final

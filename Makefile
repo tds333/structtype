@@ -74,6 +74,12 @@ type-check: ## Type check with
 	-uvx ty check ${SOURCE_DIR}
 	uvx pyrefly check ${SOURCE_DIR}
 
+.PHONY: typecheck-tests
+typecheck-tests: ## Type check tests/typecheck fixtures (skipped when tools unavailable)
+	@if uvx ty --version >/dev/null 2>&1; then uvx ty check tests/typecheck; else echo "skip: ty unavailable"; fi
+	@if uvx pyrefly --version >/dev/null 2>&1; then uvx pyrefly check tests/typecheck; else echo "skip: pyrefly unavailable"; fi
+	@if uvx mypy --version >/dev/null 2>&1; then uvx mypy --python-executable .venv/bin/python tests/typecheck; else echo "skip: mypy unavailable"; fi
+
 .PHONY: format
 format: ## Format files using ruff format
 	uvx ruff format ${SOURCE_DIR}
