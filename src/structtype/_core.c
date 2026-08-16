@@ -15534,6 +15534,7 @@ json_decode_dict(
     PyObject *out, *key = NULL, *val = NULL;
     unsigned char c;
     bool first = true;
+    bool key_is_str = (key_type->types == MS_TYPE_STR);
     PathNode key_path = {path, PATH_KEY, NULL};
     PathNode val_path = {path, PATH_STR_BRACKET, NULL};
 
@@ -15568,8 +15569,27 @@ json_decode_dict(
 
         /* Parse a string key */
         if (c == '"') {
-            key = json_decode_dict_key(self, key_type, &key_path);
-            if (key == NULL) goto error;
+            if (MS_LIKELY(key_is_str)) {
+                /* Fast path: JSON object keys are always strings, and a plain
+                 * `str` key type needs no type dispatch or constraint checks. */
+                bool is_ascii = true;
+                char *view = NULL;
+                Py_ssize_t size = json_decode_string_view(self, &view, &is_ascii);
+                if (size < 0) goto error;
+                if (MS_LIKELY(is_ascii)) {
+                    key = PyUnicode_New(size, 127);
+                    if (MS_UNLIKELY(key == NULL)) goto error;
+                    memcpy(ascii_get_buffer(key), view, size);
+                }
+                else {
+                    key = PyUnicode_DecodeUTF8(view, size, NULL);
+                    if (MS_UNLIKELY(key == NULL)) goto error;
+                }
+            }
+            else {
+                key = json_decode_dict_key(self, key_type, &key_path);
+                if (key == NULL) goto error;
+            }
         }
         else if (c == '}') {
             json_err_invalid(self, "trailing comma in object");
@@ -16074,6 +16094,28 @@ json_decode_raw(JSONDecoderState *self) {
     return Raw_FromView(self->buffer_obj, (char *)start, size);
 }
 
+/* Fast path for the common `str`/`Any` string decode, inlined so the hot path
+ * avoids the large non-inline `json_decode_string` (which also handles
+ * datetime, uuid, decimal, bytes, enum, ...). */
+static MS_INLINE PyObject *
+json_decode_str_fast(JSONDecoderState *self, TypeNode *type, PathNode *path)
+{
+    char *view = NULL;
+    bool is_ascii = true;
+    Py_ssize_t size = json_decode_string_view(self, &view, &is_ascii);
+    if (size < 0) return NULL;
+    PyObject *out;
+    if (MS_LIKELY(is_ascii)) {
+        out = PyUnicode_New(size, 127);
+        if (MS_UNLIKELY(out == NULL)) return NULL;
+        memcpy(ascii_get_buffer(out), view, size);
+    }
+    else {
+        out = PyUnicode_DecodeUTF8(view, size, NULL);
+    }
+    return ms_check_str_constraints(out, type, path);
+}
+
 static MS_INLINE PyObject *
 json_decode_nocustom(
     JSONDecoderState *self, TypeNode *type, PathNode *path
@@ -16088,7 +16130,11 @@ json_decode_nocustom(
         case 'f': return json_decode_false(self, type, path);
         case '[': return json_decode_array(self, type, path);
         case '{': return json_decode_object(self, type, path);
-        case '"': return json_decode_string(self, type, path);
+        case '"':
+            if (MS_LIKELY(type->types & (MS_TYPE_STR | MS_TYPE_ANY))) {
+                return json_decode_str_fast(self, type, path);
+            }
+            return json_decode_string(self, type, path);
         default: return json_maybe_decode_number(self, type, path);
     }
 }

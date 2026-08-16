@@ -12,11 +12,15 @@
 
 """Compare structtype, msgspec, and pydantic across many field types.
 
-Two parts:
+Three parts:
 
 - Kitchen-sink struct: a single struct with one field for each supported
   field type, measured for construct, dict validate, dict dump, JSON encode,
   and JSON decode.
+
+- Nested struct: a parent struct whose fields are nested structs containing
+  basic types (str, int, float), to show the cost of nesting vs. flat fields.
+  Measured for the same five operations.
 
 - Per-type micro-benchmarks: each field type is measured through a struct
   with 10 identical fields of that type (one per library), so the per-type
@@ -202,6 +206,78 @@ for name, anno, value in FIELD_TYPES:
     micro_json_pd[name] = micro_objs_pd[name].model_dump_json().encode()
 
 
+# ── Nested struct (basic types) ──
+
+# A nested struct containing mostly basic types (str, int, float), used as a
+# field type in a parent struct with 10 identical nested fields so the nesting
+# cost is amplified like the per-type micro-benchmarks.
+
+BASIC_FIELDS = [
+    ("id", int),
+    ("name", str),
+    ("street", str),
+    ("city", str),
+    ("region", str),
+    ("country", str),
+    ("zip", int),
+    ("lat", float),
+    ("lng", float),
+    ("elevation", float),
+    ("population", int),
+    ("timezone", str),
+    ("founded", int),
+    ("area", float),
+    ("active", bool),
+]
+
+Basic_st = type("Basic", (structtype.Struct,), {"__annotations__": dict(BASIC_FIELDS)})
+Basic_ms = type("Basic", (msgspec_lib.Struct,), {"__annotations__": dict(BASIC_FIELDS)})
+Basic_pd = type("Basic", (pydantic.BaseModel,), {"__annotations__": dict(BASIC_FIELDS)})
+
+BASIC_DICT = {
+    "id": 1,
+    "name": "Alice Annabel Montgomery",
+    "street": "1234 Main Street, Apartment 56, Charlottenburg",
+    "city": "Berlin",
+    "region": "BE",
+    "country": "Germany",
+    "zip": 10115,
+    "lat": 52.52,
+    "lng": 13.40,
+    "elevation": 34.0,
+    "population": 3600000,
+    "timezone": "Europe/Berlin",
+    "founded": 1237,
+    "area": 891.7,
+    "active": True,
+}
+
+
+def holder_annos(nested_type):
+    return {f"a{i}": nested_type for i in range(10)}
+
+
+HOLDER_ST = type(
+    "Holder", (structtype.Struct,), {"__annotations__": holder_annos(Basic_st)}
+)
+HOLDER_MS = type(
+    "Holder", (msgspec_lib.Struct,), {"__annotations__": holder_annos(Basic_ms)}
+)
+HOLDER_PD = type(
+    "Holder", (pydantic.BaseModel,), {"__annotations__": holder_annos(Basic_pd)}
+)
+
+HOLDER_DICT = {f"a{i}": BASIC_DICT for i in range(10)}
+
+holder_st = HOLDER_ST.struct_validate(HOLDER_DICT)
+holder_ms = msgspec_lib.convert(HOLDER_DICT, HOLDER_MS)
+holder_pd = HOLDER_PD.model_validate(HOLDER_DICT)
+
+holder_json_st = holder_st.struct_dump_json()
+holder_json_ms = msgspec_lib.json.encode(holder_ms)
+holder_json_pd = holder_pd.model_dump_json().encode()
+
+
 # ── Benchmarking ──
 
 
@@ -298,6 +374,45 @@ bench_op(
     lambda: msgspec_lib.json.decode(sink_json_ms, type=SINK_MS),
     lambda: SINK_PD.model_validate_json(sink_json_pd),
     500,
+)
+
+print()
+print("Nested struct (10x basic-type struct)")
+print("=" * 55)
+bench_op(
+    "Construct (kwargs -> instance)",
+    lambda: HOLDER_ST(**HOLDER_DICT),
+    lambda: HOLDER_MS(**HOLDER_DICT),
+    lambda: HOLDER_PD(**HOLDER_DICT),
+    5000,
+)
+bench_op(
+    "Dict validate (dict -> struct)",
+    lambda: HOLDER_ST.struct_validate(HOLDER_DICT),
+    lambda: msgspec_lib.convert(HOLDER_DICT, HOLDER_MS),
+    lambda: HOLDER_PD.model_validate(HOLDER_DICT),
+    5000,
+)
+bench_op(
+    "Dict dump (struct -> dict)",
+    lambda: holder_st.struct_dump(),
+    lambda: msgspec_lib.to_builtins(holder_ms),
+    lambda: holder_pd.model_dump(mode="json"),
+    5000,
+)
+bench_op(
+    "JSON encode (struct -> bytes)",
+    lambda: holder_st.struct_dump_json(),
+    lambda: msgspec_lib.json.encode(holder_ms),
+    lambda: holder_pd.model_dump_json(),
+    5000,
+)
+bench_op(
+    "JSON decode (bytes -> struct)",
+    lambda: HOLDER_ST.struct_validate_json(holder_json_st),
+    lambda: msgspec_lib.json.decode(holder_json_ms, type=HOLDER_MS),
+    lambda: HOLDER_PD.model_validate_json(holder_json_pd),
+    5000,
 )
 
 print()
