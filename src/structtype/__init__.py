@@ -1,5 +1,5 @@
 from ._adapter import StructAdapter
-from ._core import (
+from ._core import (  # type: ignore
     ALL_BUILTIN_TYPES,
     NODEFAULT,
     UNSET,

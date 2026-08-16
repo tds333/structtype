@@ -3,7 +3,7 @@ import textwrap
 from collections.abc import Callable, Iterable
 from typing import Any, Final
 
-from ._core import NODEFAULT, _dump, _json_encode
+from ._core import NODEFAULT, _dump, _json_encode  # type: ignore
 from ._inspect import (
     AnyType,
     BoolType,
@@ -230,6 +230,7 @@ def _get_class_name(cls: Any) -> str:
 def _get_doc(t: Type) -> str:
     assert hasattr(t, "cls")
     cls = getattr(t.cls, "__origin__", t.cls)
+    assert isinstance(cls, type)
     doc = getattr(cls, "__doc__", "")
     if not doc:
         return ""
@@ -237,9 +238,10 @@ def _get_doc(t: Type) -> str:
     if isinstance(t, EnumType):
         if doc == "An enumeration.":
             return ""
-    elif isinstance(t, (NamedTupleType, DataclassType, PydanticType)):
-        if doc.startswith(f"{cls.__name__}(") and doc.endswith(")"):
-            return ""
+    elif isinstance(t, (NamedTupleType, DataclassType, PydanticType)) and (
+        doc.startswith(f"{cls.__name__}(") and doc.endswith(")")
+    ):
+        return ""
     return doc
 
 
@@ -292,10 +294,9 @@ class _SchemaGenerator:
             schema = _merge_json(schema, t.json_schema_extra)
             t = t.type
 
-        if check_ref and hasattr(t, "cls"):
-            if name := self.name_map.get(t.cls):
-                schema["$ref"] = self.ref_template.format(name=name)
-                return schema
+        if check_ref and hasattr(t, "cls") and (name := self.name_map.get(t.cls)):
+            schema["$ref"] = self.ref_template.format(name=name)
+            return schema
 
         if isinstance(t, (AnyType, RawType)):
             pass

@@ -3,7 +3,7 @@ from typing import Any, get_args
 from ._core import (  # type: ignore
     Field as _Field,
 )
-from ._core import (
+from ._core import (  # type: ignore
     _dump,
     _json_decode,
     _json_encode,

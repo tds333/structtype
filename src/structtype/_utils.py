@@ -7,15 +7,15 @@ from typing import Any, _AnnotatedAlias, _GenericAlias  # noqa: F401
 
 try:
     from typing_extensions import get_type_hints as _get_type_hints
-except Exception:
+except ImportError:
     from typing import get_type_hints as _get_type_hints
 
 try:
     from typing_extensions import NotRequired, Required
-except Exception:
+except ImportError:
     try:
         from typing import NotRequired, Required
-    except Exception:
+    except ImportError:
         Required = NotRequired = None
 
 
@@ -57,7 +57,8 @@ if sys.version_info >= (3, 14):
 else:
 
     def _get_class_annotations(cls):
-        return cls.__dict__.get("__annotations__", {})
+        # RUF063 targets 3.14+ behavior; this is the <3.14 raw-annotations fallback.
+        return cls.__dict__.get("__annotations__", {})  # noqa: RUF063
 
 
 def _apply_params(obj, mapping):
@@ -66,7 +67,7 @@ def _apply_params(obj, mapping):
 
     try:
         parameters = tuple(obj.__parameters__)
-    except Exception:
+    except (AttributeError, TypeError):
         # Not parameterized or __parameters__ is invalid, ignore
         return obj
 

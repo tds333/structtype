@@ -1,4 +1,4 @@
-# ruff: noqa: PYI041
+# ruff: noqa: PYI041, PYI015, PYI020, UP037
 import enum
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from inspect import Signature
@@ -33,7 +33,7 @@ class StructMeta(type):
     __struct_fields__: ClassVar[tuple[str, ...]]
     __struct_defaults__: ClassVar[tuple[Any, ...]]
     __struct_encode_fields__: ClassVar[tuple[str, ...]]
-    __match_args__: ClassVar[tuple[str, ...]]
+    __match_args__: ClassVar[tuple[str, ...]] = ...
     @property
     def __signature__(self) -> Signature: ...
     @property
@@ -68,8 +68,6 @@ class StructMeta(type):
         validate_on_init: bool = False,
     ) -> _SM: ...
 
-_T = TypeVar("_T")
-
 @final
 class UnsetType(enum.Enum):
     UNSET = "UNSET"
@@ -83,13 +81,13 @@ class _NoDefault(enum.Enum):
 
 NODEFAULT: Final = _NoDefault.NODEFAULT
 
-@dataclass_transform(field_specifiers=("Field",))
+@dataclass_transform(field_specifiers=("Field",))  # type: ignore
 class Struct(metaclass=StructMeta):
     __struct_fields__: ClassVar[tuple[str, ...]]
     __struct_config__: ClassVar[StructConfig]
     __struct_encode_fields__: ClassVar[tuple[str, ...]]
     __struct_defaults__: ClassVar[tuple[Any, ...]]
-    __match_args__: ClassVar[tuple[str, ...]]
+    __match_args__: ClassVar[tuple[str, ...]] = ...
     # A default __init__ so that Structs with unknown field types
     # won't error on every call to `__init__`
     def __init__(self, *args: Any, **kwargs: Any) -> None: ...
@@ -141,19 +139,19 @@ class Struct(metaclass=StructMeta):
     def struct_validate_self(self) -> None: ...
     @classmethod
     def struct_validate_json(
-        cls: type[_T],
+        cls,
         buf: str | Buffer,
         *,
         strict: bool = True,
-    ) -> _T: ...
+    ) -> Self: ...
     @classmethod
     def struct_validate(
-        cls: type[_T],
+        cls,
         obj: Any,
         *,
         strict: bool = True,
         from_attributes: bool = False,
-    ) -> _T: ...
+    ) -> Self: ...
 
 # Lie and say `Raw` is a subclass of `bytes`, so mypy will accept it in most
 # places where an object that implements the buffer protocol is valid

@@ -5,12 +5,12 @@ import sys
 import uuid
 from collections.abc import Iterable
 from types import UnionType as _types_UnionType
-from typing import Any, Final, Literal, TypeVar, Union
+from typing import Any, ClassVar, Final, Literal, TypeVar, Union
 
 try:
     from typing import TypeAliasType as _TypeAliasType  # type: ignore
 except ImportError:
-    _TypeAliasType = type("TypeAliasType", (), {})  # type: ignore
+    _TypeAliasType = type("TypeAliasType", (), {})
 
 import structtype
 from structtype import NODEFAULT, UNSET
@@ -19,12 +19,12 @@ from structtype import UnsetType as _UnsetType
 from ._core import (  # type: ignore
     Factory as _Factory,
 )
-from ._core import (
+from ._core import (  # type: ignore
     Struct,
     StructMeta,
     _dump,
 )
-from ._utils import (  # type: ignore
+from ._utils import (
     _CONCRETE_TYPES,
     _AnnotatedAlias,
 )
@@ -516,7 +516,7 @@ class FieldNode(structtype.Struct):
         `NODEFAULT` if no ``default_factory`` is set.
     """
 
-    _FIELD_UNSET = object()
+    _FIELD_UNSET: ClassVar[object] = object()
 
     name: str
     encode_name: str
@@ -898,9 +898,9 @@ class _Translator:
 
     def run(self):
         # First construct a decoder to validate the types are valid
-        from ._core import JSONDecoder
+        from ._core import JSONDecoder  # type: ignore
 
-        JSONDecoder(tuple[self.types])
+        JSONDecoder(tuple[self.types])  # type: ignore
         return tuple(self.translate(t) for t in self.types)
 
     def translate(self, typ):
