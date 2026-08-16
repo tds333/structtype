@@ -1,4 +1,4 @@
-from ._adapter import StrAdapter, StructAdapter
+from ._adapter import StructAdapter
 from ._core import (
     ALL_BUILTIN_TYPES,
     NODEFAULT,
@@ -17,3 +17,26 @@ from ._core import (
 from ._inspect import FieldInfo, fields
 from ._json_schema import json_schema, json_schema_components, json_schema_dump
 from ._version import __version__
+
+__all__ = [
+    "ALL_BUILTIN_TYPES",
+    "NODEFAULT",
+    "UNSET",
+    "DecodeError",
+    "EncodeError",
+    "Factory",
+    "Field",
+    "FieldInfo",
+    "Raw",
+    "Struct",
+    "StructAdapter",
+    "StructConfig",
+    "StructMeta",
+    "UnsetType",
+    "ValidationError",
+    "__version__",
+    "fields",
+    "json_schema",
+    "json_schema_components",
+    "json_schema_dump",
+]

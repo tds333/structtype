@@ -185,17 +185,18 @@ def get_class_annotations(obj):
 # A mapping from a type annotation (or annotation __origin__) to the concrete
 # python type that structtype will use when decoding. THIS IS PRIVATE FOR A
 # REASON. DON'T MUCK WITH THIS.
+
 _CONCRETE_TYPES = {
     list: list,
     tuple: tuple,
     set: set,
     frozenset: frozenset,
     dict: dict,
-    typing.List: list,
-    typing.Tuple: tuple,
-    typing.Set: set,
-    typing.FrozenSet: frozenset,
-    typing.Dict: dict,
+    typing.List: list,  # noqa: UP006
+    typing.Tuple: tuple,  # noqa: UP006
+    typing.Set: set,  # noqa: UP006
+    typing.FrozenSet: frozenset,  # noqa: UP006
+    typing.Dict: dict,  # noqa: UP006
     typing.Collection: list,
     typing.MutableSequence: list,
     typing.Sequence: list,

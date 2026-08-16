@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** remove `StrAdapter`. For custom types constructed from a single
+  string argument (`IPv4Address`, `HttpUrl`, ...), use
+  `Annotated[T, Field(dump=str, validate=T)]` codecs instead.
+
 ## 0.5.0 (2026-08-15)
 
 - **Breaking:** remove the `enc_hook` / `dec_hook` keyword arguments from

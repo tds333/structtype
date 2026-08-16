@@ -240,12 +240,6 @@ StructAdapter
 .. autoclass:: StructAdapter
     :members:
 
-StrAdapter
-----------
-
-.. autoclass:: StrAdapter
-    :members:
-
 
 Exceptions
 ----------

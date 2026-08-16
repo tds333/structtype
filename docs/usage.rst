@@ -1130,7 +1130,7 @@ representation.
 
 The :ref:`Converters <structs-converters>` section below covers how to combine
 ``struct_dump`` / ``struct_validate`` with other serialization libraries, and
-the :class:`StructAdapter` / :class:`StrAdapter` helpers.
+the :class:`StructAdapter` helper.
 
 Note that ``dict(struct_instance)`` is *not* equivalent to
 ``struct_dump``. It performs a one-to-one conversion of a single struct
@@ -1302,46 +1302,27 @@ documentation to demonstrate structtype's type handling without
 creating named ``Struct`` subclasses for every example.
 
 
-StrAdapter
-~~~~~~~~~~
+String-constructible custom types
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For types that validate from and serialize to strings, :class:`StrAdapter`
-provides a simpler alternative to writing a custom :doc:`extension
-<extending>`. It creates a ``str`` subclass that validates values via the
-wrapped type's constructor:
+For a *custom* type that is constructed from a single string argument
+(``IPv4Address``, ``HttpUrl``, ...), attach :class:`Field` codecs:
 
 .. code-block:: python
 
-    >>> from structtype import StrAdapter, Struct
-    >>> from pydantic import HttpUrl
+    >>> from structtype import Struct, Field
+    >>> from typing import Annotated
     >>> from ipaddress import IPv4Address
 
     >>> class Config(Struct):
-    ...     url: StrAdapter(HttpUrl)
-    ...     ip: StrAdapter(IPv4Address)
+    ...     ip: Annotated[IPv4Address, Field(dump=str, validate=IPv4Address)]
 
-    >>> Config.struct_validate_json(
-    ...     b'{"url": "https://example.com", "ip": "10.0.0.1"}'
-    ... )
-    Config(url='https://example.com/', ip='10.0.0.1')
+    >>> Config.struct_validate_json(b'{"ip": "10.0.0.1"}')
+    Config(ip=IPv4Address('10.0.0.1'))
 
-The wrapped type must accept a single string argument in its constructor
-and raise an error if the value is invalid. Compatible with pydantic's
-``HttpUrl``, ``PostgresDsn``, ``AnyUrl``, and stdlib's ``IPv4Address``,
-``IPv6Address``.
-
-Which one should I use?
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Use :class:`StructAdapter` when ``structtype`` already knows how to handle the
-type — builtins and the other :doc:`supported types <supported-types>` — for
-example ``StructAdapter(list[int])``. It wraps the type and exposes the same
-methods as a ``Struct``.
-
-Use :class:`StrAdapter` when you have a *custom* type that can be constructed
-from a single string argument (``IPv4Address``, ``HttpUrl``, ...). It creates a
-``str`` subclass, so validating a value simply calls the wrapped type's
-constructor.
+The field stores the ``IPv4Address`` object: ``dump=str`` serializes it to a
+string and ``validate=IPv4Address`` parses it back. See :doc:`extending` for
+details on per-field codecs.
 
 
 .. _type annotations: https://docs.python.org/3/library/typing.html

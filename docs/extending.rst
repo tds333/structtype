@@ -228,7 +228,7 @@ These aliases nest (``list[Complex]``, ``dict[str, Fraction]``), and the
 fields only — :class:`StructAdapter` rejects them (see above). For types you
 control, prefer the ``struct_dump`` / ``struct_validate`` protocol methods.
 Single-argument string-constructible types such as ``IPv4Address`` may also use
-:class:`StrAdapter`.
+``Annotated[T, Field(dump=str, validate=T)]`` codecs.
 
 Pydantic custom types
 ~~~~~~~~~~~~~~~~~~~~~

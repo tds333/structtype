@@ -1,3 +1,4 @@
+# ruff: noqa: PYI041
 import enum
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from inspect import Signature
@@ -5,7 +6,21 @@ from typing import Any, ClassVar, Final, Literal, TypeAlias, TypeVar, final, ove
 
 from typing_extensions import Buffer, Self, dataclass_transform
 
-from . import StructConfig
+class StructConfig:
+    frozen: bool
+    eq: bool
+    order: bool
+    array_like: bool
+    gc: bool
+    repr_omit_defaults: bool
+    omit_defaults: bool
+    forbid_unknown_fields: bool
+    validate_on_init: bool
+    weakref: bool
+    dict: bool
+    cache_hash: bool
+    tag: str | int | None
+    tag_field: str | None
 
 # PEP 673 explicitly rejects using Self in metaclass definitions:
 # https://peps.python.org/pep-0673/#valid-locations-for-self
@@ -262,22 +277,6 @@ class Field:
     validate: Final[Callable[[Any], Any] | None]
     def __rich_repr__(self) -> list[tuple[str, Any]]: ...
 
-class StructConfig:
-    frozen: bool
-    eq: bool
-    order: bool
-    array_like: bool
-    gc: bool
-    repr_omit_defaults: bool
-    omit_defaults: bool
-    forbid_unknown_fields: bool
-    validate_on_init: bool
-    weakref: bool
-    dict: bool
-    cache_hash: bool
-    tag: str | int | None
-    tag_field: str | None
-
 class FieldInfo(Struct):
     name: str
     encode_name: str
@@ -341,9 +340,6 @@ class StructAdapter:
         str_keys: bool = False,
         builtin_types: Iterable[type] | None = None,
     ) -> Any: ...
-
-class StrAdapter:
-    def __new__(cls, type: type[Any]) -> type[str]: ...
 
 class EncodeError(ValueError): ...
 class DecodeError(ValueError): ...

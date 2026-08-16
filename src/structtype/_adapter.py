@@ -131,34 +131,3 @@ class StructAdapter:
             str_keys=str_keys,
             sort_keys=sort_keys,
         )
-
-
-class StrAdapter:
-    """Create a ``str`` subclass wrapper for validating a type during
-    structtype serialization.
-
-    Wraps a type that has a single-argument string constructor
-    (e.g. ``HttpUrl``, ``EmailStr``, ``IPv4Address``) into a ``str``
-    subclass. The wrapped value is stored as a string but validated by
-    calling ``typ(value)`` on construction. During structtype
-    validation and serialization, the wrapper is treated as a native
-    ``str``.
-
-    >>> from structtype import StrAdapter, Struct
-    >>> from ipaddress import IPv4Address
-    >>>
-    >>> class Config(Struct):
-    ...     ip: StrAdapter(IPv4Address)
-    """
-
-    __slots__ = ()
-
-    def __new__(cls, typ):
-        return type(
-            f"_Wrapped_{typ.__name__}",
-            (str,),
-            {
-                "__slots__": (),
-                "__new__": lambda self, v: str.__new__(self, str(typ(v))),
-            },
-        )
