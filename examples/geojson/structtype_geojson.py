@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import structtype
 
 Position = tuple[float, float]
@@ -61,5 +63,5 @@ GeoJSON = Geometry | Feature | FeatureCollection
 
 
 # Create a decoder and an encoder to use for decoding & encoding GeoJSON types
-loads = structtype.json.Decoder(GeoJSON).decode
-dumps = structtype.json.Encoder().encode
+loads = structtype.StructAdapter(GeoJSON).struct_validate_json
+dumps = structtype.StructAdapter(GeoJSON).struct_dump_json
