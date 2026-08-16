@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-08-15)
 
 - **Breaking:** remove the `enc_hook` / `dec_hook` keyword arguments from
   `struct_dump`, `struct_dump_json`, `struct_validate`, and
