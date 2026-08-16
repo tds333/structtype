@@ -21,6 +21,11 @@ CHECKERS = {
     "mypy": ["mypy", "--python-executable", sys.executable, str(FIXTURE_DIR)],
 }
 
+pytestmark = pytest.mark.skipif(
+    sys.platform == "emscripten",
+    reason="type checkers cannot run in Pyodide",
+)
+
 
 @pytest.mark.parametrize("name", sorted(CHECKERS))
 def test_typecheck(name):
