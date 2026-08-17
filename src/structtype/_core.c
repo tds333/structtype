@@ -3963,30 +3963,11 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
         out->details[e_ind++].pointer = state->structs_lookup;
     }
     if (state->intenum_obj != NULL) {
-        PyObject *lookup = PyObject_GetAttr(state->intenum_obj, state->mod->str___structtype_cache__);
-        if (lookup == NULL) {
-            /* IntLookup isn't created yet, create and store on enum class */
-            PyErr_Clear();
-            PyObject *member_map = PyObject_GetAttr(state->intenum_obj, state->mod->str__value2member_map_);
-            if (member_map == NULL) goto error;
-            lookup = IntLookup_New(member_map, NULL, state->intenum_obj, false);
-            Py_DECREF(member_map);
-            if (lookup == NULL) goto error;
-            if (PyObject_SetAttr(state->intenum_obj, state->mod->str___structtype_cache__, lookup) < 0) {
-                Py_DECREF(lookup);
-                goto error;
-            }
-        }
-        else if (!Lookup_IsIntLookup(lookup)) {
-            /* the lookup attribute has been overwritten, error */
-            Py_DECREF(lookup);
-            PyErr_Format(
-                PyExc_RuntimeError,
-                "%R.__structtype_cache__ has been overwritten",
-                state->intenum_obj
-            );
-            goto error;
-        }
+        PyObject *member_map = PyObject_GetAttr(state->intenum_obj, state->mod->str__value2member_map_);
+        if (member_map == NULL) goto error;
+        PyObject *lookup = IntLookup_New(member_map, NULL, state->intenum_obj, false);
+        Py_DECREF(member_map);
+        if (lookup == NULL) goto error;
         out->details[e_ind++].pointer = lookup;
     }
     if (state->literal_int_lookup != NULL) {
@@ -3994,30 +3975,11 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
         out->details[e_ind++].pointer = state->literal_int_lookup;
     }
     if (state->enum_obj != NULL) {
-        PyObject *lookup = PyObject_GetAttr(state->enum_obj, state->mod->str___structtype_cache__);
-        if (lookup == NULL) {
-            /* StrLookup isn't created yet, create and store on enum class */
-            PyErr_Clear();
-            PyObject *member_map = PyObject_GetAttr(state->enum_obj, state->mod->str__value2member_map_);
-            if (member_map == NULL) goto error;
-            lookup = StrLookup_New(member_map, NULL, state->enum_obj, false);
-            Py_DECREF(member_map);
-            if (lookup == NULL) goto error;
-            if (PyObject_SetAttr(state->enum_obj, state->mod->str___structtype_cache__, lookup) < 0) {
-                Py_DECREF(lookup);
-                goto error;
-            }
-        }
-        else if (Py_TYPE(lookup) != &StrLookup_Type) {
-            /* the lookup attribute has been overwritten, error */
-            Py_DECREF(lookup);
-            PyErr_Format(
-                PyExc_RuntimeError,
-                "%R.__structtype_cache__ has been overwritten",
-                state->enum_obj
-            );
-            goto error;
-        }
+        PyObject *member_map = PyObject_GetAttr(state->enum_obj, state->mod->str__value2member_map_);
+        if (member_map == NULL) goto error;
+        PyObject *lookup = StrLookup_New(member_map, NULL, state->enum_obj, false);
+        Py_DECREF(member_map);
+        if (lookup == NULL) goto error;
         out->details[e_ind++].pointer = lookup;
     }
     if (state->literal_str_lookup != NULL) {
@@ -4539,37 +4501,6 @@ typenode_collect_validate_literals(TypeNodeCollectState *state) {
 
     Py_ssize_t n = PyList_GET_SIZE(state->literals);
 
-    if (n == 1) {
-        PyObject *literal = PyList_GET_ITEM(state->literals, 0);
-
-        PyObject *cached = NULL;
-        if (get_structtype_cache(state->mod, literal, &LiteralInfo_Type, &cached)) {
-            if (cached == NULL) return -1;
-            LiteralInfo *info = (LiteralInfo *)cached;
-            if (info->int_lookup != NULL) {
-                state->types |= MS_TYPE_INTLITERAL;
-                Py_INCREF(info->int_lookup);
-                state->literal_int_lookup = info->int_lookup;
-            }
-            if (info->str_lookup != NULL) {
-                state->types |= MS_TYPE_STRLITERAL;
-                Py_INCREF(info->str_lookup);
-                state->literal_str_lookup = info->str_lookup;
-            }
-            if (info->literal_none) {
-                state->types |= MS_TYPE_NONE;
-            }
-            if (info->literal_bool_true) {
-                state->types |= MS_TYPE_BOOLLITERAL_TRUE;
-            }
-            if (info->literal_bool_false) {
-                state->types |= MS_TYPE_BOOLLITERAL_FALSE;
-            }
-            Py_DECREF(cached);
-            return 0;
-        }
-    }
-
     /* Collect all values in all literals */
     for (Py_ssize_t i = 0; i < n; i++) {
         PyObject *literal = PyList_GET_ITEM(state->literals, i);
@@ -4598,26 +4529,6 @@ typenode_collect_validate_literals(TypeNodeCollectState *state) {
     }
     if (state->literal_bool_false) {
         state->types |= MS_TYPE_BOOLLITERAL_FALSE;
-    }
-
-    if (n == 1) {
-        /* A single `Literal` object, cache the lookups on it */
-        LiteralInfo *info = PyObject_GC_New(LiteralInfo, &LiteralInfo_Type);
-        if (info == NULL) return -1;
-        Py_XINCREF(state->literal_int_lookup);
-        info->int_lookup = state->literal_int_lookup;
-        Py_XINCREF(state->literal_str_lookup);
-        info->str_lookup = state->literal_str_lookup;
-        info->literal_none = state->literal_none;
-        info->literal_bool_true = state->literal_bool_true;
-        info->literal_bool_false = state->literal_bool_false;
-        PyObject_GC_Track(info);
-        PyObject *literal = PyList_GET_ITEM(state->literals, 0);
-        int status = PyObject_SetAttr(
-            literal, state->mod->str___structtype_cache__, (PyObject *)info
-        );
-        Py_DECREF(info);
-        return status;
     }
     return 0;
 }

@@ -165,3 +165,48 @@ def test_concurrent_self_referential_info_build():
         t.start()
     for t in threads:
         t.join()
+
+
+class Color(int):
+    pass
+
+
+class Status(int):
+    pass
+
+
+class Order(Struct):
+    color: Color
+    status: Status
+
+
+class Preference(Struct):
+    color: Color
+    status: Status
+
+
+def test_concurrent_enum_cache_construction():
+    """Stress concurrent TypeNode construction across multiple struct types
+    that share the same IntEnum field type. Exercises the __structtype_cache__
+    race on enum classes — without the critical section fix, two threads can
+    both create and store an IntLookup, leaking one."""
+    from structtype import StructAdapter
+
+    order_adapter = StructAdapter(Order)
+    pref_adapter = StructAdapter(Preference)
+
+    order_json = b'{"color":1,"status":2}'
+    pref_json = b'{"color":3,"status":4}'
+
+    def worker(seed):
+        for i in range(2000):
+            if (i + seed) % 2 == 0:
+                order_adapter.struct_validate_json(order_json)
+            else:
+                pref_adapter.struct_validate_json(pref_json)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
