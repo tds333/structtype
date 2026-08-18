@@ -460,9 +460,6 @@ typedef struct {
     PyObject *str__value_;
     PyObject *str__missing_;
     PyObject *str_type;
-    PyObject *str_enc_hook;
-    PyObject *str_dec_hook;
-    PyObject *str_ext_hook;
     PyObject *str_strict;
     PyObject *str_sort_keys;
     PyObject *str_decimal_format;
@@ -9454,12 +9451,10 @@ enum decimal_format {
 enum uuid_format {
     UUID_FORMAT_CANONICAL = 0,
     UUID_FORMAT_HEX = 1,
-    UUID_FORMAT_BYTES = 2,
 };
 
 typedef struct EncoderState {
     StructspecState *mod;          /* module reference */
-    PyObject *enc_hook;         /* `enc_hook` callback */
     PyObject *codecs;           /* current per-field {type: dump} map, or NULL */
     PyObject *decimal_callable; /* `decimal_format` callable */
     enum decimal_format decimal_format;
@@ -9476,7 +9471,6 @@ typedef struct EncoderState {
 
 typedef struct Encoder {
     PyObject_HEAD
-    PyObject *enc_hook;
     PyObject *decimal_callable;
     StructspecState *mod;
     enum decimal_format decimal_format;
@@ -9490,14 +9484,6 @@ ms_resize_bytes(PyObject** output_buffer, Py_ssize_t size)
     int status = _PyBytes_Resize(output_buffer, size);
     if (status < 0) return NULL;
     return PyBytes_AS_STRING(*output_buffer);
-}
-
-static char*
-ms_resize_bytearray(PyObject** output_buffer, Py_ssize_t size)
-{
-    int status = PyByteArray_Resize(*output_buffer, size);
-    if (status < 0) return NULL;
-    return PyByteArray_AS_STRING(*output_buffer);
 }
 
 static MS_NOINLINE int
@@ -9550,13 +9536,13 @@ ms_write(EncoderState *self, const char *s, Py_ssize_t n)
 static int
 Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
 {
-    char *kwlist[] = {"enc_hook", "decimal_format", "uuid_format", "sort_keys", NULL};
-    PyObject *enc_hook = NULL, *decimal_format = NULL, *uuid_format = NULL, *sort_keys = NULL;
+    char *kwlist[] = {"decimal_format", "uuid_format", "sort_keys", NULL};
+    PyObject *decimal_format = NULL, *uuid_format = NULL, *sort_keys = NULL;
 
     if (
         !PyArg_ParseTupleAndKeywords(
-            args, kwds, "|$OOOO", kwlist,
-            &enc_hook, &decimal_format, &uuid_format, &sort_keys
+            args, kwds, "|$OOO", kwlist,
+            &decimal_format, &uuid_format, &sort_keys
         )
     ) {
         return -1;
@@ -9623,26 +9609,13 @@ Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
     /* Process sort_keys */
     if (parse_sort_keys_arg(sort_keys, &self->sort_keys) < 0) return -1;
 
-    if (enc_hook == Py_None) {
-        enc_hook = NULL;
-    }
-    if (enc_hook != NULL) {
-        if (!PyCallable_Check(enc_hook)) {
-            PyErr_SetString(PyExc_TypeError, "enc_hook must be callable");
-            return -1;
-        }
-        Py_INCREF(enc_hook);
-    }
-
     self->mod = structtype_get_global_state();
-    Py_XSETREF(self->enc_hook, enc_hook);
     return 0;
 }
 
 static int
 Encoder_traverse(Encoder *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->enc_hook);
     Py_VISIT(self->decimal_callable);
     return 0;
 }
@@ -9650,7 +9623,6 @@ Encoder_traverse(Encoder *self, visitproc visit, void *arg)
 static int
 Encoder_clear(Encoder *self)
 {
-    Py_CLEAR(self->enc_hook);
     Py_CLEAR(self->decimal_callable);
     return 0;
 }
@@ -9661,95 +9633,6 @@ Encoder_dealloc(Encoder *self)
     PyObject_GC_UnTrack(self);
     Encoder_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-PyDoc_STRVAR(Encoder_encode_into__doc__,
-"encode_into(self, obj, buffer, offset=0, /)\n"
-"--\n"
-"\n"
-"Serialize an object into an existing bytearray buffer.\n"
-"\n"
-"Upon success, the buffer will be truncated to the end of the serialized\n"
-"message. Note that the underlying memory buffer *won't* be truncated,\n"
-"allowing for efficiently appending additional bytes later.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"obj : Any\n"
-"    The object to serialize.\n"
-"buffer : bytearray\n"
-"    The buffer to serialize into.\n"
-"offset : int, optional\n"
-"    The offset into the buffer to start writing at. Defaults to 0. Set to -1\n"
-"    to start writing at the end of the buffer.\n"
-"\n"
-"Returns\n"
-"-------\n"
-"None"
-);
-static PyObject*
-encoder_encode_into_common(
-    Encoder *self,
-    PyObject *const *args,
-    Py_ssize_t nargs,
-    int(*encode)(EncoderState*, PyObject*)
-)
-{
-    if (!check_positional_nargs(nargs, 2, 3)) return NULL;
-    PyObject *obj = args[0];
-    PyObject *buf = args[1];
-    if (!PyByteArray_CheckExact(buf)) {
-        PyErr_SetString(PyExc_TypeError, "buffer must be a `bytearray`");
-        return NULL;
-    }
-    Py_ssize_t buf_size = PyByteArray_GET_SIZE(buf);
-    Py_ssize_t offset = 0;
-    if (nargs == 3) {
-        offset = PyLong_AsSsize_t(args[2]);
-        if (offset == -1) {
-            if (PyErr_Occurred()) return NULL;
-            offset = buf_size;
-        }
-        if (offset < 0) {
-            PyErr_SetString(PyExc_ValueError, "offset must be >= -1");
-            return NULL;
-        }
-
-        if (offset < buf_size) {
-            Py_ssize_t growth = offset / 2;
-            if (offset > PY_SSIZE_T_MAX - growth) {
-                PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
-                return NULL;
-            }
-            buf_size = offset + growth;
-            if (buf_size < 8) buf_size = 8;
-            if (PyByteArray_Resize(buf, buf_size) < 0) return NULL;
-        }
-    }
-
-    /* Setup buffer */
-    EncoderState state = {
-        .mod = self->mod,
-        .enc_hook = self->enc_hook,
-        .codecs = NULL,
-        .decimal_format = self->decimal_format,
-        .decimal_callable = self->decimal_callable,
-        .in_decimal_callable = false,
-        .uuid_format = self->uuid_format,
-        .sort_keys = self->sort_keys,
-        .output_buffer = buf,
-        .output_buffer_raw = PyByteArray_AS_STRING(buf),
-        .output_len = offset,
-        .max_output_len = buf_size,
-        .resize_buffer = ms_resize_bytearray
-    };
-
-    if (encode(&state, obj) < 0) {
-        return NULL;
-    }
-
-    FAST_BYTEARRAY_SHRINK(buf, state.output_len);
-    Py_RETURN_NONE;
 }
 
 PyDoc_STRVAR(Encoder_encode__doc__,
@@ -9780,7 +9663,6 @@ encoder_encode_common(
 
     EncoderState state = {
         .mod = self->mod,
-        .enc_hook = self->enc_hook,
         .codecs = NULL,
         .decimal_format = self->decimal_format,
         .decimal_callable = self->decimal_callable,
@@ -9812,14 +9694,13 @@ encode_common(
     int(*encode)(EncoderState*, PyObject*)
 )
 {
-    PyObject *enc_hook = NULL, *sort_keys = NULL, *decimal_format = NULL, *uuid_format = NULL;
+    PyObject *sort_keys = NULL, *decimal_format = NULL, *uuid_format = NULL;
     StructspecState *mod = structtype_get_state(module);
 
     /* Parse arguments */
     if (!check_positional_nargs(nargs, 1, 1)) return NULL;
     if (kwnames != NULL) {
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
-        if ((enc_hook = find_keyword(kwnames, args + nargs, mod->str_enc_hook)) != NULL) nkwargs--;
         if ((sort_keys = find_keyword(kwnames, args + nargs, mod->str_sort_keys)) != NULL) nkwargs--;
         if ((decimal_format = find_keyword(kwnames, args + nargs, mod->str_decimal_format)) != NULL) nkwargs--;
         if ((uuid_format = find_keyword(kwnames, args + nargs, mod->str_uuid_format)) != NULL) nkwargs--;
@@ -9830,14 +9711,6 @@ encode_common(
             );
             return NULL;
         }
-    }
-
-    if (enc_hook == Py_None) {
-        enc_hook = NULL;
-    }
-    if (enc_hook != NULL && !PyCallable_Check(enc_hook)) {
-        PyErr_SetString(PyExc_TypeError, "enc_hook must be callable");
-        return NULL;
     }
 
     /* Process decimal format */
@@ -9903,7 +9776,6 @@ encode_common(
 
     EncoderState state = {
         .mod = mod,
-        .enc_hook = enc_hook,
         .codecs = NULL,
         .decimal_format = dec_fmt,
         .decimal_callable = dec_callable,
@@ -9929,7 +9801,6 @@ encode_common(
 }
 
 static PyMemberDef Encoder_members[] = {
-    {"enc_hook", T_OBJECT, offsetof(Encoder, enc_hook), READONLY, NULL},
     {NULL},
 };
 
@@ -9952,11 +9823,8 @@ Encoder_uuid_format(Encoder *self, void *closure) {
     if (self->uuid_format == UUID_FORMAT_CANONICAL) {
         return PyUnicode_InternFromString("canonical");
     }
-    else if (self->uuid_format == UUID_FORMAT_HEX) {
-        return PyUnicode_InternFromString("hex");
-    }
     else {
-        return PyUnicode_InternFromString("bytes");
+        return PyUnicode_InternFromString("hex");
     }
 }
 
@@ -10077,7 +9945,7 @@ ms_decode_custom_struct(PyObject *cls, PyObject *dict, PathNode *path) {
 }
 
 static MS_NOINLINE PyObject *
-ms_decode_custom(PyObject *obj, PyObject *dec_hook, TypeNode* type, PathNode *path) {
+ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
     PyObject *custom_cls = NULL, *custom_obj, *out = NULL;
     int status;
     bool generic = type->types & MS_TYPE_CUSTOM_GENERIC;
@@ -10088,17 +9956,7 @@ ms_decode_custom(PyObject *obj, PyObject *dec_hook, TypeNode* type, PathNode *pa
 
     custom_obj = TypeNode_get_custom(type);
 
-    if (dec_hook != NULL) {
-        out = PyObject_CallFunctionObjArgs(dec_hook, custom_obj, obj, NULL);
-        Py_DECREF(obj);
-        if (out == NULL) {
-            ms_maybe_wrap_validation_error(path);
-            return NULL;
-        }
-    }
-    else {
-        out = obj;
-    }
+    out = obj;
 
     /* Generic classes must be checked based on __origin__ */
     if (generic) {
@@ -13193,25 +13051,7 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
             return status;
         }
     }
-    if (self->enc_hook != NULL) {
-        int status = -1;
-        PyObject *temp;
-        temp = PyObject_CallOneArg(self->enc_hook, obj);
-        if (temp == NULL) return -1;
-        if (!Py_EnterRecursiveCall(" while serializing an object")) {
-            status = json_encode_dict_key(self, temp);
-            Py_LeaveRecursiveCall();
-        }
-        Py_DECREF(temp);
-        return status;
-    }
-    else {
-        PyErr_SetString(
-            PyExc_TypeError,
-            "Only dicts with str-like or number-like keys are supported"
-        );
-        return -1;
-    }
+    return ms_encode_err_type_unsupported(type);
 }
 
 static int
@@ -13683,18 +13523,6 @@ cleanup:
         }
     }
 
-    if (self->enc_hook != NULL) {
-        int status = -1;
-        PyObject *temp;
-        temp = PyObject_CallOneArg(self->enc_hook, obj);
-        if (temp == NULL) return -1;
-        if (!Py_EnterRecursiveCall(" while serializing an object")) {
-            status = json_encode(self, temp);
-            Py_LeaveRecursiveCall();
-        }
-        Py_DECREF(temp);
-        return status;
-    }
     return ms_encode_err_type_unsupported(type);
 }
 
@@ -13741,12 +13569,6 @@ json_encode(EncoderState *self, PyObject *obj)
 }
 
 static PyObject*
-JSONEncoder_encode_into(Encoder *self, PyObject *const *args, Py_ssize_t nargs)
-{
-    return encoder_encode_into_common(self, args, nargs, &json_encode);
-}
-
-static PyObject*
 JSONEncoder_encode(Encoder *self, PyObject *const *args, Py_ssize_t nargs)
 {
     return encoder_encode_common(self, args, nargs, &json_encode);
@@ -13757,10 +13579,6 @@ static struct PyMethodDef JSONEncoder_methods[] = {
     {
         "encode", (PyCFunction) JSONEncoder_encode, METH_FASTCALL,
         Encoder_encode__doc__,
-    },
-    {
-        "encode_into", (PyCFunction) JSONEncoder_encode_into, METH_FASTCALL,
-        Encoder_encode_into__doc__,
     },
     {NULL, NULL}                /* sentinel */
 };
@@ -13794,7 +13612,6 @@ structtype_json_encode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
 typedef struct JSONDecoderState {
     /* Configuration */
     TypeNode *type;
-    PyObject *dec_hook;
     PyObject *float_hook;
     bool strict;
 
@@ -13817,12 +13634,11 @@ typedef struct JSONDecoder {
     /* Configuration */
     TypeNode *type;
     char strict;
-    PyObject *dec_hook;
     PyObject *float_hook;
 } JSONDecoder;
 
 PyDoc_STRVAR(JSONDecoder__doc__,
-"Decoder(type='Any', *, strict=True, dec_hook=None, float_hook=None)\n"
+"Decoder(type='Any', *, strict=True, float_hook=None)\n"
 "--\n"
 "\n"
 "A JSON decoder.\n"
@@ -13838,12 +13654,6 @@ PyDoc_STRVAR(JSONDecoder__doc__,
 "    Whether type coercion rules should be strict. Setting to False enables a\n"
 "    wider set of coercion rules from string to non-string types for all values.\n"
 "    Default is True.\n"
-"dec_hook : callable, optional\n"
-"    An optional callback for handling decoding custom types. Should have the\n"
-"    signature ``dec_hook(type: Type, obj: Any) -> Any``, where ``type`` is the\n"
-"    expected message type, and ``obj`` is the decoded representation composed\n"
-"    of only basic JSON types. This hook should transform ``obj`` into type\n"
-"    ``type``, or raise a ``NotImplementedError`` if unsupported.\n"
 "float_hook : callable, optional\n"
 "    An optional callback for handling decoding untyped float literals. Should\n"
 "    have the signature ``float_hook(val: str) -> Any``, where ``val`` is the\n"
@@ -13856,31 +13666,17 @@ PyDoc_STRVAR(JSONDecoder__doc__,
 static int
 JSONDecoder_init(JSONDecoder *self, PyObject *args, PyObject *kwds)
 {
-    char *kwlist[] = {"type", "strict", "dec_hook", "float_hook", NULL};
+    char *kwlist[] = {"type", "strict", "float_hook", NULL};
     StructspecState *st = structtype_get_global_state();
     PyObject *type = st->typing_any;
-    PyObject *dec_hook = NULL;
     PyObject *float_hook = NULL;
     int strict = 1;
 
     if (!PyArg_ParseTupleAndKeywords(
-        args, kwds, "|O$pOO", kwlist, &type, &strict, &dec_hook, &float_hook)
+        args, kwds, "|O$pO", kwlist, &type, &strict, &float_hook)
     ) {
         return -1;
     }
-
-    /* Handle dec_hook */
-    if (dec_hook == Py_None) {
-        dec_hook = NULL;
-    }
-    if (dec_hook != NULL) {
-        if (!PyCallable_Check(dec_hook)) {
-            PyErr_SetString(PyExc_TypeError, "dec_hook must be callable");
-            return -1;
-        }
-        Py_INCREF(dec_hook);
-    }
-    Py_XSETREF(self->dec_hook, dec_hook);
 
     /* Handle float_hook */
     if (float_hook == Py_None) {
@@ -13913,7 +13709,6 @@ JSONDecoder_traverse(JSONDecoder *self, visitproc visit, void *arg)
     int out = TypeNode_traverse(self->type, visit, arg);
     if (out != 0) return out;
     Py_VISIT(self->orig_type);
-    Py_VISIT(self->dec_hook);
     Py_VISIT(self->float_hook);
     return 0;
 }
@@ -13924,7 +13719,6 @@ JSONDecoder_clear(JSONDecoder *self)
     Py_CLEAR(self->orig_type);
     TypeNode_Free(self->type);
     self->type = NULL;
-    Py_CLEAR(self->dec_hook);
     Py_CLEAR(self->float_hook);
     return 0;
 }
@@ -14698,7 +14492,7 @@ json_decode_dict_key_fallback(
             out = PyUnicode_DecodeUTF8(view, size, NULL);
         }
         if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
-            return ms_decode_custom(out, self->dec_hook, type, path);
+            return ms_decode_custom(out, type, path);
         }
         return ms_check_str_constraints(out, type, path);
     }
@@ -16085,7 +15879,7 @@ json_decode(
     }
     PyObject *obj = json_decode_nocustom(self, type, path);
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
-        return ms_decode_custom(obj, self->dec_hook, type, path);
+        return ms_decode_custom(obj, type, path);
     }
     return obj;
 }
@@ -16315,7 +16109,6 @@ JSONDecoder_decode(JSONDecoder *self, PyObject *const *args, Py_ssize_t nargs)
     JSONDecoderState state = {
         .type = self->type,
         .strict = self->strict,
-        .dec_hook = self->dec_hook,
         .float_hook = self->float_hook,
         .scratch = NULL,
         .scratch_capacity = 0,
@@ -16349,7 +16142,6 @@ JSONDecoder_decode(JSONDecoder *self, PyObject *const *args, Py_ssize_t nargs)
 static PyMemberDef JSONDecoder_members[] = {
     {"type", T_OBJECT_EX, offsetof(JSONDecoder, orig_type), READONLY, "The Decoder type"},
     {"strict", T_BOOL, offsetof(JSONDecoder, strict), READONLY, "The Decoder strict setting"},
-    {"dec_hook", T_OBJECT, offsetof(JSONDecoder, dec_hook), READONLY, "The Decoder dec_hook"},
     {"float_hook", T_OBJECT, offsetof(JSONDecoder, float_hook), READONLY, "The Decoder float_hook"},
     {NULL},
 };
@@ -16380,19 +16172,18 @@ static PyTypeObject JSONDecoder_Type = {
 };
 
 /* Shared decode core: parse `buf` as JSON into `type` with the given
- * `strict` / `dec_hook` options. Used both by the module-level
+ * `strict` option. Used both by the module-level
  * `structtype_json_decode` and by the `Struct.struct_validate_json` method
  * (which supplies the struct type directly, avoiding keyword re-marshaling). */
 static PyObject *
 json_decode_common(
-    StructspecState *mod, PyObject *buf, PyObject *type, int strict, PyObject *dec_hook
+    StructspecState *mod, PyObject *buf, PyObject *type, int strict
 )
 {
     PyObject *res = NULL;
 
     JSONDecoderState state = {
         .strict = strict,
-        .dec_hook = dec_hook,
         .float_hook = NULL,
         .scratch = NULL,
         .scratch_capacity = 0,
@@ -16451,7 +16242,7 @@ json_decode_common(
 static PyObject*
 structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
 {
-    PyObject *buf = NULL, *type = NULL, *dec_hook = NULL, *strict_obj = NULL;
+    PyObject *buf = NULL, *type = NULL, *strict_obj = NULL;
     int strict = 1;
     StructspecState *mod = structtype_get_state(self);
 
@@ -16462,23 +16253,11 @@ structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
         if ((type = find_keyword(kwnames, args + nargs, mod->str_type)) != NULL) nkwargs--;
         if ((strict_obj = find_keyword(kwnames, args + nargs, mod->str_strict)) != NULL) nkwargs--;
-        if ((dec_hook = find_keyword(kwnames, args + nargs, mod->str_dec_hook)) != NULL) nkwargs--;
         if (nkwargs > 0) {
             PyErr_SetString(
                 PyExc_TypeError,
                 "Extra keyword arguments provided"
             );
-            return NULL;
-        }
-    }
-
-    /* Handle dec_hook */
-    if (dec_hook == Py_None) {
-        dec_hook = NULL;
-    }
-    if (dec_hook != NULL) {
-        if (!PyCallable_Check(dec_hook)) {
-            PyErr_SetString(PyExc_TypeError, "dec_hook must be callable");
             return NULL;
         }
     }
@@ -16489,7 +16268,7 @@ structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
         if (strict < 0) return NULL;
     }
 
-    return json_decode_common(mod, buf, type, strict, dec_hook);
+    return json_decode_common(mod, buf, type, strict);
 }
 
 /*************************************************************************
@@ -16510,7 +16289,6 @@ structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
 
 typedef struct {
     StructspecState *mod;
-    PyObject *enc_hook;
     PyObject *codecs;           /* current per-field {type: dump} map, or NULL */
     bool str_keys;
     bool sort_keys;
@@ -17162,22 +16940,8 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         }
     }
 
-    if (self->enc_hook != NULL) {
-        PyObject *out = NULL;
-        PyObject *temp;
-        temp = PyObject_CallOneArg(self->enc_hook, obj);
-        if (temp == NULL) return NULL;
-        if (!Py_EnterRecursiveCall(" while serializing an object")) {
-            out = dump_obj(self, temp, is_key);
-            Py_LeaveRecursiveCall();
-        }
-        Py_DECREF(temp);
-        return out;
-    }
-    else {
-        ms_encode_err_type_unsupported(type);
-        return NULL;
-    }
+    ms_encode_err_type_unsupported(type);
+    return NULL;
 
 builtin:
     Py_INCREF(obj);
@@ -17269,16 +17033,16 @@ error:
 static PyObject*
 structtype_dump(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-    PyObject *obj = NULL, *builtin_types = NULL, *enc_hook = NULL, *sort_keys = NULL;
+    PyObject *obj = NULL, *builtin_types = NULL, *sort_keys = NULL;
     int str_keys = 0;
     DumpState state;
 
-    char *kwlist[] = {"obj", "builtin_types", "str_keys", "enc_hook", "sort_keys", NULL};
+    char *kwlist[] = {"obj", "builtin_types", "str_keys", "sort_keys", NULL};
 
     /* Parse arguments */
     if (!PyArg_ParseTupleAndKeywords(
-        args, kwargs, "O|$OpOO", kwlist,
-        &obj, &builtin_types, &str_keys, &enc_hook, &sort_keys
+        args, kwargs, "O|$OpO", kwlist,
+        &obj, &builtin_types, &str_keys, &sort_keys
     )) {
         return NULL;
     }
@@ -17290,15 +17054,6 @@ structtype_dump(PyObject *self, PyObject *args, PyObject *kwargs)
     state.codecs = NULL;
 
     if (parse_sort_keys_arg(sort_keys, &state.sort_keys) < 0) return NULL;
-
-    if (enc_hook == Py_None) {
-        enc_hook = NULL;
-    }
-    else if (enc_hook != NULL && !PyCallable_Check(enc_hook)) {
-        PyErr_SetString(PyExc_TypeError, "enc_hook must be callable");
-        return NULL;
-    }
-    state.enc_hook = enc_hook;
 
     if (
         ms_process_builtin_types(
@@ -17322,7 +17077,6 @@ structtype_dump(PyObject *self, PyObject *args, PyObject *kwargs)
 
 typedef struct ValidateState {
     StructspecState *mod;
-    PyObject *dec_hook;
     uint32_t builtin_types;
     bool str_keys;
     bool from_attributes;
@@ -18814,7 +18568,7 @@ validate_obj(
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_ANY))) {
         Py_INCREF(obj);
         if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
-            return ms_decode_custom(obj, self->dec_hook, type, path);
+            return ms_decode_custom(obj, type, path);
         }
         return obj;
     }
@@ -18894,19 +18648,19 @@ validate_obj(
 static PyObject*
 structtype_validate(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-    PyObject *obj = NULL, *pytype = NULL, *builtin_types = NULL, *dec_hook = NULL;
+    PyObject *obj = NULL, *pytype = NULL, *builtin_types = NULL;
     int str_keys = false, strict = true, from_attributes = false;
     ValidateState state;
 
     char *kwlist[] = {
-        "obj", "type", "strict", "from_attributes", "dec_hook", "builtin_types",
+        "obj", "type", "strict", "from_attributes", "builtin_types",
         "str_keys", NULL
     };
 
     /* Parse arguments */
     if (!PyArg_ParseTupleAndKeywords(
-        args, kwargs, "OO|$ppOOp", kwlist,
-        &obj, &pytype, &strict, &from_attributes, &dec_hook, &builtin_types, &str_keys
+        args, kwargs, "OO|$ppOp", kwlist,
+        &obj, &pytype, &strict, &from_attributes, &builtin_types, &str_keys
     )) {
         return NULL;
     }
@@ -18924,15 +18678,6 @@ structtype_validate(PyObject *self, PyObject *args, PyObject *kwargs)
     else {
         state.str_keys = true;
     }
-
-    if (dec_hook == Py_None) {
-        dec_hook = NULL;
-    }
-    else if (dec_hook != NULL && !PyCallable_Check(dec_hook)) {
-        PyErr_SetString(PyExc_TypeError, "dec_hook must be callable");
-        return NULL;
-    }
-    state.dec_hook = dec_hook;
 
     /* Avoid allocating a new TypeNode for struct types */
     if (ms_is_struct_cls(pytype)) {
@@ -19034,7 +18779,7 @@ Struct_validate_json(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyO
         if (strict < 0) return NULL;
     }
 
-    return json_decode_common(state, args[0], cls, strict, NULL);
+    return json_decode_common(state, args[0], cls, strict);
 }
 
 static PyObject *
@@ -19078,7 +18823,6 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
     state.builtin_types = 0;
     state.builtin_types_seq = NULL;
     if (parse_sort_keys_arg(sort_keys, &state.sort_keys) < 0) return NULL;
-    state.enc_hook = NULL;
     state.codecs = NULL;
     if (ms_process_builtin_types(mod, builtin_types,
             &(state.builtin_types), &(state.builtin_types_seq)) < 0) {
@@ -19121,7 +18865,6 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
     state.mod = mod;
     state.strict = strict;
     state.from_attributes = from_attributes;
-    state.dec_hook = NULL;
     state.str_keys = strict ? false : true;
     state.builtin_types = 0;
 
@@ -19191,7 +18934,6 @@ struct_check_recursive(
         state.mod = mod;
         state.strict = 1;
         state.from_attributes = 0;
-        state.dec_hook = NULL;
         state.str_keys = 0;
         state.builtin_types = 0;
         PyObject *out = validate_obj(&state, val, field_type, NULL);
@@ -19268,9 +19010,6 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->str__value_);
     Py_CLEAR(st->str__missing_);
     Py_CLEAR(st->str_type);
-    Py_CLEAR(st->str_enc_hook);
-    Py_CLEAR(st->str_dec_hook);
-    Py_CLEAR(st->str_ext_hook);
     Py_CLEAR(st->str_strict);
     Py_CLEAR(st->str_sort_keys);
     Py_CLEAR(st->str_decimal_format);
@@ -19669,9 +19408,6 @@ PyInit__core(void)
     CACHED_STRING(str__value_, "_value_");
     CACHED_STRING(str__missing_, "_missing_");
     CACHED_STRING(str_type, "type");
-    CACHED_STRING(str_enc_hook, "enc_hook");
-    CACHED_STRING(str_dec_hook, "dec_hook");
-    CACHED_STRING(str_ext_hook, "ext_hook");
     CACHED_STRING(str_strict, "strict");
     CACHED_STRING(str_sort_keys, "sort_keys");
     CACHED_STRING(str_decimal_format, "decimal_format");

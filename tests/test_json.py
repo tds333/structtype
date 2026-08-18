@@ -117,30 +117,6 @@ class TestEncodeFunction:
         ):
             _json_encode(Foo())
 
-    def test_encode_enc_hook(self):
-        unsupported = object()
-
-        def enc_hook(x):
-            assert x is unsupported
-            return "hello"
-
-        orig_refcount = sys.getrefcount(enc_hook)
-
-        res = _json_encode(unsupported, enc_hook=enc_hook)
-        assert _json_encode("hello") == res
-        assert sys.getrefcount(enc_hook) == orig_refcount
-
-    def test_encode_enc_hook_errors(self):
-        def enc_hook(x):
-            raise TypeError("bad")
-
-        orig_refcount = sys.getrefcount(enc_hook)
-
-        with pytest.raises(TypeError, match="bad"):
-            _json_encode(object(), enc_hook=enc_hook)
-
-        assert sys.getrefcount(enc_hook) == orig_refcount
-
     def test_encode_parse_arguments_errors(self):
         with pytest.raises(TypeError, match="Missing 1 required argument"):
             _json_encode()
@@ -153,9 +129,6 @@ class TestEncodeFunction:
 
         with pytest.raises(TypeError, match="Extra keyword arguments"):
             _json_encode(1, bad=1)
-
-        with pytest.raises(TypeError, match="Extra keyword arguments"):
-            _json_encode(1, enc_hook=lambda x: None, extra="extra")
 
 
 class TestEncoderMisc:
@@ -194,141 +167,11 @@ class TestEncoderMisc:
         class Foo:
             pass
 
-        enc = JSONEncoder()
-        assert enc.enc_hook is None
-
         with pytest.raises(
             TypeError, match="Encoding objects of type Foo is unsupported"
         ):
+            enc = JSONEncoder()
             enc.encode(Foo())
-
-    def test_encode_enc_hook(self):
-        unsupported = object()
-
-        def enc_hook(x):
-            assert x is unsupported
-            return "hello"
-
-        orig_refcount = sys.getrefcount(enc_hook)
-
-        enc = JSONEncoder(enc_hook=enc_hook)
-
-        assert enc.enc_hook is enc_hook
-        assert sys.getrefcount(enc.enc_hook) == orig_refcount + 2
-        assert sys.getrefcount(enc_hook) == orig_refcount + 1
-
-        res = enc.encode(unsupported)
-        assert enc.encode("hello") == res
-
-        del enc
-        assert sys.getrefcount(enc_hook) == orig_refcount
-
-    def test_encode_enc_hook_errors(self):
-        def enc_hook(x):
-            raise TypeError("bad")
-
-        enc = JSONEncoder(enc_hook=enc_hook)
-
-        with pytest.raises(TypeError, match="bad"):
-            enc.encode(object())
-
-    def test_encode_enc_hook_recurses(self):
-        class Node:
-            def __init__(self, a):
-                self.a = a
-
-        def enc_hook(x):
-            return {"type": "Node", "a": x.a}
-
-        enc = JSONEncoder(enc_hook=enc_hook)
-
-        msg = enc.encode(Node(Node(1)))
-        res = json.loads(msg)
-        assert res == {"type": "Node", "a": {"type": "Node", "a": 1}}
-
-    @emscripten_stack_limited
-    def test_encode_enc_hook_recursion_error(self):
-        enc = JSONEncoder(enc_hook=lambda x: x)
-
-        with pytest.raises(RecursionError):
-            enc.encode(object())
-
-    def test_encode_into_bad_arguments(self):
-        enc = JSONEncoder()
-
-        with pytest.raises(TypeError, match="bytearray"):
-            enc.encode_into(1, b"test")
-
-        with pytest.raises(TypeError):
-            enc.encode_into(1, bytearray(), "bad")
-
-        with pytest.raises(ValueError, match="offset"):
-            enc.encode_into(1, bytearray(), -2)
-
-    @pytest.mark.parametrize("buf_size", [0, 1, 16, 55, 60])
-    def test_encode_into(self, buf_size):
-        enc = JSONEncoder()
-
-        msg = {"key": "x" * 48}
-        encoded = _json_encode(msg)
-
-        buf = bytearray(buf_size)
-        out = enc.encode_into(msg, buf)
-        assert out is None
-        assert buf == encoded
-
-    def test_encode_into_offset(self):
-        enc = JSONEncoder()
-        msg = {"key": "value"}
-        encoded = enc.encode(msg)
-
-        # Offset 0 is default
-        buf = bytearray()
-        enc.encode_into(msg, buf, 0)
-        assert buf == encoded
-
-        # Offset in bounds uses the provided offset
-        buf = bytearray(b"01234")
-        enc.encode_into(msg, buf, 2)
-        assert buf == b"01" + encoded
-
-        # Offset out of bounds extends
-        buf = bytearray(b"01234")
-        enc.encode_into(msg, buf, 10)
-        assert buf[:5] == b"01234"
-        assert buf[10:] == encoded
-
-        # Offset -1 means append at end
-        buf = bytearray(b"01234")
-        enc.encode_into(msg, buf, -1)
-        assert buf == b"01234" + encoded
-
-    def test_encode_into_rejects_overflowing_offset(self):
-        enc = JSONEncoder()
-
-        with pytest.raises((OverflowError, ValueError)):
-            enc.encode_into(1, bytearray(), sys.maxsize)
-
-    def test_encode_into_rejects_overflowing_growth(self):
-        enc = JSONEncoder()
-
-        with pytest.raises((OverflowError, ValueError, MemoryError)):
-            enc.encode_into(1, bytearray(), sys.maxsize - 1)
-
-    def test_encode_into_handles_errors_properly(self):
-        enc = JSONEncoder()
-        out1 = enc.encode([1, 2, 3])
-
-        msg = [1, 2, object()]
-        buf = bytearray()
-        with pytest.raises(TypeError):
-            enc.encode_into(msg, buf)
-
-        assert buf  # buffer isn't reset upon error
-
-        # Encoder still works
-        out2 = enc.encode([1, 2, 3])
-        assert out1 == out2
 
 
 class TestDecodeFunction:
@@ -1829,10 +1672,7 @@ class TestNamedTuple:
 
 class TestDict:
     def test_encode_dict_raises_non_string_or_numeric_keys(self):
-        with pytest.raises(
-            TypeError,
-            match="Only dicts with str-like or number-like keys are supported",
-        ):
+        with pytest.raises(TypeError):
             _json_encode({"a": 1, (1, 2): "bad"})
 
     @pytest.mark.parametrize("x", [{}, {"a": 1}, {"a": 1, "b": 2}])
@@ -2050,50 +1890,6 @@ class TestDict:
 
         msg = _json_encode({mystr("test"): 1})
         assert msg == b'{"test":1}'
-
-    def test_encode_dict_custom_key(self):
-        class Custom:
-            def __init__(self, value):
-                self.value = value
-
-        msg = _json_encode({Custom("a"): 1, Custom("b"): 2}, enc_hook=lambda x: x.value)
-        assert msg == b'{"a":1,"b":2}'
-
-        def enc_hook(x):
-            raise TypeError("Oh no!")
-
-        with pytest.raises(TypeError):
-            _json_encode({Custom("x"): 1}, enc_hook=enc_hook)
-
-    @emscripten_stack_limited
-    def test_encode_dict_custom_key_recursion_error(self):
-        class Custom:
-            def __init__(self, value):
-                self.value = value
-
-        with pytest.raises(RecursionError):
-            _json_encode({Custom("x"): 1}, enc_hook=lambda x: x)
-
-    def test_decode_dict_custom_key(self):
-        class Custom:
-            def __init__(self, value):
-                self.value = value
-
-            def __hash__(self):
-                return hash(self.value)
-
-            def __eq__(self, other):
-                return self.value == other.value
-
-        def dec_hook(typ, obj):
-            if typ == Custom:
-                return Custom(obj)
-            raise NotImplementedError
-
-        msg = b'{"a":1,"b":2}'
-
-        obj = _json_decode(msg, type=dict[Custom, int], dec_hook=dec_hook)
-        assert obj == {Custom("a"): 1, Custom("b"): 2}
 
     @pytest.mark.parametrize(
         "s, error",
@@ -2994,17 +2790,6 @@ class TestRaw:
 
         r = _json_decode(b'{"x": 1}', type=Test)
         assert r == Test(1)
-
-    def test_raw_can_be_mixed_with_custom_type(self):
-        class Test(structtype.Struct):
-            x: Custom | structtype.Raw
-
-        def dec_hook(typ, obj):
-            assert typ is Custom
-            return typ(*obj)
-
-        res = _json_decode(b'{"x": [1, 2]}', type=Test, dec_hook=dec_hook)
-        assert res == Test(Custom(1, 2))
 
 
 class TestFieldCodecAPI:

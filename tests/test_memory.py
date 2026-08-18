@@ -32,26 +32,6 @@ def test_struct_class_annotations_not_leaked():
     assert sys.getrefcount(shared) == base
 
 
-def test_encoder_reinit_releases_old_hook():
-    from structtype._core import JSONEncoder
-
-    h1, h2 = lambda x: x, lambda x: x
-    enc = JSONEncoder(enc_hook=h1)
-    base = sys.getrefcount(h1)
-    enc.__init__(enc_hook=h2)
-    assert sys.getrefcount(h1) == base - 1
-
-
-def test_decoder_reinit_releases_old_hooks():
-    from structtype._core import JSONDecoder
-
-    d1 = lambda x: x
-    dec = JSONDecoder(dec_hook=d1)
-    base = sys.getrefcount(d1)
-    dec.__init__(dec_hook=None)
-    assert sys.getrefcount(d1) == base - 1
-
-
 def test_encode_set_iterator_exception_propagates():
     from structtype._core import JSONEncoder
 
