@@ -303,6 +303,18 @@ class TestEncoderMisc:
         enc.encode_into(msg, buf, -1)
         assert buf == b"01234" + encoded
 
+    def test_encode_into_rejects_overflowing_offset(self):
+        enc = JSONEncoder()
+
+        with pytest.raises((OverflowError, ValueError)):
+            enc.encode_into(1, bytearray(), sys.maxsize)
+
+    def test_encode_into_rejects_overflowing_growth(self):
+        enc = JSONEncoder()
+
+        with pytest.raises((OverflowError, ValueError, MemoryError)):
+            enc.encode_into(1, bytearray(), sys.maxsize - 1)
+
     def test_encode_into_handles_errors_properly(self):
         enc = JSONEncoder()
         out1 = enc.encode([1, 2, 3])

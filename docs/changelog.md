@@ -5,6 +5,8 @@
 - **Breaking:** remove `StrAdapter`. For custom types constructed from a single
   string argument (`IPv4Address`, `HttpUrl`, ...), use
   `Annotated[T, Field(dump=str, validate=T)]` codecs instead.
+- Harden JSON serialization buffer sizing against integer overflow, preventing
+  crashes or out-of-bounds writes when processing oversized values.
 
 ## 0.5.0 (2026-08-15)
 

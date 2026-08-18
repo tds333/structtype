@@ -9503,7 +9503,15 @@ ms_resize_bytearray(PyObject** output_buffer, Py_ssize_t size)
 static MS_NOINLINE int
 ms_resize(EncoderState *self, Py_ssize_t size)
 {
-    self->max_output_len = (Py_ssize_t)Py_MAX(8, 1.5 * size);
+    /* Calculate growth: size + size/2, with overflow check */
+    Py_ssize_t growth = size / 2;
+    if (size > PY_SSIZE_T_MAX - growth) {
+        PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
+        return -1;
+    }
+    Py_ssize_t new_size = size + growth;
+    if (new_size < 8) new_size = 8;
+    self->max_output_len = new_size;
     char *new_buf = self->resize_buffer(&self->output_buffer, self->max_output_len);
     if (new_buf == NULL) return -1;
     self->output_buffer_raw = new_buf;
@@ -9512,6 +9520,10 @@ ms_resize(EncoderState *self, Py_ssize_t size)
 
 static MS_INLINE int
 ms_ensure_space(EncoderState *self, Py_ssize_t size) {
+    if (size < 0 || self->output_len > PY_SSIZE_T_MAX - size) {
+        PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
+        return -1;
+    }
     Py_ssize_t required = self->output_len + size;
     if (MS_UNLIKELY(required > self->max_output_len)) {
         return ms_resize(self, required);
@@ -9522,6 +9534,10 @@ ms_ensure_space(EncoderState *self, Py_ssize_t size) {
 static MS_INLINE int
 ms_write(EncoderState *self, const char *s, Py_ssize_t n)
 {
+    if (n < 0 || self->output_len > PY_SSIZE_T_MAX - n) {
+        PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
+        return -1;
+    }
     Py_ssize_t required = self->output_len + n;
     if (MS_UNLIKELY(required > self->max_output_len)) {
         if (ms_resize(self, required) < 0) return -1;
@@ -9700,7 +9716,13 @@ encoder_encode_into_common(
         }
 
         if (offset < buf_size) {
-            buf_size = (Py_ssize_t)Py_MAX(8, 1.5 * offset);
+            Py_ssize_t growth = offset / 2;
+            if (offset > PY_SSIZE_T_MAX - growth) {
+                PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
+                return NULL;
+            }
+            buf_size = offset + growth;
+            if (buf_size < 8) buf_size = 8;
             if (PyByteArray_Resize(buf, buf_size) < 0) return NULL;
         }
     }
@@ -12729,6 +12751,10 @@ escape:
         Py_ssize_t remaining = 7 + src_end - src;
         if (MS_UNLIKELY(remaining > out_end - out)) {
             Py_ssize_t output_len = out - self->output_buffer_raw;
+            if (output_len > PY_SSIZE_T_MAX - remaining) {
+                PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
+                return -1;
+            }
             if (MS_UNLIKELY(ms_resize(self, remaining + output_len) < 0)) return -1;
             out = self->output_buffer_raw + output_len;
             out_end = self->output_buffer_raw + self->max_output_len;
