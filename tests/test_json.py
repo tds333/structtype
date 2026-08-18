@@ -272,18 +272,9 @@ class TestDecoderMisc:
         with pytest.raises(structtype.DecodeError):
             dec.decode(b'[1, 2, 3]"trailing"')
 
-    def test_decoder_init_float_hook(self):
-        dec = JSONDecoder()
-        assert dec.float_hook is None
-
-        dec = JSONDecoder(float_hook=None)
-        assert dec.float_hook is None
-
-        dec = JSONDecoder(float_hook=decimal.Decimal)
-        assert dec.float_hook is decimal.Decimal
-
+    def test_decoder_rejects_float_hook(self):
         with pytest.raises(TypeError):
-            dec = JSONDecoder(float_hook=1)
+            JSONDecoder(float_hook=decimal.Decimal)
 
 
 class TestBoolAndNone:
@@ -1401,43 +1392,6 @@ class TestFloat:
             structtype.ValidationError, match="Expected `int`, got `float`"
         ):
             _json_decode(s, type=int)
-
-    def test_float_hook_untyped(self):
-        dec = JSONDecoder(float_hook=decimal.Decimal)
-        res = dec.decode(b"1.33")
-        assert res == decimal.Decimal("1.33")
-        assert type(res) is decimal.Decimal
-
-    def test_float_hook_typed(self):
-        class Ex(structtype.Struct):
-            a: float
-            b: decimal.Decimal
-            c: Any
-            d: Any
-
-        class MyFloat(NamedTuple):
-            x: str
-
-        dec = JSONDecoder(Ex, float_hook=MyFloat)
-        res = dec.decode(b'{"a": 1.5, "b": 1.3, "c": 1.3, "d": 123}')
-        sol = Ex(1.5, decimal.Decimal("1.3"), MyFloat("1.3"), 123)
-        assert res == sol
-
-    def test_float_hook_error(self):
-        def float_hook(val):
-            raise ValueError("Oh no!")
-
-        class Ex(structtype.Struct):
-            a: float
-            b: Any
-
-        dec = JSONDecoder(Ex, float_hook=float_hook)
-        assert dec.decode(b'{"a": 1.5, "b": 2}') == Ex(a=1.5, b=2)
-        with pytest.raises(structtype.ValidationError) as rec:
-            dec.decode(b'{"a": 1.5, "b": 2.5}')
-        assert "Oh no!" in str(rec.value)
-        assert "at `$.b`" in str(rec.value)
-
 
 class TestDecimal:
     """Most decimal tests are in test_common.py, the ones here are for json
