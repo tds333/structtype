@@ -34,11 +34,17 @@ test-lf: ## Run tests in current Python
 test-doc: ## Run doctests
 	uv run pytest --doctest-modules --pyargs structtype
 
-.PHONY: test-all
-test-all: ## Run tests in all supporte Python versions
-	for py_v in $(PY_VERSIONS); do \
-		uv run --isolated --reinstall-package structtype -p $$py_v pytest; \
-	done
+TEST_ALL_TARGETS = $(PY_VERSIONS:%=test-all-%)
+
+.PHONY: test-all $(TEST_ALL_TARGETS)
+test-all: $(TEST_ALL_TARGETS) ## Run tests in all supported Python versions (parallel: make -j$(nproc) test-all)
+
+define test-all-rule
+.PHONY: test-all-$(1)
+test-all-$(1): ## Run tests for Python $(1)
+	uv run --isolated --reinstall-package structtype -p $(1) pytest
+endef
+$(foreach py_v,$(PY_VERSIONS),$(eval $(call test-all-rule,$(py_v))))
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
