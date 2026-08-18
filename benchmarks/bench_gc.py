@@ -65,12 +65,6 @@ class Point(structtype.Struct):
     z: int
 
 
-class PointGCFalse(structtype.Struct, gc=False):
-    x: int
-    y: int
-    z: int
-
-
 class PointClass:
     def __init__(self, x, y, z):
         self.x = x
@@ -126,7 +120,6 @@ def main():
         ("standard class", PointClass),
         ("standard class with __slots__", PointClassSlots),
         ("structtype struct", Point),
-        ("structtype struct with gc=False", PointGCFalse),
     ]:
         print(f"Benchmarking {name}...")
         gc_time, mibytes = bench_gc(cls)

@@ -1062,140 +1062,54 @@ def test_struct_gc_not_added_if_not_needed():
 
 
 class TestStructGC:
-    @pytest.mark.skipif(
-        hasattr(sys.flags, "gil") and not sys.flags.gil,
-        reason="object layout is different on free-threading builds",
-    )
-    def test_memory_layout(self):
-        sizes = {}
-        for has_gc in [False, True]:
-
-            class Test(Struct, gc=has_gc):
-                x: object
-                y: object
-
-            sizes[has_gc] = sys.getsizeof(Test(1, 2))
-
-        # Currently gc=False structs are 16 bytes smaller than gc=True structs,
-        # but that's a cpython implementation detail. This test is mainly to
-        # check that the smaller layout is being actually used.
-        assert sizes[False] < sizes[True]
-
     def test_init(self):
-        class Test(Struct, gc=False):
+        class Test(Struct):
             x: object
             y: object
 
         assert not gc.is_tracked(Test(1, 2))
-        assert not gc.is_tracked(Test([1, 2, 3], 1))
-        assert not gc.is_tracked(Test(1, [1, 2, 3]))
+        assert gc.is_tracked(Test([1, 2, 3], 1))
+        assert gc.is_tracked(Test(1, [1, 2, 3]))
 
     def test_setattr(self):
-        class Test(Struct, gc=False):
+        class Test(Struct):
             x: object
             y: object
 
-        # Tracked status doesn't change on mutation
         t = Test(1, 2)
         assert not gc.is_tracked(t)
         t.x = []
-        assert not gc.is_tracked(t)
+        assert gc.is_tracked(t)
 
-    def test_gc_false_inherit_from_gc_true(self):
-        class HasGC(Struct):
-            x: object
-
-        class NoGC(HasGC, gc=False):
-            y: object
-
-        assert gc.is_tracked(HasGC([]))
-        assert not gc.is_tracked(NoGC(1, 2))
-        assert not gc.is_tracked(NoGC(1, []))
-        x = NoGC([], 2)
-        assert not gc.is_tracked(x)
-        x.y = []
-        assert not gc.is_tracked(x)
-
-    def test_gc_true_inherit_from_gc_false(self):
-        class NoGC(Struct, gc=False):
-            y: object
-
-        class HasGC(NoGC, gc=True):
-            x: object
-
-        assert gc.is_tracked(HasGC(1, []))
-        assert gc.is_tracked(HasGC([], 1))
-        x = HasGC(1, 2)
-        assert not gc.is_tracked(x)
-        x.x = []
-        assert gc.is_tracked(x)
-
-    @pytest.mark.parametrize("has_gc", [False, True])
-    def test_struct_gc_set_on_copy(self, has_gc):
+    def test_struct_gc_set_on_copy(self):
         """Copying doesn't go through the struct constructor"""
 
-        class Test(Struct, gc=has_gc):
+        class Test(Struct):
             x: object
             y: object
 
         assert not gc.is_tracked(copy.copy(Test(1, 2)))
         assert not gc.is_tracked(copy.copy(Test(1, ())))
-        assert gc.is_tracked(copy.copy(Test(1, []))) == has_gc
+        assert gc.is_tracked(copy.copy(Test(1, [])))
 
-    def test_struct_gc_false_cannot_inherit_from_non_slots_classes(self):
-        class Base:
-            pass
+    def test_struct_gc_inherit(self):
+        class Base(Struct):
+            x: object
 
-        with pytest.raises(
-            ValueError,
-            match="Cannot set gc=False when inheriting from non-struct types with a __dict__",
-        ):
+        class Child(Base):
+            y: object
 
-            class Test(Struct, Base, gc=False):
-                pass
-
-    def test_struct_gc_false_can_inherit_from_slots_class_mixin(self):
-        class Base:
-            __slots__ = ()
-
-        class Test(Struct, Base, gc=False):
-            x: int
-
-        t = Test(1)
-        assert not gc.is_tracked(t)
-
-    @pytest.mark.parametrize("case", ["base-dict", "base-nogc", "nobase"])
-    def test_struct_gc_false_forbids_dict_true(self, case):
-        if case == "base-dict":
-
-            class Base(Struct, dict=True):
-                pass
-
-            opts = {"gc": False}
-        elif case == "base-nogc":
-
-            class Base(Struct, gc=False):
-                pass
-
-            opts = {"dict": True}
-        elif case == "nobase":
-            Base = Struct
-            opts = {"gc": False, "dict": True}
-
-        with pytest.raises(ValueError, match="Cannot set gc=False and dict=True"):
-
-            class Test(Base, **opts):
-                pass
+        assert gc.is_tracked(Child(1, []))
+        assert not gc.is_tracked(Child(1, 2))
 
 
 class TestStructDealloc:
-    @pytest.mark.parametrize("has_gc", [False, True])
-    def test_struct_dealloc_decrefs_type(self, has_gc):
-        class Test1(Struct, gc=has_gc):
+    def test_struct_dealloc_decrefs_type(self):
+        class Test1(Struct):
             x: int
             y: int
 
-        class Test2(Struct, gc=has_gc):
+        class Test2(Struct):
             x: int
             y: int
 
@@ -1216,12 +1130,11 @@ class TestStructDealloc:
             assert sys.getrefcount(Test1) == orig_1
             assert sys.getrefcount(Test2) == orig_2
 
-    @pytest.mark.parametrize("has_gc", [False, True])
-    def test_struct_dealloc_calls_finalizer(self, has_gc):
+    def test_struct_dealloc_calls_finalizer(self):
         for _ in range(3):
             called = False
 
-            class Test(Struct, gc=has_gc):
+            class Test(Struct):
                 x: int
                 y: int
 
@@ -1236,20 +1149,16 @@ class TestStructDealloc:
 
             assert called
 
-    @pytest.mark.parametrize("has_gc", [False, True])
-    def test_struct_dealloc_supports_finalizer_resurrection(self, has_gc):
+    def test_struct_dealloc_supports_finalizer_resurrection(self):
         for _ in range(3):
             called = False
             new_ref = None
 
-            class Test(Struct, gc=has_gc):
+            class Test(Struct):
                 x: int
                 y: int
 
                 def __del__(self):
-                    # XXX: Python will only run `__del__` once, even if it's
-                    # resurrected FOR GC TYPES ONLY. If gc=False, cpython will
-                    # happily run `__del__` every time the refcount drops to 0
                     nonlocal called
                     nonlocal new_ref
                     if not called:
@@ -1263,12 +1172,11 @@ class TestStructDealloc:
             assert new_ref is not None
             del new_ref
 
-    @pytest.mark.parametrize("has_gc", [False, True])
-    def test_struct_dealloc_trashcan(self, has_gc):
+    def test_struct_dealloc_trashcan(self):
         N = 100
         called = set()
 
-        class Node(Struct, gc=has_gc):
+        class Node(Struct):
             child: "Node | None" = None
 
             def __del__(self):
@@ -1281,9 +1189,8 @@ class TestStructDealloc:
         del node
         assert len(called) == N
 
-    @pytest.mark.parametrize("has_gc", [False, True])
-    def test_struct_dealloc_decrefs_fields(self, has_gc):
-        class Test(Struct, gc=has_gc):
+    def test_struct_dealloc_decrefs_fields(self):
+        class Test(Struct):
             x: Any
 
         x = object()
@@ -1292,9 +1199,8 @@ class TestStructDealloc:
         del t
         assert sys.getrefcount(x) == count - 1
 
-    @pytest.mark.parametrize("has_gc", [False, True])
-    def test_struct_dealloc_works_with_missing_fields(self, has_gc):
-        class Test(Struct, gc=has_gc):
+    def test_struct_dealloc_works_with_missing_fields(self):
+        class Test(Struct):
             x: Any
             y: Any
 
@@ -1400,7 +1306,6 @@ def test_struct_handles_missing_attributes():
         ("eq", True),
         ("repr_omit_defaults", False),
         ("array_like", False),
-        ("gc", True),
         ("omit_defaults", False),
         ("forbid_unknown_fields", False),
     ],
@@ -1661,16 +1566,14 @@ class TestSetAttr:
         with pytest.raises(AttributeError, match="immutable type: 'FrozenPoint'"):
             p.x = 3
 
-    @pytest.mark.parametrize("base_gc", [True, None, False])
     @pytest.mark.parametrize("base_frozen", [True, False])
-    @pytest.mark.parametrize("has_gc", [True, None, False])
-    def test_override_setattr(self, has_gc, base_gc, base_frozen):
+    def test_override_setattr(self, base_frozen):
         called = False
 
-        class Base(Struct, gc=base_gc, frozen=base_frozen):
+        class Base(Struct, frozen=base_frozen):
             pass
 
-        class Test(Struct, gc=has_gc, frozen=False):
+        class Test(Struct, frozen=False):
             x: Any
 
             def __setattr__(self, name, value):
@@ -1682,17 +1585,14 @@ class TestSetAttr:
         assert not called
         t.x = 2
         assert called
-        if has_gc:
-            assert not gc.is_tracked(t)
-            t.x = [1]
-            assert gc.is_tracked(t)
+        assert not gc.is_tracked(t)
+        t.x = [1]
+        assert gc.is_tracked(t)
 
-    @pytest.mark.parametrize("base_gc", [True, None, False])
-    @pytest.mark.parametrize("has_gc", [True, None, False])
-    def test_override_setattr_inherit(self, base_gc, has_gc):
+    def test_override_setattr_inherit(self):
         called = False
 
-        class Base(Struct, gc=base_gc):
+        class Base(Struct):
             x: Any
 
             def __setattr__(self, name, value):
@@ -1700,17 +1600,16 @@ class TestSetAttr:
                 called = True
                 super().__setattr__(name, value)
 
-        class Test(Base, gc=has_gc):
+        class Test(Base):
             pass
 
         t = Test(1)
         assert not called
         t.x = 2
         assert called
-        if has_gc:
-            assert not gc.is_tracked(t)
-            t.x = [1]
-            assert gc.is_tracked(t)
+        assert not gc.is_tracked(t)
+        t.x = [1]
+        assert gc.is_tracked(t)
 
     def test_force_setattr_removed(self):
         class Ex(Struct, frozen=True):
@@ -2288,15 +2187,6 @@ class TestReplace:
         assert gc.is_tracked(replace(obj))
         assert gc.is_tracked(replace(obj, x=1))
         assert not gc.is_tracked(replace(obj, y=None))
-
-    def test_replace_gc_false(self, replace):
-        class Test(structtype.Struct, gc=False):
-            x: int
-            y: list[int]
-
-        res = replace(Test(1, [1, 2]), x=3)
-        assert res == Test(3, [1, 2])
-        assert not gc.is_tracked(res)
 
     def test_replace_reference_counts(self, replace):
         class Test(structtype.Struct):

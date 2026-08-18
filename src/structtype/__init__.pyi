@@ -20,7 +20,6 @@ class StructConfig:
     eq: bool
     order: bool
     array_like: bool
-    gc: bool
     repr_omit_defaults: bool
     omit_defaults: bool
     forbid_unknown_fields: bool
@@ -70,7 +69,6 @@ class StructMeta(type):
         kw_only: bool = False,
         repr_omit_defaults: bool = False,
         array_like: bool = False,
-        gc: bool = True,
         weakref: bool = False,
         dict: bool = False,
         cache_hash: bool = False,
@@ -118,7 +116,6 @@ class Struct(metaclass=StructMeta):
         kw_only: bool = False,
         repr_omit_defaults: bool = False,
         array_like: bool = False,
-        gc: bool = True,
         weakref: bool = False,
         dict: bool = False,
         cache_hash: bool = False,

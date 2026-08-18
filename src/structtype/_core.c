@@ -2967,7 +2967,6 @@ typedef struct {
     int8_t eq;
     int8_t repr_omit_defaults;
     int8_t array_like;
-    int8_t gc;
     int8_t omit_defaults;
     int8_t forbid_unknown_fields;
     int8_t validate_on_init;
@@ -5374,56 +5373,6 @@ Struct_alloc(PyTypeObject *type) {
     return type->tp_alloc(type, type->tp_itemsize);
 }
 
-/* Mirrored from cpython Objects/typeobject.c */
-static void
-clear_slots(PyTypeObject *type, PyObject *self)
-{
-    Py_ssize_t i, n;
-    PyMemberDef *mp;
-
-    n = Py_SIZE(type);
-    mp = MS_PyHeapType_GET_MEMBERS((PyHeapTypeObject *)type);
-    for (i = 0; i < n; i++, mp++) {
-        if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
-            char *addr = (char *)self + mp->offset;
-            PyObject *obj = *(PyObject **)addr;
-            if (obj != NULL) {
-                *(PyObject **)addr = NULL;
-                Py_DECREF(obj);
-            }
-        }
-    }
-}
-
-static void
-Struct_dealloc_nogc(PyObject *self) {
-    PyTypeObject *type = Py_TYPE(self);
-
-    /* Maybe call a finalizer */
-    if (type->tp_finalize) {
-        /* If resurrected, exit early */
-        if (PyObject_CallFinalizerFromDealloc(self) < 0) return;
-    }
-
-    /* Maybe clear weakrefs */
-    if (type->tp_weaklistoffset) {
-        PyObject_ClearWeakRefs(self);
-    }
-
-    /* Clear all slots */
-    PyTypeObject *base = type;
-    while (base != NULL) {
-        if (Py_SIZE(base)) {
-            clear_slots(base, self);
-        }
-        base = base->tp_base;
-    }
-
-    type->tp_free(self);
-    /* Decref the object type immediately */
-    Py_DECREF(type);
-}
-
 static PyObject *
 StructMeta_get_field_name(PyObject *self, Py_ssize_t field_index) {
     return PyTuple_GET_ITEM(
@@ -5661,7 +5610,6 @@ typedef struct {
     int order;
     int repr_omit_defaults;
     int array_like;
-    int gc;
     int weakref;
     bool already_has_weakref;
     int dict;
@@ -5756,7 +5704,6 @@ structmeta_collect_base(StructMetaInfo *info, StructspecState *mod, PyObject *ba
     info->eq = STRUCT_MERGE_OPTIONS(info->eq, st_type->eq);
     info->order = STRUCT_MERGE_OPTIONS(info->order, st_type->order);
     info->array_like = STRUCT_MERGE_OPTIONS(info->array_like, st_type->array_like);
-    info->gc = STRUCT_MERGE_OPTIONS(info->gc, st_type->gc);
     info->omit_defaults = STRUCT_MERGE_OPTIONS(info->omit_defaults, st_type->omit_defaults);
     info->repr_omit_defaults = STRUCT_MERGE_OPTIONS(
         info->repr_omit_defaults, st_type->repr_omit_defaults
@@ -6737,7 +6684,7 @@ StructMeta_new_inner(
     int arg_omit_defaults, int arg_forbid_unknown_fields,
     int arg_frozen, int arg_eq, int arg_order, bool arg_kw_only,
     int arg_repr_omit_defaults, int arg_array_like,
-    int arg_gc, int arg_weakref, int arg_dict, int arg_cache_hash,
+    int arg_weakref, int arg_dict, int arg_cache_hash,
     int arg_validate_on_init
 ) {
     StructMetaObject *cls = NULL;
@@ -6775,7 +6722,6 @@ StructMeta_new_inner(
         .order = -1,
         .repr_omit_defaults = -1,
         .array_like = -1,
-        .gc = -1,
         .weakref = arg_weakref,
         .already_has_weakref = false,
         .dict = arg_dict,
@@ -6820,7 +6766,6 @@ StructMeta_new_inner(
     info.order = STRUCT_MERGE_OPTIONS(info.order, arg_order);
     info.repr_omit_defaults = STRUCT_MERGE_OPTIONS(info.repr_omit_defaults, arg_repr_omit_defaults);
     info.array_like = STRUCT_MERGE_OPTIONS(info.array_like, arg_array_like);
-    info.gc = STRUCT_MERGE_OPTIONS(info.gc, arg_gc);
     info.omit_defaults = STRUCT_MERGE_OPTIONS(info.omit_defaults, arg_omit_defaults);
     info.forbid_unknown_fields = STRUCT_MERGE_OPTIONS(info.forbid_unknown_fields, arg_forbid_unknown_fields);
     info.validate_on_init = STRUCT_MERGE_OPTIONS(info.validate_on_init, arg_validate_on_init);
@@ -6833,20 +6778,6 @@ StructMeta_new_inner(
     if (info.cache_hash == OPT_TRUE && info.frozen != OPT_TRUE) {
         PyErr_SetString(PyExc_ValueError, "Cannot set cache_hash=True without frozen=True");
         goto cleanup;
-    }
-
-    if (info.gc == OPT_FALSE) {
-        if (info.has_non_slots_bases) {
-            PyErr_SetString(
-                PyExc_ValueError,
-                "Cannot set gc=False when inheriting from non-struct types with a __dict__"
-            );
-            goto cleanup;
-        }
-        else if (info.dict == OPT_TRUE || info.already_has_dict) {
-            PyErr_SetString(PyExc_ValueError, "Cannot set gc=False and dict=True");
-            goto cleanup;
-        }
     }
 
     /* Collect new fields and defaults */
@@ -6883,15 +6814,8 @@ StructMeta_new_inner(
 
     /* Fill in type methods */
     ((PyTypeObject *)cls)->tp_vectorcall = (vectorcallfunc)Struct_vectorcall;
-    if (info.gc == OPT_FALSE) {
-        ((PyTypeObject *)cls)->tp_flags &= ~Py_TPFLAGS_HAVE_GC;
-        ((PyTypeObject *)cls)->tp_dealloc = &Struct_dealloc_nogc;
-        ((PyTypeObject *)cls)->tp_free = &PyObject_Free;
-    }
-    else {
-        ((PyTypeObject *)cls)->tp_flags |= Py_TPFLAGS_HAVE_GC;
-        ((PyTypeObject *)cls)->tp_free = &PyObject_GC_Del;
-    }
+    ((PyTypeObject *)cls)->tp_flags |= Py_TPFLAGS_HAVE_GC;
+    ((PyTypeObject *)cls)->tp_free = &PyObject_GC_Del;
     if (info.frozen == OPT_TRUE) {
         /* Frozen structs always override __setattr__ */
         ((PyTypeObject *)cls)->tp_setattro = &Struct_setattro_frozen;
@@ -6956,7 +6880,6 @@ StructMeta_new_inner(
     cls->order = info.order;
     cls->repr_omit_defaults = info.repr_omit_defaults;
     cls->array_like = info.array_like;
-    cls->gc = info.gc;
     cls->omit_defaults = info.omit_defaults;
     cls->forbid_unknown_fields = info.forbid_unknown_fields;
     cls->validate_on_init = info.validate_on_init;
@@ -7007,7 +6930,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     PyObject *arg_tag_field = NULL, *arg_tag = NULL, *arg_rename = NULL;
     int arg_omit_defaults = -1, arg_forbid_unknown_fields = -1;
     int arg_frozen = -1, arg_eq = -1, arg_order = -1, arg_repr_omit_defaults = -1;
-    int arg_array_like = -1, arg_gc = -1, arg_weakref = -1, arg_dict = -1;
+    int arg_array_like = -1, arg_weakref = -1, arg_dict = -1;
     int arg_kw_only = 0, arg_cache_hash = -1, arg_validate_on_init = -1;
 
     char *kwlist[] = {
@@ -7016,20 +6939,20 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         "omit_defaults", "forbid_unknown_fields",
         "frozen", "eq", "order", "kw_only",
         "repr_omit_defaults", "array_like",
-        "gc", "weakref", "dict", "cache_hash",
+        "weakref", "dict", "cache_hash",
         "validate_on_init",
         NULL
     };
 
     /* Parse arguments: (name, bases, dict) */
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "UO!O!|$OOOppppppppppppp:StructMeta.__new__", kwlist,
+            args, kwargs, "UO!O!|$OOOpppppppppppp:StructMeta.__new__", kwlist,
             &name, &PyTuple_Type, &bases, &PyDict_Type, &namespace,
             &arg_tag_field, &arg_tag, &arg_rename,
             &arg_omit_defaults, &arg_forbid_unknown_fields,
             &arg_frozen, &arg_eq, &arg_order, &arg_kw_only,
             &arg_repr_omit_defaults, &arg_array_like,
-            &arg_gc, &arg_weakref, &arg_dict, &arg_cache_hash,
+            &arg_weakref, &arg_dict, &arg_cache_hash,
             &arg_validate_on_init
         )
     )
@@ -7041,7 +6964,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         arg_omit_defaults, arg_forbid_unknown_fields,
         arg_frozen, arg_eq, arg_order, arg_kw_only,
         arg_repr_omit_defaults, arg_array_like,
-        arg_gc, arg_weakref, arg_dict, arg_cache_hash,
+        arg_weakref, arg_dict, arg_cache_hash,
         arg_validate_on_init
     );
 }
@@ -7391,13 +7314,6 @@ StructConfig_array_like(StructConfig *self, void *closure)
 }
 
 static PyObject*
-StructConfig_gc(StructConfig *self, void *closure)
-{
-    if (self->st_type->gc == OPT_FALSE) { Py_RETURN_FALSE; }
-    else { Py_RETURN_TRUE; }
-}
-
-static PyObject*
 StructConfig_weakref(StructConfig *self, void *closure)
 {
     PyTypeObject *type = (PyTypeObject *)(self->st_type);
@@ -7479,7 +7395,6 @@ static PyGetSetDef StructConfig_getset[] = {
     {"order", (getter) StructConfig_order, NULL, NULL, NULL},
     {"repr_omit_defaults", (getter) StructConfig_repr_omit_defaults, NULL, NULL, NULL},
     {"array_like", (getter) StructConfig_array_like, NULL, NULL, NULL},
-    {"gc", (getter) StructConfig_gc, NULL, NULL, NULL},
     {"weakref", (getter) StructConfig_weakref, NULL, NULL, NULL},
     {"dict", (getter) StructConfig_dict, NULL, NULL, NULL},
     {"cache_hash", (getter) StructConfig_cache_hash, NULL, NULL, NULL},
@@ -7531,7 +7446,6 @@ PyDoc_STRVAR(StructConfig__doc__,
 "eq: bool\n"
 "order: bool\n"
 "array_like: bool\n"
-"gc: bool\n"
 "repr_omit_defaults: bool\n"
 "omit_defaults: bool\n"
 "forbid_unknown_fields: bool\n"
@@ -8659,11 +8573,6 @@ PyDoc_STRVAR(Struct__doc__,
 "   If True, this struct type will be treated as an array-like type during\n"
 "   encoding/decoding, rather than a dict-like type (the default). This may\n"
 "   improve performance, at the cost of a more inscrutable message encoding.\n"
-"gc: bool, default True\n"
-"   Whether garbage collection is enabled for this type. Disabling this *may*\n"
-"   help reduce GC pressure, but will prevent reference cycles composed of only\n"
-"   ``gc=False`` from being collected. It is the user's responsibility to ensure\n"
-"   that reference cycles don't occur when setting ``gc=False``.\n"
 "weakref: bool, default False\n"
 "   Whether instances of this type support weak references. Defaults to False.\n"
 "dict: bool, default False\n"

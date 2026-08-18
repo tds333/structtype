@@ -166,8 +166,7 @@ Garbage Collection
 
 `structtype.Struct` instances implement several optimizations for reducing garbage
 collection (GC) pressure and decreasing memory usage. Here we benchmark structs
-(with and without :ref:`gc=False <struct-gc>`) against standard Python
-classes (with and without `__slots__
+against standard Python classes (with and without `__slots__
 <https://docs.python.org/3/reference/datamodel.html#slots>`__).
 
 For each option we create a large dictionary containing many simple instances
@@ -190,11 +189,6 @@ The full benchmark source can be found `here
 - `structtype.Struct` instances have the same memory layout as a class with
   ``__slots__`` (and thus have the same memory usage), but due to deferred GC
   tracking a full GC pass completes in a fraction of the time.
-
-- `structtype.Struct` instances with ``gc=False`` have the lowest memory usage
-  (lack of GC reduces memory by 16 bytes per instance). They also have the
-  lowest GC pause (75x faster than standard classes!) since the entire
-  composing dict can be skipped during GC traversal.
 
 .. _structtype: https://structtype.dev
 .. _msgspec: https://jcristharif.com/msgspec/

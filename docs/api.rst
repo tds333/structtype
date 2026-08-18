@@ -120,10 +120,6 @@ Structs
 
         :type: bool
 
-    .. attribute:: gc
-
-        :type: bool
-
     .. attribute:: weakref
 
         :type: bool

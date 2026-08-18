@@ -5,6 +5,9 @@
 - **Breaking:** remove `StrAdapter`. For custom types constructed from a single
   string argument (`IPv4Address`, `HttpUrl`, ...), use
   `Annotated[T, Field(dump=str, validate=T)]` codecs instead.
+- **Breaking:** remove the `gc` Struct configuration option. All Struct types
+  now always support cyclic garbage collection, while retaining deferred tracking
+  for scalar-only instances.
 - Harden JSON serialization buffer sizing against integer overflow, preventing
   crashes or out-of-bounds writes when processing oversized values.
 

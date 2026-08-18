@@ -2133,22 +2133,6 @@ class TestStruct:
         assert gc.is_tracked(d)
         assert not gc.is_tracked(e)
 
-    @pytest.mark.parametrize("array_like", [False, True])
-    def test_struct_gc_false_always_untracked_on_decode(self, array_like):
-        class Test(structtype.Struct, array_like=array_like, gc=False):
-            x: Any
-            y: Any
-
-        dec = JSONDecoder(list[Test])
-
-        ts = [
-            Test(1, 2),
-            Test([], []),
-            Test({}, {}),
-        ]
-        for obj in dec.decode(_json_encode(ts)):
-            assert not gc.is_tracked(obj)
-
     def test_struct_recursive_definition(self):
         enc = JSONEncoder()
         dec = JSONDecoder(Node)

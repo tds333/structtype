@@ -67,20 +67,6 @@ Of course there are downsides to defining smaller "view" types, but if decoding
 performance is a bottleneck in your workflow, you may benefit from this
 technique.
 
-Use ``gc=False``
------------------
-
-Python processes with a large number of long-lived objects, or operations that
-allocate a large number of objects at once may suffer reduced performance due
-to Python's garbage collector (GC). By default, `structtype.Struct` types
-implement a few optimizations to reduce the load on the GC (and thus reduce the
-frequency and duration of a GC pause). If you find that GC is still a problem,
-and **are certain** that your ``Struct`` types may never participate in a reference
-cycle, then you **may** benefit from setting ``gc=False`` on your ``Struct``
-types.  Depending on workload, this can result in a measurable decrease in
-pause time and frequency due to GC passes. See :ref:`struct-gc` for more
-details.
-
 Use ``array_like=True``
 -----------------------
 
