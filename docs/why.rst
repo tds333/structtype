@@ -27,7 +27,7 @@ following:
 
 - **Clean and minimal interface**
 
-  It has a simple interface. If a method is named valide it validates and decodes data.
+  It has a simple interface. If a method is named validate it validates and decodes data.
   If it is named dump it encodes the data and dumps out.
   No feature overbloat.
 
