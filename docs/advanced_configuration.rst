@@ -162,6 +162,16 @@ definition enables type and constraint checking during ``__init__``:
       ...
     structtype.ValidationError: Expected `float`, got `str`
 
+.. note::
+
+    For custom types annotated with ``Field(validate=...)``, the validator is
+    called when a field value is **not** already an instance of the expected
+    type. The validator may convert the value, but the converted result is
+    **discarded** — the field keeps its original value. This is the same
+    behavior as ``struct_validate_self`` (both use the same validation logic).
+    If you need the converted value stored back, use ``struct_validate`` or
+    ``struct_validate_json`` instead.
+
 While convenient, this adds overhead to every ``__init__`` call. Prefer static
 type checking with mypy_/pyright_ when possible, and use ``struct_validate_self`` for
 explicit runtime validation.
