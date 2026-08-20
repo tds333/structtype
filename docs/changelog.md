@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Breaking:** rename `__struct_encode_fields__` to `__struct_alias_fields__`
+  for consistency with the alias terminology. Internal C identifiers are also
+  renamed (e.g. `struct_encode_fields` → `struct_alias_fields`).
+- **Breaking:** rename `FieldInfo.encode_name` to `FieldInfo.alias`.
 - **Breaking:** remove `StrAdapter`. For custom types constructed from a single
   string argument (`IPv4Address`, `HttpUrl`, ...), use
   `Annotated[T, Field(dump=str, validate=T)]` codecs instead.
