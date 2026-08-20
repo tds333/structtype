@@ -61,7 +61,8 @@ Struct instances support the mapping protocol:
 
 ## Gotchas
 
-- `make test-lf` reinstalls the C extension before running (last-failed first)
+- `make test-cov` reinstalls the C extension before running (last-failed first)
+- Validation matches keys by the **alias** name only, except `struct_validate(obj, from_attributes=True)` on a **non-dict object**, which matches by both the python field name and the alias. Dict/JSON input (even with `from_attributes=True`) and all dump/serialization use only the alias name.
 
 ## graphify
 
