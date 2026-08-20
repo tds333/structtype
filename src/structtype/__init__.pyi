@@ -40,7 +40,7 @@ _SM = TypeVar("_SM", bound="StructMeta")
 class StructMeta(type):
     __struct_fields__: ClassVar[tuple[str, ...]]
     __struct_defaults__: ClassVar[tuple[Any, ...]]
-    __struct_encode_fields__: ClassVar[tuple[str, ...]]
+    __struct_alias_fields__: ClassVar[tuple[str, ...]]
     __match_args__: ClassVar[tuple[str, ...]] = ...
     @property
     def __signature__(self) -> Signature: ...
@@ -92,7 +92,7 @@ NODEFAULT: Final = _NoDefault.NODEFAULT
 class Struct(metaclass=StructMeta):
     __struct_fields__: ClassVar[tuple[str, ...]]
     __struct_config__: ClassVar[StructConfig]
-    __struct_encode_fields__: ClassVar[tuple[str, ...]]
+    __struct_alias_fields__: ClassVar[tuple[str, ...]]
     __struct_defaults__: ClassVar[tuple[Any, ...]]
     __match_args__: ClassVar[tuple[str, ...]] = ...
     # A default __init__ so that Structs with unknown field types
@@ -283,7 +283,7 @@ class Field:
 
 class FieldInfo(Struct):
     name: str
-    encode_name: str
+    alias: str
     type: Any
     default: Any = NODEFAULT
     default_factory: Any = NODEFAULT

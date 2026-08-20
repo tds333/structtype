@@ -3,7 +3,7 @@
 ## Project
 
 Fast struct validation + JSON serialization for Python.
-Core is a monolithic C extension (`src/structtype/_core.c`, ~20K lines).
+Core is a monolithic C extension (`src/structtype/_core.c`, ~19K lines).
 No runtime deps.
 
 ## Setup
@@ -47,11 +47,11 @@ All commands go through `make`.
 
 ### Struct Methods
 
-- `obj.struct_dump_json(*, enc_hook=None, decimal_format=None, uuid_format=None, order=None)` — serialize to JSON bytes
-- `obj.struct_dump()` — convert to built-in Python types (uses `encode_name` for keys)
+- `obj.struct_dump_json(*, decimal_format=None, uuid_format=None, sort_keys=False)` — serialize to JSON bytes
+- `obj.struct_dump(*, sort_keys=False, str_keys=False, builtin_types=None)` — convert to built-in Python types (uses `alias` for keys)
 - `obj.struct_validate_self()` — validate field values against types + constraints
-- `cls.struct_validate_json(buf, *, strict=True, dec_hook=None)` — deserialize from JSON
-- `cls.struct_validate(obj, *, strict=True, from_attributes=False, dec_hook=None)` — convert built-in types to struct
+- `cls.struct_validate_json(buf, *, strict=True)` — deserialize from JSON
+- `cls.struct_validate(obj, *, strict=True, from_attributes=False)` — convert built-in types to struct
 
 ### Dict & Iteration Protocol
 

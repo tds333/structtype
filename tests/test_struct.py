@@ -107,7 +107,7 @@ def test_factory():
 
 def test_struct_class_attributes():
     assert Struct.__struct_fields__ == ()
-    assert Struct.__struct_encode_fields__ == ()
+    assert Struct.__struct_alias_fields__ == ()
     assert Struct.__struct_defaults__ == ()
     assert Struct.__match_args__ == ()
     assert Struct.__slots__ == ()
@@ -130,8 +130,8 @@ def test_struct_instance_attributes():
     x = Test(1, 2.0, a="goodbye")
 
     assert x.__struct_fields__ == ("c", "b", "a")
-    assert x.__struct_encode_fields__ == ("c", "b", "a")
-    assert x.__struct_fields__ is x.__struct_encode_fields__
+    assert x.__struct_alias_fields__ == ("c", "b", "a")
+    assert x.__struct_fields__ is x.__struct_alias_fields__
     assert x.__struct_defaults__ == ("hello",)
     assert x.__slots__ == ("a", "b", "c")
     assert isinstance(x.__struct_config__, StructConfig)
@@ -308,7 +308,7 @@ def test_struct_errors_nicely_if_used_in_init_subclass():
             # Class attributes aren't yet defined, error nicely
             for attr in [
                 "__struct_fields__",
-                "__struct_encode_fields__",
+                "__struct_alias_fields__",
                 "__match_args__",
                 "__struct_defaults__",
             ]:
@@ -957,7 +957,7 @@ def test_struct_defaults_from_field_annotated():
         assert t.a == 42, f"Expected 42, got {t.a}"
         assert t.b == []
         assert t.c == "hello"
-        assert mod.Test.__struct_encode_fields__[2] == "ccc"
+        assert mod.Test.__struct_alias_fields__[2] == "ccc"
 
     # Test alias only (with kw_only to avoid ordering issue)
     source2 = """
@@ -969,7 +969,7 @@ def test_struct_defaults_from_field_annotated():
         y: Annotated[str, Field(alias="yyy")]
     """
     with temp_module(source2) as mod2:
-        assert mod2.Test2.__struct_encode_fields__[1] == "yyy"
+        assert mod2.Test2.__struct_alias_fields__[1] == "yyy"
 
 
 def test_field_outside_annotated_errors():
@@ -1925,59 +1925,59 @@ class TestRename:
         class Test(Struct):
             x: Annotated[int, Field(alias="field_x")]
 
-        assert Test.__struct_encode_fields__ == ("field_x",)
+        assert Test.__struct_alias_fields__ == ("field_x",)
 
     def test_rename_mixed_with_field_name(self):
         class Test(Struct, rename="upper"):
             x: Annotated[int, Field(alias="field_x")]
             y: int
 
-        assert Test.__struct_encode_fields__ == ("field_x", "Y")
+        assert Test.__struct_alias_fields__ == ("field_x", "Y")
 
     def test_rename_no_change(self):
         class Test(Struct, rename="lower"):
             x: int
 
-        assert Test.__struct_fields__ is Test.__struct_encode_fields__
+        assert Test.__struct_fields__ is Test.__struct_alias_fields__
 
     def test_field_name_no_change(self):
         class Test(Struct):
             x: Annotated[int, Field(alias="x")]
 
-        assert Test.__struct_fields__ is Test.__struct_encode_fields__
+        assert Test.__struct_fields__ is Test.__struct_alias_fields__
 
     def test_field_name_none(self):
         class Test(Struct):
             x: Annotated[int, Field(alias=None)]
 
-        assert Test.__struct_fields__ is Test.__struct_encode_fields__
+        assert Test.__struct_fields__ is Test.__struct_alias_fields__
 
         class Test(Struct, rename="upper"):
             x: Annotated[int, Field(alias=None)]
 
-        assert Test.__struct_encode_fields__ == ("X",)
+        assert Test.__struct_alias_fields__ == ("X",)
 
     def test_rename_explicit_none(self):
         class Test(Struct, rename=None):
             field_one: int
             field_two: str
 
-        assert Test.__struct_encode_fields__ == ("field_one", "field_two")
-        assert Test.__struct_fields__ is Test.__struct_encode_fields__
+        assert Test.__struct_alias_fields__ == ("field_one", "field_two")
+        assert Test.__struct_fields__ is Test.__struct_alias_fields__
 
     def test_rename_lower(self):
         class Test(Struct, rename="lower"):
             field_One: int
             field_Two: str
 
-        assert Test.__struct_encode_fields__ == ("field_one", "field_two")
+        assert Test.__struct_alias_fields__ == ("field_one", "field_two")
 
     def test_rename_upper(self):
         class Test(Struct, rename="upper"):
             field_one: int
             field_two: str
 
-        assert Test.__struct_encode_fields__ == ("FIELD_ONE", "FIELD_TWO")
+        assert Test.__struct_alias_fields__ == ("FIELD_ONE", "FIELD_TWO")
 
     def test_rename_kebab(self):
         class Test(Struct, rename="kebab"):
@@ -1987,7 +1987,7 @@ class TestRename:
             field4: float
             _field_five: int
 
-        assert Test.__struct_encode_fields__ == (
+        assert Test.__struct_alias_fields__ == (
             "field-one",
             "field-two-with-suffix",
             "field-three",
@@ -2003,7 +2003,7 @@ class TestRename:
             field4: float
             _field_five: int
 
-        assert Test.__struct_encode_fields__ == (
+        assert Test.__struct_alias_fields__ == (
             "fieldOne",
             "fieldTwoWithSuffix",
             "__fieldThree",
@@ -2019,7 +2019,7 @@ class TestRename:
             field4: float
             _field_five: int
 
-        assert Test.__struct_encode_fields__ == (
+        assert Test.__struct_alias_fields__ == (
             "FieldOne",
             "FieldTwoWithSuffix",
             "__FieldThree",
@@ -2032,14 +2032,14 @@ class TestRename:
             field_one: int
             field_two: str
 
-        assert Test.__struct_encode_fields__ == ("Field_One", "Field_Two")
+        assert Test.__struct_alias_fields__ == ("Field_One", "Field_Two")
 
     def test_rename_callable_returns_none(self):
         class Test(Struct, rename={"from_": "from"}.get):
             from_: str
             to: str
 
-        assert Test.__struct_encode_fields__ == ("from", "to")
+        assert Test.__struct_alias_fields__ == ("from", "to")
 
     def test_rename_callable_returns_non_string(self):
         with pytest.raises(
@@ -2057,7 +2057,7 @@ class TestRename:
             from_: str
             to: str
 
-        assert Test.__struct_encode_fields__ == ("from", "to")
+        assert Test.__struct_alias_fields__ == ("from", "to")
 
     def test_rename_bad_value(self):
         with pytest.raises(ValueError, match="rename='invalid' is unsupported"):
@@ -2096,22 +2096,22 @@ class TestRename:
         class Test1(Base):
             x: int
 
-        assert Test1.__struct_encode_fields__ == ("X",)
+        assert Test1.__struct_alias_fields__ == ("X",)
 
         class Test2(Base, rename="camel"):
             my_field: int
 
-        assert Test2.__struct_encode_fields__ == ("myField",)
+        assert Test2.__struct_alias_fields__ == ("myField",)
 
         class Test3(Test2, rename="kebab"):
             my_other_field: int
 
-        assert Test3.__struct_encode_fields__ == ("myField", "my-other-field")
+        assert Test3.__struct_alias_fields__ == ("myField", "my-other-field")
 
         class Test4(Base, rename=None):
             my_field: int
 
-        assert Test4.__struct_encode_fields__ == ("my_field",)
+        assert Test4.__struct_alias_fields__ == ("my_field",)
 
     def test_rename_fields_only_used_for_encode_and_decode(self):
         """Check that the renamed fields don't show up elsewhere"""
@@ -2310,7 +2310,7 @@ class TestInspectFields:
         )
         assert structtype.fields(Example) == sol
 
-    def test_fields_encode_name(self):
+    def test_fields_alias(self):
         class Example(structtype.Struct, rename="camel"):
             field_one: int
             field_two: int

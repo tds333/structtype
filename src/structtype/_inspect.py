@@ -499,7 +499,7 @@ class FieldNode(structtype.Struct):
     ----------
     name: str
         The field name as seen by Python code (e.g. ``field_one``).
-    encode_name: str
+    alias: str
         The name used when encoding/decoding the field. This may differ if
         the field is renamed (e.g. ``fieldOne``).
     type: Type
@@ -519,7 +519,7 @@ class FieldNode(structtype.Struct):
     _FIELD_UNSET: ClassVar[object] = object()
 
     name: str
-    encode_name: str
+    alias: str
     type: Type
     required: bool = True
     default: Any = _FIELD_UNSET
@@ -624,7 +624,7 @@ class FieldInfo(structtype.Struct):
     """A record describing a field in a struct."""
 
     name: str
-    encode_name: str
+    alias: str
     type: Any
     default: Any = UNSET
     default_factory: Any = UNSET
@@ -642,7 +642,7 @@ class FieldInfo(structtype.Struct):
     def __repr__(self):
         parts = [
             f"name={self.name!r}",
-            f"encode_name={self.encode_name!r}",
+            f"alias={self.alias!r}",
             f"type={self.type!r}",
         ]
         if self.required:
@@ -681,7 +681,7 @@ def fields(type_or_instance: Struct | type[Struct]) -> tuple[FieldInfo, ...]:
     ...     y: float
 
     >>> fields(Point)
-    (FieldInfo(name='x', encode_name='x', type=<class 'float'>, required=True), FieldInfo(name='y', encode_name='y', type=<class 'float'>, required=True))
+    (FieldInfo(name='x', alias='x', type=<class 'float'>, required=True), FieldInfo(name='y', alias='y', type=<class 'float'>, required=True))
     """
     obj = type_or_instance
     if isinstance(obj, StructMeta):
@@ -697,9 +697,9 @@ def fields(type_or_instance: Struct | type[Struct]) -> tuple[FieldInfo, ...]:
     hints = _get_class_annotations(annotated_cls)
     npos = len(cls.__struct_fields__) - len(cls.__struct_defaults__)
     fields_list = []
-    for name, encode_name, default_obj in zip(
+    for name, alias, default_obj in zip(
         cls.__struct_fields__,
-        cls.__struct_encode_fields__,
+        cls.__struct_alias_fields__,
         (NODEFAULT,) * npos + cls.__struct_defaults__,
     ):
         default = default_factory = NODEFAULT
@@ -710,7 +710,7 @@ def fields(type_or_instance: Struct | type[Struct]) -> tuple[FieldInfo, ...]:
 
         field_instance = FieldInfo(
             name=name,
-            encode_name=encode_name,
+            alias=alias,
             type=hints[name],
             default=default,
             default_factory=default_factory,
@@ -1065,9 +1065,9 @@ class _Translator:
             hints = self._get_class_annotations(cls)
             npos = len(t.__struct_fields__) - len(t.__struct_defaults__)
             fields = []
-            for name, encode_name, default_obj in zip(
+            for name, alias, default_obj in zip(
                 t.__struct_fields__,
-                t.__struct_encode_fields__,
+                t.__struct_alias_fields__,
                 (NODEFAULT,) * npos + t.__struct_defaults__,
             ):
                 if default_obj is NODEFAULT:
@@ -1084,7 +1084,7 @@ class _Translator:
 
                 field = FieldNode(
                     name=name,
-                    encode_name=encode_name,
+                    alias=alias,
                     type=self.translate(hints[name]),
                     required=required,
                     default=default,
@@ -1103,7 +1103,7 @@ class _Translator:
             out.fields = tuple(
                 FieldNode(
                     name=name,
-                    encode_name=name,
+                    alias=name,
                     type=self.translate(field_type),
                     required=name in required,
                 )
@@ -1134,7 +1134,7 @@ class _Translator:
                 fields.append(
                     FieldNode(
                         name=name,
-                        encode_name=name,
+                        alias=name,
                         type=self.translate(typ),
                         required=required,
                         default=default,
@@ -1152,7 +1152,7 @@ class _Translator:
             out.fields = tuple(
                 FieldNode(
                     name=name,
-                    encode_name=name,
+                    alias=name,
                     type=self.translate(hints.get(name, Any)),
                     required=name not in t._field_defaults,
                     default=t._field_defaults.get(name, NODEFAULT),
@@ -1179,11 +1179,11 @@ class _Translator:
                     default = default_obj
                     default_factory = NODEFAULT
                 field_info = cls.model_fields[name]
-                encode_name = field_info.alias or field_info.serialization_alias or name
+                alias = field_info.alias or field_info.serialization_alias or name
                 fields.append(
                     FieldNode(
                         name=name,
-                        encode_name=encode_name,
+                        alias=alias,
                         type=self.translate(typ),
                         required=is_required,
                         default=default,

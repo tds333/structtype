@@ -2947,8 +2947,8 @@ typedef struct {
     PyObject *struct_fields;
     PyObject *struct_defaults;
     Py_ssize_t *struct_offsets;
-    PyObject *struct_encode_fields;
-    MS_StrView *struct_encode_keys;   /* raw UTF-8 views of encode fields, NULL if none */
+    PyObject *struct_alias_fields;
+    MS_StrView *struct_alias_keys;   /* raw UTF-8 views of alias fields, NULL if none */
     MS_StrView struct_tag_field_view; /* raw UTF-8 view of tag field, valid if tag_field set */
     PyObject *struct_module;          /* owning structtype module, or NULL */
     struct StructInfo *struct_info;
@@ -5376,7 +5376,7 @@ Struct_alloc(PyTypeObject *type) {
 static PyObject *
 StructMeta_get_field_name(PyObject *self, Py_ssize_t field_index) {
     return PyTuple_GET_ITEM(
-        ((StructMetaObject *)self)->struct_encode_fields, field_index
+        ((StructMetaObject *)self)->struct_alias_fields, field_index
     );
 }
 
@@ -5386,10 +5386,10 @@ StructMeta_get_field_index(
 ) {
     const char *field;
     Py_ssize_t nfields, field_size, i, offset = *pos;
-    nfields = PyTuple_GET_SIZE(self->struct_encode_fields);
+    nfields = PyTuple_GET_SIZE(self->struct_alias_fields);
     for (i = offset; i < nfields; i++) {
         field = unicode_str_and_size_nocheck(
-            PyTuple_GET_ITEM(self->struct_encode_fields, i), &field_size
+            PyTuple_GET_ITEM(self->struct_alias_fields, i), &field_size
         );
         if (key_size == field_size && memcmp(key, field, key_size) == 0) {
             *pos = i < (nfields - 1) ? (i + 1) : 0;
@@ -5398,7 +5398,7 @@ StructMeta_get_field_index(
     }
     for (i = 0; i < offset; i++) {
         field = unicode_str_and_size_nocheck(
-            PyTuple_GET_ITEM(self->struct_encode_fields, i), &field_size
+            PyTuple_GET_ITEM(self->struct_alias_fields, i), &field_size
         );
         if (key_size == field_size && memcmp(key, field, key_size) == 0) {
             *pos = i + 1;
@@ -5588,7 +5588,7 @@ typedef struct {
     PyObject *renamed_fields;
     /* Output values. All owned references. */
     PyObject *fields;
-    PyObject *encode_fields;
+    PyObject *alias_fields;
     PyObject *defaults;
     PyObject *match_args;
     PyObject *tag;
@@ -5713,7 +5713,7 @@ structmeta_collect_base(StructMetaInfo *info, StructspecState *mod, PyObject *ba
     );
 
     PyObject *fields = st_type->struct_fields;
-    PyObject *encode_fields = st_type->struct_encode_fields;
+    PyObject *alias_fields = st_type->struct_alias_fields;
     PyObject *defaults = st_type->struct_defaults;
     Py_ssize_t *offsets = st_type->struct_offsets;
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
@@ -5723,7 +5723,7 @@ structmeta_collect_base(StructMetaInfo *info, StructspecState *mod, PyObject *ba
 
     for (Py_ssize_t i = 0; i < nfields; i++) {
         PyObject *field = PyTuple_GET_ITEM(fields, i);
-        PyObject *encode_field = PyTuple_GET_ITEM(encode_fields, i);
+        PyObject *alias_field = PyTuple_GET_ITEM(alias_fields, i);
         PyObject *default_val = NODEFAULT;
         if (i >= defaults_offset) {
             default_val = PyTuple_GET_ITEM(defaults, i - defaults_offset);
@@ -5739,8 +5739,8 @@ structmeta_collect_base(StructMetaInfo *info, StructspecState *mod, PyObject *ba
         }
 
         /* Propagate any renamed fields */
-        if (field != encode_field) {
-            if (PyDict_SetItem(info->renamed_fields, field, encode_field) < 0) return -1;
+        if (field != alias_field) {
+            if (PyDict_SetItem(info->renamed_fields, field, alias_field) < 0) return -1;
         }
 
         PyObject *offset = PyLong_FromSsize_t(offsets[i]);
@@ -6436,17 +6436,17 @@ structmeta_construct_fields(StructMetaInfo *info, StructspecState *mod) {
 static int json_str_requires_escaping(PyObject *);
 
 static int
-structmeta_construct_encode_fields(StructMetaInfo *info)
+structmeta_construct_alias_fields(StructMetaInfo *info)
 {
     if (PyDict_GET_SIZE(info->renamed_fields) == 0) {
         /* Nothing to do, use original field tuple */
         Py_INCREF(info->fields);
-        info->encode_fields = info->fields;
+        info->alias_fields = info->fields;
         return 0;
     }
 
-    info->encode_fields = PyTuple_New(PyTuple_GET_SIZE(info->fields));
-    if (info->encode_fields == NULL) return -1;
+    info->alias_fields = PyTuple_New(PyTuple_GET_SIZE(info->fields));
+    if (info->alias_fields == NULL) return -1;
     for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(info->fields); i++) {
         PyObject *name = PyTuple_GET_ITEM(info->fields, i);
         PyObject *temp = PyDict_GetItem(info->renamed_fields, name);
@@ -6454,13 +6454,13 @@ structmeta_construct_encode_fields(StructMetaInfo *info)
             temp = name;
         }
         Py_INCREF(temp);
-        PyTuple_SET_ITEM(info->encode_fields, i, temp);
+        PyTuple_SET_ITEM(info->alias_fields, i, temp);
     }
 
     /* Ensure that renamed fields don't collide */
-    PyObject *fields_set = PySet_New(info->encode_fields);
+    PyObject *fields_set = PySet_New(info->alias_fields);
     if (fields_set == NULL) return -1;
-    bool unique = PySet_GET_SIZE(fields_set) == PyTuple_GET_SIZE(info->encode_fields);
+    bool unique = PySet_GET_SIZE(fields_set) == PyTuple_GET_SIZE(info->alias_fields);
     Py_DECREF(fields_set);
     if (!unique) {
         PyErr_SetString(
@@ -6474,8 +6474,8 @@ structmeta_construct_encode_fields(StructMetaInfo *info)
     /* Ensure all renamed fields contain characters that don't require quoting
      * in JSON. This isn't strictly required, but usage of such characters is
      * extremely unlikely, and forbidding this allows us to optimize encoding */
-    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(info->encode_fields); i++) {
-        PyObject *field = PyTuple_GET_ITEM(info->encode_fields, i);
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(info->alias_fields); i++) {
+        PyObject *field = PyTuple_GET_ITEM(info->alias_fields, i);
         Py_ssize_t status = json_str_requires_escaping(field);
         if (status == -1) return -1;
         if (status == 1) {
@@ -6494,13 +6494,13 @@ structmeta_construct_encode_fields(StructMetaInfo *info)
 /* Precompute raw UTF-8 views of the struct's encode field names and tag field
  * so the JSON encoder can write keys without touching Python str objects at
  * encode time. Field names are guaranteed to be escape-free (identifiers, or
- * validated by structmeta_construct_encode_fields), so callers may write them
+ * validated by structmeta_construct_alias_fields), so callers may write them
  * with the noescape path. The tag field may contain arbitrary characters and
  * must be written with the escaping path. */
 static int
-structmeta_construct_encode_key_views(StructMetaObject *cls)
+structmeta_construct_alias_key_views(StructMetaObject *cls)
 {
-    cls->struct_encode_keys = NULL;
+    cls->struct_alias_keys = NULL;
     cls->struct_tag_field_view.buf = NULL;
     cls->struct_tag_field_view.size = 0;
 
@@ -6511,22 +6511,22 @@ structmeta_construct_encode_key_views(StructMetaObject *cls)
         if (cls->struct_tag_field_view.buf == NULL) return -1;
     }
 
-    Py_ssize_t nfields = PyTuple_GET_SIZE(cls->struct_encode_fields);
+    Py_ssize_t nfields = PyTuple_GET_SIZE(cls->struct_alias_fields);
     if (nfields == 0) return 0;
 
-    cls->struct_encode_keys = PyMem_Malloc(nfields * sizeof(MS_StrView));
-    if (cls->struct_encode_keys == NULL) {
+    cls->struct_alias_keys = PyMem_Malloc(nfields * sizeof(MS_StrView));
+    if (cls->struct_alias_keys == NULL) {
         PyErr_NoMemory();
         return -1;
     }
 
     for (Py_ssize_t i = 0; i < nfields; i++) {
-        PyObject *field = PyTuple_GET_ITEM(cls->struct_encode_fields, i);
+        PyObject *field = PyTuple_GET_ITEM(cls->struct_alias_fields, i);
         /* Use the checked variant to force UTF-8 materialization for
          * non-ASCII names; the nocheck variant may return a NULL utf8
          * pointer before the cache is populated. */
-        cls->struct_encode_keys[i].buf = unicode_str_and_size(field, &cls->struct_encode_keys[i].size);
-        if (cls->struct_encode_keys[i].buf == NULL) return -1;
+        cls->struct_alias_keys[i].buf = unicode_str_and_size(field, &cls->struct_alias_keys[i].size);
+        if (cls->struct_alias_keys[i].buf == NULL) return -1;
     }
     return 0;
 }
@@ -6619,7 +6619,7 @@ structmeta_construct_tag(StructMetaInfo *info, StructspecState *mod, PyObject *c
         PyErr_SetString(PyExc_TypeError, "`tag_field` must be a `str`");
         return -1;
     }
-    int contains = PySequence_Contains(info->encode_fields, info->tag_field);
+    int contains = PySequence_Contains(info->alias_fields, info->tag_field);
     if (contains < 0) return -1;
     if (contains) {
         PyErr_Format(
@@ -6701,7 +6701,7 @@ StructMeta_new_inner(
         .namespace = NULL,
         .renamed_fields = NULL,
         .fields = NULL,
-        .encode_fields = NULL,
+        .alias_fields = NULL,
         .defaults = NULL,
         .match_args = NULL,
         .tag = NULL,
@@ -6789,8 +6789,8 @@ StructMeta_new_inner(
     /* Collect per-field codec maps from the resolved annotations */
     if (structmeta_collect_codecs(&info, mod, bases) < 0) goto cleanup;
 
-    /* Construct encode_fields */
-    if (structmeta_construct_encode_fields(&info) < 0) goto cleanup;
+    /* Construct alias_fields */
+    if (structmeta_construct_alias_fields(&info) < 0) goto cleanup;
 
     /* Construct type */
     PyObject *args = Py_BuildValue("(OOO)", name, bases, info.namespace);
@@ -6852,8 +6852,8 @@ StructMeta_new_inner(
     cls->struct_field_codecs = info.codec_maps;
     Py_INCREF(info.defaults);
     cls->struct_defaults = info.defaults;
-    Py_INCREF(info.encode_fields);
-    cls->struct_encode_fields = info.encode_fields;
+    Py_INCREF(info.alias_fields);
+    cls->struct_alias_fields = info.alias_fields;
     Py_INCREF(info.match_args);
     cls->match_args = info.match_args;
     Py_XINCREF(info.tag);
@@ -6865,7 +6865,7 @@ StructMeta_new_inner(
     Py_XINCREF(info.rename);
     cls->rename = info.rename;
 
-    if (structmeta_construct_encode_key_views(cls) < 0) goto cleanup;
+    if (structmeta_construct_alias_key_views(cls) < 0) goto cleanup;
 
     /* Cache the module on the type so methods like struct_dump_json /
      * struct_validate_json / struct_dump avoid a PyState_FindModule lookup
@@ -6900,7 +6900,7 @@ cleanup:
     Py_XDECREF(info.codec_maps);
     /* Constructed outputs */
     Py_XDECREF(info.fields);
-    Py_XDECREF(info.encode_fields);
+    Py_XDECREF(info.alias_fields);
     Py_XDECREF(info.defaults);
     Py_XDECREF(info.match_args);
     Py_XDECREF(info.tag);
@@ -6913,9 +6913,9 @@ cleanup:
              * doesn't double-free if the error happened after assignment. */
             if (cls != NULL) cls->struct_offsets = NULL;
         }
-        if (cls != NULL && cls->struct_encode_keys != NULL) {
-            PyMem_Free(cls->struct_encode_keys);
-            cls->struct_encode_keys = NULL;
+        if (cls != NULL && cls->struct_alias_keys != NULL) {
+            PyMem_Free(cls->struct_alias_keys);
+            cls->struct_alias_keys = NULL;
         }
         Py_XDECREF(cls);
         return NULL;
@@ -7144,7 +7144,7 @@ StructMeta_traverse(StructMetaObject *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->struct_fields);
     Py_VISIT(self->struct_defaults);
-    Py_VISIT(self->struct_encode_fields);
+    Py_VISIT(self->struct_alias_fields);
     Py_VISIT(self->struct_module);
     Py_VISIT(self->struct_tag);  /* May be a function */
     Py_VISIT(self->rename);  /* May be a function */
@@ -7162,7 +7162,7 @@ StructMeta_clear(StructMetaObject *self)
 
     Py_CLEAR(self->struct_fields);
     Py_CLEAR(self->struct_defaults);
-    Py_CLEAR(self->struct_encode_fields);
+    Py_CLEAR(self->struct_alias_fields);
     Py_CLEAR(self->struct_module);
     Py_CLEAR(self->struct_tag_field);
     Py_CLEAR(self->struct_tag_value);
@@ -7176,9 +7176,9 @@ StructMeta_clear(StructMetaObject *self)
         PyMem_Free(self->struct_offsets);
         self->struct_offsets = NULL;
     }
-    if (self->struct_encode_keys != NULL) {
-        PyMem_Free(self->struct_encode_keys);
-        self->struct_encode_keys = NULL;
+    if (self->struct_alias_keys != NULL) {
+        PyMem_Free(self->struct_alias_keys);
+        self->struct_alias_keys = NULL;
     }
     return PyType_Type.tp_clear((PyObject *)self);
 }
@@ -7490,7 +7490,7 @@ StructMeta_config(StructMetaObject *self, void *closure) {
 static PyMemberDef StructMeta_members[] = {
     {"__struct_fields__", T_OBJECT_EX, offsetof(StructMetaObject, struct_fields), READONLY, "Struct fields"},
     {"__struct_defaults__", T_OBJECT_EX, offsetof(StructMetaObject, struct_defaults), READONLY, "Struct defaults"},
-    {"__struct_encode_fields__", T_OBJECT_EX, offsetof(StructMetaObject, struct_encode_fields), READONLY, "Struct encoded field names"},
+    {"__struct_alias_fields__", T_OBJECT_EX, offsetof(StructMetaObject, struct_alias_fields), READONLY, "Struct alias field names"},
     {"__match_args__", T_OBJECT_EX, offsetof(StructMetaObject, match_args), READONLY, "Positional match args"},
     {NULL},
 };
@@ -7638,7 +7638,7 @@ Struct_fill_in_defaults(StructMetaObject *st_type, PyObject *obj, PathNode *path
     Py_ssize_t nfields, ndefaults, i;
     bool is_gc, should_untrack;
 
-    nfields = PyTuple_GET_SIZE(st_type->struct_encode_fields);
+    nfields = PyTuple_GET_SIZE(st_type->struct_alias_fields);
     ndefaults = PyTuple_GET_SIZE(st_type->struct_defaults);
     is_gc = MS_TYPE_IS_GC(st_type);
     should_untrack = is_gc;
@@ -7669,7 +7669,7 @@ Struct_fill_in_defaults(StructMetaObject *st_type, PyObject *obj, PathNode *path
 
 missing_required:
     ms_missing_required_field(
-        PyTuple_GET_ITEM(st_type->struct_encode_fields, i), path
+        PyTuple_GET_ITEM(st_type->struct_alias_fields, i), path
     );
     return -1;
 }
@@ -8245,8 +8245,8 @@ StructMixin_fields(PyObject *self, void *closure) {
 }
 
 static PyObject *
-StructMixin_encode_fields(PyObject *self, void *closure) {
-    PyObject *out = ((StructMetaObject *)Py_TYPE(self))->struct_encode_fields;
+StructMixin_alias_fields(PyObject *self, void *closure) {
+    PyObject *out = ((StructMetaObject *)Py_TYPE(self))->struct_alias_fields;
     Py_INCREF(out);
     return out;
 }
@@ -8476,7 +8476,7 @@ static PyGetSetDef StructMixin_getset[] = {
     {"__struct_fields__", (getter) StructMixin_fields, NULL,
         "A tuple of field names in declaration order",
         NULL},
-    {"__struct_encode_fields__", (getter) StructMixin_encode_fields, NULL,
+    {"__struct_alias_fields__", (getter) StructMixin_alias_fields, NULL,
         "A tuple of field names used for serialization (after applying rename)",
         NULL},
     {"__struct_defaults__", (getter) StructMixin_defaults, NULL,
@@ -13173,7 +13173,7 @@ json_encode_struct_object(
     Py_ssize_t i, nfields, nunchecked;
     int status = -1;
     tag_value = struct_type->struct_tag_value;
-    fields = struct_type->struct_encode_fields;
+    fields = struct_type->struct_alias_fields;
     defaults = struct_type->struct_defaults;
     nfields = PyTuple_GET_SIZE(fields);
     nunchecked = nfields;
@@ -13199,7 +13199,7 @@ json_encode_struct_object(
         val = Struct_get_index(obj, i);
         if (MS_UNLIKELY(val == NULL)) goto cleanup;
         if (MS_UNLIKELY(val == UNSET)) continue;
-        MS_StrView kv = struct_type->struct_encode_keys[i];
+        MS_StrView kv = struct_type->struct_alias_keys[i];
         if (json_encode_cstr_noescape(self, kv.buf, kv.size) < 0) goto cleanup;
         if (ms_write(self, ":", 1) < 0) goto cleanup;
         if (has_codecs) self->codecs = PyTuple_GET_ITEM(field_codecs, i);
@@ -13213,7 +13213,7 @@ json_encode_struct_object(
         if (MS_UNLIKELY(val == UNSET)) continue;
         PyObject *default_val = PyTuple_GET_ITEM(defaults, i - nunchecked);
         if (!is_default(val, default_val)) {
-            MS_StrView kv = struct_type->struct_encode_keys[i];
+            MS_StrView kv = struct_type->struct_alias_keys[i];
             if (json_encode_cstr_noescape(self, kv.buf, kv.size) < 0) goto cleanup;
             if (ms_write(self, ":", 1) < 0) goto cleanup;
             if (has_codecs) self->codecs = PyTuple_GET_ITEM(field_codecs, i);
@@ -13243,7 +13243,7 @@ json_encode_struct_array(
 ) {
     int status = -1;
     PyObject *tag_value = struct_type->struct_tag_value;
-    PyObject *fields = struct_type->struct_encode_fields;
+    PyObject *fields = struct_type->struct_alias_fields;
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
     PyObject *field_codecs = struct_type->struct_field_codecs;
     PyObject *saved_codecs = self->codecs;
@@ -14745,7 +14745,7 @@ json_decode_struct_array_inner(
     out = Struct_alloc((PyTypeObject *)(st_type));
     if (out == NULL) return NULL;
 
-    nfields = PyTuple_GET_SIZE(st_type->struct_encode_fields);
+    nfields = PyTuple_GET_SIZE(st_type->struct_alias_fields);
     ndefaults = PyTuple_GET_SIZE(st_type->struct_defaults);
     nrequired = nfields - st_type->n_trailing_defaults;
     npos = nfields - ndefaults;
@@ -14962,7 +14962,7 @@ json_ensure_array_nonempty(
         }
         else {
             /* n_fields - n_optional_fields + 1 tag */
-            expected_size = PyTuple_GET_SIZE(st_type->struct_encode_fields)
+            expected_size = PyTuple_GET_SIZE(st_type->struct_alias_fields)
                             - PyTuple_GET_SIZE(st_type->struct_defaults)
                             + 1;
         }
@@ -16422,7 +16422,7 @@ dump_struct(DumpState *self, PyObject *obj, bool is_key) {
     StructMetaObject *struct_type = (StructMetaObject *)Py_TYPE(obj);
     PyObject *tag_field = struct_type->struct_tag_field;
     PyObject *tag_value = struct_type->struct_tag_value;
-    PyObject *fields = struct_type->struct_encode_fields;
+    PyObject *fields = struct_type->struct_alias_fields;
     PyObject *defaults = struct_type->struct_defaults;
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
     Py_ssize_t npos = nfields - PyTuple_GET_SIZE(defaults);
@@ -17605,7 +17605,7 @@ validate_seq_to_struct_array_inner(
     StructMetaObject *st_type = info->class;
     PathNode item_path = {path, 0};
     bool tagged = st_type->struct_tag_value != NULL;
-    Py_ssize_t nfields = PyTuple_GET_SIZE(st_type->struct_encode_fields);
+    Py_ssize_t nfields = PyTuple_GET_SIZE(st_type->struct_alias_fields);
     Py_ssize_t ndefaults = PyTuple_GET_SIZE(st_type->struct_defaults);
     Py_ssize_t nrequired = tagged + nfields - st_type->n_trailing_defaults;
     Py_ssize_t npos = nfields - ndefaults;
@@ -18087,7 +18087,7 @@ validate_object_to_struct(
 ) {
     StructMetaObject *struct_type = info->class;
 
-    Py_ssize_t nfields = PyTuple_GET_SIZE(struct_type->struct_encode_fields);
+    Py_ssize_t nfields = PyTuple_GET_SIZE(struct_type->struct_alias_fields);
     Py_ssize_t ndefaults = PyTuple_GET_SIZE(struct_type->struct_defaults);
 
     if (struct_type->struct_tag_value != NULL && !tag_already_read) {
@@ -18116,7 +18116,7 @@ validate_object_to_struct(
 
     /* If no fields are renamed we only have one fields tuple to choose from */
     PyObject *fields = NULL;
-    if (struct_type->struct_fields == struct_type->struct_encode_fields) {
+    if (struct_type->struct_fields == struct_type->struct_alias_fields) {
         fields = struct_type->struct_fields;
     }
 
@@ -18130,11 +18130,11 @@ validate_object_to_struct(
         }
         else {
             /* fields tuple undetermined. Try the attribute name first */
-            PyObject *encode_field;
+            PyObject *alias_field;
             field = PyTuple_GET_ITEM(struct_type->struct_fields, i);
-            encode_field = PyTuple_GET_ITEM(struct_type->struct_encode_fields, i);
+            alias_field = PyTuple_GET_ITEM(struct_type->struct_alias_fields, i);
             attr = getter(obj, field);
-            if (field != encode_field) {
+            if (field != alias_field) {
                 /* The field _was_ renamed */
                 if (attr != NULL) {
                     /* Got a match, lock-in using attribute names */
@@ -18143,11 +18143,11 @@ validate_object_to_struct(
                 else {
                     /* No match. Try using the renamed name */
                     PyErr_Clear();
-                    attr = getter(obj, encode_field);
+                    attr = getter(obj, alias_field);
                     if (attr != NULL) {
                         /* Got a match, lock-in using renamed names */
-                        field = encode_field;
-                        fields = struct_type->struct_encode_fields;
+                        field = alias_field;
+                        fields = struct_type->struct_alias_fields;
                     }
                 }
             }

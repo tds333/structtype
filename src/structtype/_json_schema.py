@@ -462,12 +462,12 @@ class _SchemaGenerator:
             for field in t.fields:
                 field_schema = self.to_schema(field.type)
                 if field.required:
-                    required.append(field.encode_name)
+                    required.append(field.alias)
                 elif field.default is not NODEFAULT:
                     field_schema["default"] = _dump(field.default, str_keys=True)
                 elif field.default_factory in (list, dict, set, bytearray):
                     field_schema["default"] = field.default_factory()
-                names.append(field.encode_name)
+                names.append(field.alias)
                 fields.append(field_schema)
 
             if t.array_like:
@@ -498,10 +498,10 @@ class _SchemaGenerator:
             for field in t.fields:
                 field_schema = self.to_schema(field.type)
                 if field.required:
-                    required.append(field.encode_name)
+                    required.append(field.alias)
                 elif field.default is not NODEFAULT:
                     field_schema["default"] = _dump(field.default, str_keys=True)
-                names.append(field.encode_name)
+                names.append(field.alias)
                 fields.append(field_schema)
             if isinstance(t, NamedTupleType):
                 schema["type"] = "array"

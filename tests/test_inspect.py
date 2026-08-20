@@ -418,13 +418,13 @@ def test_struct(kw):
     sol = mi.StructType(
         cls=Example,
         fields=(
-            mi.FieldNode(name="x", encode_name="x", type=mi.IntType()),
+            mi.FieldNode(name="x", alias="x", type=mi.IntType()),
             mi.FieldNode(
-                name="y", encode_name="y", type=mi.IntType(), required=False, default=0
+                name="y", alias="y", type=mi.IntType(), required=False, default=0
             ),
             mi.FieldNode(
                 name="z",
-                encode_name="z",
+                alias="z",
                 type=mi.IntType(),
                 required=False,
                 default_factory=factory,
@@ -462,7 +462,7 @@ def test_struct_keyword_only():
     assert mi.type_info(Example) == sol
 
 
-def test_struct_encode_name():
+def test_struct_alias():
     class Example(structtype.Struct, rename="camel"):
         field_one: int
         field_two: int
@@ -832,7 +832,7 @@ def test_type_info_custom_base_class():
         fields=(
             mi.FieldNode(
                 name="foo",
-                encode_name="foo",
+                alias="foo",
                 type=mi.StrType(min_length=None, max_length=None, pattern=None),
                 required=True,
                 default=structtype.NODEFAULT,

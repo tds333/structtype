@@ -17,7 +17,7 @@ Structs
         A tuple of the field names in declaration order. Available on both the
         struct type and on instances.
 
-    .. attribute:: __struct_encode_fields__
+    .. attribute:: __struct_alias_fields__
 
         :type: tuple[str, ...]
 

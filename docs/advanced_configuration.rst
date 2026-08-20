@@ -254,8 +254,8 @@ fields as a tuple of ``FieldInfo`` objects:
     ...     y: float
 
     >>> fields(Point)
-    (FieldInfo(name='x', encode_name='x', type=float, default=NODEFAULT, default_factory=NODEFAULT),
-     FieldInfo(name='y', encode_name='y', type=float, default=NODEFAULT, default_factory=NODEFAULT))
+    (FieldInfo(name='x', alias='x', type=float, default=NODEFAULT, default_factory=NODEFAULT),
+     FieldInfo(name='y', alias='y', type=float, default=NODEFAULT, default_factory=NODEFAULT))
 
     >>> fields(Point(1.0, 2.0))  # also works on instances
     (FieldInfo(...), FieldInfo(...))
@@ -263,7 +263,7 @@ fields as a tuple of ``FieldInfo`` objects:
 Each ``FieldInfo`` has the following attributes:
 
 - ``name``: the Python field name.
-- ``encode_name``: the name used for serialization (affected by ``rename``/``alias``).
+- ``alias``: the name used for serialization (affected by ``rename``/``alias``).
 - ``type``: the field's type annotation.
 - ``default``: the default value, or ``NODEFAULT`` if required.
 - ``default_factory``: the default factory callable, or ``NODEFAULT`` if none.
