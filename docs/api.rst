@@ -196,12 +196,21 @@ Field
         :type: Callable[[Any], Any] | None
 
         A callable converting a value composed of natively supported types
-        back into a custom-type value. Used during decoding. Only valid for
-        custom types; attaching a ``validate`` codec to a natively supported
-        type or a union (including optional types such as
-        ``Annotated[complex | None, Field(...)]``) raises a ``TypeError`` — at
-        class creation time for ``Struct``, at construction for
-        ``StructAdapter``. See :doc:`extending`.
+        back into a custom-type value. Called during decoding
+        (``struct_validate`` / ``struct_validate_json``) and during
+        ``struct_validate_self`` when the field value is not already an instance
+        of the custom type. Only valid for custom types; attaching a
+        ``validate`` codec to a natively supported type or a union (including
+        optional types such as ``Annotated[complex | None, Field(...)]``) raises
+        a ``TypeError`` — at class creation time for ``Struct``, at construction
+        for ``StructAdapter``. See :doc:`extending`.
+
+        .. note::
+
+            In ``struct_validate_self`` the validator's converted value is
+            discarded — the struct instance is not modified. Use
+            ``struct_validate`` / ``struct_validate_json`` when you need the
+            converted value stored back into a (new) struct.
 
 
 Factory

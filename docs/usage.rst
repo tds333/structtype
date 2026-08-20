@@ -399,6 +399,15 @@ You can also validate an existing struct instance at any time using
 
     ``struct_validate_self`` never modifies the struct — it only validates.
 
+    For custom types annotated with ``Field(validate=...)``, the validator is
+    called when a field value is **not** already an instance of the expected
+    type. The validator may convert the value, but the converted result is
+    **discarded** — the field keeps its original value. This is intentional:
+    ``struct_validate_self`` is for *detecting* type mismatches, not fixing them.
+    (Contrast with :meth:`Struct.struct_validate` and
+    :meth:`Struct.struct_validate_json`, which construct a new struct using the
+    validator's converted value.)
+
 
 Pattern Matching
 ----------------
