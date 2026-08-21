@@ -4,19 +4,9 @@ description = "Fast Struct type with validation and JSON serialization for Pytho
 readme = "README.md"
 requires-python = ">=3.10"
 license = "BSD-3-Clause"
-license-files = [
-  "LICENSE",
-]
-maintainers = [
-  { name = "Wolfgang Langner", email = "tds333@mailbox.org" },
-]
-keywords = [
-  "JSON",
-  "schema",
-  "serialization",
-  "struct",
-  "validation",
-]
+license-files = ["LICENSE"]
+maintainers = [{ name = "Wolfgang Langner", email = "tds333@mailbox.org" }]
+keywords = ["JSON", "schema", "serialization", "struct", "validation"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: WebAssembly :: Emscripten",
@@ -28,9 +18,7 @@ classifiers = [
   "Programming Language :: Python :: 3.15",
 ]
 dependencies = []
-dynamic = [
-  "version",
-]
+dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://tds333.github.io/structtype/"
@@ -44,9 +32,10 @@ dev = [
   "attrs",
   "coverage",
   "msgspec",
-  "pydantic; python_version < '3.15'",
+  "pydantic; python_version < '3.16'",
   "pytest>=9",
   "pytest-coverage>=0.0",
+  "typing_extensions",
 ]
 docs = [
   "furo",
@@ -58,10 +47,7 @@ docs = [
 ]
 
 [build-system]
-requires = [
-  "setuptools>=80",
-  "setuptools-scm>=8",
-]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
@@ -71,10 +57,7 @@ packages = ["structtype"]
 "" = "src"
 
 [tool.setuptools.exclude-package-data]
-structtype = [
-  "*.c",
-  "*.h",
-]
+structtype = ["*.c", "*.h"]
 
 [tool.setuptools_scm]
 version_file = "src/structtype/_version.py"
@@ -90,3 +73,12 @@ test-command = "pip install pytest>=9 && pytest {project}/tests"
 
 [tool.ruff]
 target-version = "py310"
+
+[tool.coverage.report]
+exclude_lines = [
+  'pragma: no cover',
+  'if (typing\.)?TYPE_CHECKING:',
+  'if sys\.version_info',
+  'except ImportError:',
+  '# noqa: F821',
+]

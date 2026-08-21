@@ -31,7 +31,7 @@ PY_312PLUS = sys.version_info >= (3, 12)
 # for Python 3.10.
 try:
     typing.ForwardRef("Foo", is_class=True)
-except TypeError:
+except TypeError:  # pragma: no cover
 
     def _forward_ref(value):
         return typing.ForwardRef(value, is_argument=False)
@@ -48,13 +48,13 @@ if sys.version_info >= (3, 13):
     def _eval_type(t, globalns, localns):
         return typing._eval_type(t, globalns, localns, ())
 
-else:
+else:  # pragma: no cover
     _eval_type = typing._eval_type
 
 
 if sys.version_info >= (3, 14):
     from annotationlib import get_annotations as _get_class_annotations
-else:
+else:  # pragma: no cover
 
     def _get_class_annotations(cls):
         # RUF063 targets 3.14+ behavior; this is the <3.14 raw-annotations fallback.
@@ -73,7 +73,7 @@ def _apply_params(obj, mapping):
 
     if not parameters:
         # Not parametrized
-        return obj
+        return obj  # pragma: no cover
 
     # Parametrized
     args = tuple(mapping.get(p, p) for p in parameters)
@@ -163,7 +163,7 @@ def get_class_annotations(obj):
 
         try:
             cls_module = cls.__module__
-        except AttributeError:
+        except AttributeError:  # pragma: no cover
             cls_globals = {}
         else:
             cls_globals = getattr(sys.modules.get(cls_module, None), "__dict__", {})
@@ -227,9 +227,9 @@ def get_typeddict_info(obj):
 
     if hasattr(cls, "__required_keys__"):
         required = set(cls.__required_keys__)
-    elif cls.__total__:
+    elif cls.__total__:  # pragma: no cover
         required = set(raw_hints)
-    else:
+    else:  # pragma: no cover
         required = set()
 
     # Both `typing.TypedDict` and `typing_extensions.TypedDict` have a bug
@@ -253,7 +253,7 @@ def get_typeddict_info(obj):
     # This can happen if there is a bug in the TypedDict implementation;
     # such a bug was present in Python 3.14.
     if not all(k in hints for k in required):
-        raise RuntimeError(
+        raise RuntimeError(  # pragma: no cover
             f"Required set {required} contains keys that are no in hints: {hints.keys()}"
         )
     return hints, required
@@ -278,7 +278,7 @@ def get_dataclass_info(obj):
                     raise TypeError(
                         "dataclasses with `InitVar` fields are not supported"
                     )
-                continue
+                continue  # pragma: no cover
             name = field.name
             typ = hints[name]
             if field.default is not MISSING:
@@ -337,7 +337,7 @@ def get_pydantic_info(obj):
     """Extract field info from a Pydantic v2 BaseModel."""
     if isinstance(obj, type):
         cls = obj
-    else:
+    else:  # pragma: no cover
         cls = obj.__origin__
     hints = get_class_annotations(obj)
     required = []
@@ -376,7 +376,7 @@ def rebuild(cls, kwargs):
     return cls(**kwargs)
 
 
-def convert_generic_alias(origin, args):
+def convert_generic_alias(origin, args):  # pragma: no cover
     # subscribed typing._GenericAlias instances are cached within the typing module
     # we make use of this fact, by storing a __structtype_cache__ attribute on the
     # subscribed instance. only subscribed types are cached, so

@@ -344,3 +344,110 @@ def test_adapter_protocol_roundtrip():
     assert ta.struct_validate_json(buf) == Point(1, 2)
     assert ta.struct_dump(Point(3, 4)) == {"x": 3, "y": 4}
     assert ta.struct_validate({"x": 3, "y": 4}) == Point(3, 4)
+
+
+# ------------------------------------------------------------------
+# Coverage: dataclass with InitVar field → TypeError
+# ------------------------------------------------------------------
+from dataclasses import InitVar, dataclass as _dc
+
+
+@_dc
+class _DCInit:
+    x: int
+    post: InitVar[int] = 0
+
+
+def test_initvar_rejected():
+    class _SInit(Struct):
+        d: _DCInit
+
+    with pytest.raises(TypeError, match="InitVar"):
+        _SInit.struct_validate({"d": {"x": 1}})
+
+
+# ------------------------------------------------------------------
+# Coverage: dataclass inheriting parametrised Mapping generic
+# (_utils.py:120 — builtin-generic scope branch)
+# ------------------------------------------------------------------
+from collections.abc import Mapping
+from typing import Generic, TypeVar
+
+_T = TypeVar("T")
+
+
+class _MBase(Mapping[str, _T], Generic[_T]):
+    def __init__(self, d=None):
+        self._d = dict(d or {})
+
+    def __getitem__(self, k):
+        return self._d[k]
+
+    def __iter__(self):
+        return iter(self._d)
+
+    def __len__(self):
+        return len(self._d)
+
+
+@_dc
+class _DCM(_MBase[int]):
+    extra: int = 0
+
+
+def test_dc_inherits_mapping_generic():
+    from structtype._utils import get_class_annotations
+
+    hints = get_class_annotations(_DCM)
+    assert "extra" in hints
+
+
+# ------------------------------------------------------------------
+# Coverage: TypedDict with Required/NotRequired via typing_extensions
+# (_utils.py:244-249)
+# ------------------------------------------------------------------
+
+
+def _make_td_classes(te):
+    class TDWrappers(te.TypedDict):
+        a: int
+        b: te.NotRequired[str]
+
+    class TDRRequired(te.TypedDict, total=False):
+        x: float
+        y: te.Required[int]
+
+    return TDWrappers, TDRRequired
+
+
+def test_typeddict_notrequired():
+    te = pytest.importorskip("typing_extensions")
+    TDWrappers, _ = _make_td_classes(te)
+
+    class STDW(Struct):
+        t: TDWrappers
+
+    result = STDW.struct_validate({"t": {"a": 1}})
+    assert result.t == {"a": 1}
+
+
+def test_typeddict_required_wrapper():
+    te = pytest.importorskip("typing_extensions")
+    _, TDRRequired = _make_td_classes(te)
+
+    class STDR(Struct):
+        t: TDRRequired
+
+    result = STDR.struct_validate({"t": {"y": 2}})
+    assert result.t == {"y": 2}
+
+
+def test_typeddict_total_false_info():
+    from structtype._inspect import type_info
+
+    te = pytest.importorskip("typing_extensions")
+    _, TDRRequired = _make_td_classes(te)
+
+    ti = type_info(TDRRequired)
+    assert "x" in {f.name for f in ti.fields}
+    assert "y" in {f.name for f in ti.fields}

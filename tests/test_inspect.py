@@ -30,7 +30,7 @@ import pytest
 
 import structtype
 import structtype._inspect as mi
-from structtype import Field
+from structtype import Factory, Field, Struct
 
 from .utils import py315_or_later_only, temp_module
 
@@ -923,3 +923,47 @@ def test_pydantic():
         ),
     )
     assert mi.type_info(Example) == sol
+
+
+# ------------------------------------------------------------------
+# Coverage: FieldInfo.__repr__ branches (_inspect.py:643-656)
+# ------------------------------------------------------------------
+
+
+class _PRepr(Struct):
+    a: int
+    b: str = "x"
+
+
+def test_fieldinfo_repr_required():
+    fi = structtype.fields(_PRepr)[0]
+    r = repr(fi)
+    assert "required=True" in r
+    assert "default=" not in r
+
+
+def test_fieldinfo_repr_default():
+    fi = structtype.fields(_PRepr)[1]
+    r = repr(fi)
+    assert "required=False" in r
+    assert "default='x'" in r
+
+
+class _PFactory(Struct):
+    xs: list = structtype.Factory(list)
+
+
+def test_fieldinfo_repr_factory():
+    fi = structtype.fields(_PFactory)[0]
+    r = repr(fi)
+    assert "required=False" in r
+    assert "default_factory=" in r
+
+
+# ------------------------------------------------------------------
+# Coverage: tuple[()] normalization (_inspect.py:1017)
+# ------------------------------------------------------------------
+def test_tuple_empty_tuple_args():
+    ti = mi.type_info(Tuple[()])
+    assert isinstance(ti, mi.TupleType)
+    assert ti.item_types == ()

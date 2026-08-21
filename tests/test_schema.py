@@ -29,7 +29,7 @@ import pytest
 
 import structtype
 from structtype import Field
-from structtype._json_schema import json_schema as make_schema, json_schema_components
+from structtype._json_schema import json_schema as make_schema, json_schema_components, json_schema_dump
 
 from .utils import py315_or_later_only, temp_module
 
@@ -1566,3 +1566,40 @@ def test_pydantic_with_alias():
             },
         },
     }
+
+
+# ------------------------------------------------------------------
+# Coverage: json_schema_dump body (_json_schema.py:119)
+# ------------------------------------------------------------------
+def test_json_schema_dump():
+    class _DumpTarget(structtype.Struct):
+        name: str
+        value: int
+
+    s = json_schema_dump(_DumpTarget)
+    assert isinstance(s, bytes)
+    assert b"_DumpTarget" in s
+
+
+# ------------------------------------------------------------------
+# Coverage: enum auto-docstring suppression (_json_schema.py:240)
+# ------------------------------------------------------------------
+class _ColorNoDoc(enum.Enum):
+    RED = 1
+    BLUE = 2
+
+
+class _ColorWithDoc(enum.Enum):
+    "Custom color enum."
+    RED = 1
+    BLUE = 2
+
+
+def test_enum_no_doc_no_description():
+    s = make_schema(_ColorNoDoc)
+    assert "description" not in s
+
+
+def test_enum_with_doc_has_description():
+    s = make_schema(_ColorWithDoc)
+    assert s["$defs"]["_ColorWithDoc"].get("description") == "Custom color enum."

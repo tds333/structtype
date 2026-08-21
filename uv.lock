@@ -1455,9 +1455,10 @@ dev = [
     { name = "attrs" },
     { name = "coverage" },
     { name = "msgspec" },
-    { name = "pydantic", marker = "python_full_version < '3.15'" },
+    { name = "pydantic", marker = "python_full_version < '3.16'" },
     { name = "pytest" },
     { name = "pytest-coverage" },
+    { name = "typing-extensions" },
 ]
 docs = [
     { name = "furo" },
@@ -1480,9 +1481,10 @@ dev = [
     { name = "attrs" },
     { name = "coverage" },
     { name = "msgspec" },
-    { name = "pydantic", marker = "python_full_version < '3.15'" },
+    { name = "pydantic", marker = "python_full_version < '3.16'" },
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-coverage", specifier = ">=0.0" },
+    { name = "typing-extensions" },
 ]
 docs = [
     { name = "furo" },

@@ -236,7 +236,7 @@ def _get_doc(t: Type) -> str:
         return ""
     doc = textwrap.dedent(doc).strip("\r\n")
     if isinstance(t, EnumType):
-        if doc == "An enumeration.":
+        if doc == "An enumeration.":  # pragma: no cover
             return ""
     elif isinstance(t, (NamedTupleType, DataclassType, PydanticType)) and (
         doc.startswith(f"{cls.__name__}(") and doc.endswith(")")
@@ -528,6 +528,6 @@ class _SchemaGenerator:
                 )
         else:
             # This should be unreachable
-            raise TypeError(f"json-schema doesn't support type {t!r}")
+            raise TypeError(f"json-schema doesn't support type {t!r}")  # pragma: no cover
 
         return schema

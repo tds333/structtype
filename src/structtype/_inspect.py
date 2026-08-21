@@ -815,7 +815,7 @@ def _origin_args_metadata(t):
                 args = None
                 break
 
-    if type(origin) is _types_UnionType:
+    if type(origin) is _types_UnionType:  # pragma: no cover
         args = origin.__args__
         origin = Union
     return origin, args, tuple(metadata)
@@ -829,7 +829,7 @@ def _sort_literal_args(args):
     # crashing.
     try:
         return tuple(sorted(args, key=lambda x: (type(x).__name__, x)))
-    except TypeError:
+    except TypeError:  # pragma: no cover
         return tuple(args)
 
 
@@ -852,14 +852,14 @@ def _is_pydantic(t):
 def _is_typeddict(t):
     try:
         return issubclass(t, dict) and hasattr(t, "__total__")
-    except TypeError:
+    except TypeError:  # pragma: no cover
         return False
 
 
 def _is_namedtuple(t):
     try:
         return issubclass(t, tuple) and hasattr(t, "_fields")
-    except TypeError:
+    except TypeError:  # pragma: no cover
         return False
 
 
@@ -1013,7 +1013,7 @@ class _Translator:
             # Handle an annoying compatibility issue:
             # - Tuple[()] has args == ((),)
             # - tuple[()] has args == ()
-            if args == ((),):
+            if args == ((),):  # pragma: no cover
                 args = ()
             if args is None:
                 return VarTupleType(

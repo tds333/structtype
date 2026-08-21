@@ -1,4 +1,5 @@
 import datetime
+from typing import Generic, TypeVar
 
 import pytest
 
@@ -6,6 +7,8 @@ pytest.importorskip("pydantic")
 
 from pydantic import BaseModel
 from structtype import Struct, StructAdapter
+
+_T = TypeVar("T")
 
 
 class User(BaseModel):
@@ -134,3 +137,33 @@ def test_pydantic_roundtrip():
     assert restored.owner.name == original.owner.name
     assert restored.owner.age == original.owner.age
     assert restored.items == original.items
+
+
+# ------------------------------------------------------------------
+# Coverage: pydantic parametrised alias + cache hit
+# (_inspect.py:1164-1166, _utils.py:341-342)
+# ------------------------------------------------------------------
+
+
+class _PM(BaseModel, Generic[_T]):
+    v: _T
+
+
+def test_pydantic_cache_hit():
+    from structtype._inspect import multi_type_info
+
+    result = multi_type_info([_PM[int], _PM[int]])
+    assert len(result) == 2
+    assert result[0] is result[1]
+
+
+def test_pydantic_typeinfo_alias():
+    from structtype._inspect import type_info
+
+    ti = type_info(_PM[int])
+    assert "v" in {f.name for f in ti.fields}
+
+
+def test_pydantic_adapter_generic():
+    ta = StructAdapter(_PM[int])
+    assert ta.struct_validate_json(b'{"v":42}').v == 42
