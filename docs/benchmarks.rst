@@ -110,6 +110,45 @@ The full benchmark source can be found
       msgspec                 4.1 μs   (1.00x)
       pydantic               21.8 μs   (5.31x)
 
+.. code-block:: text
+    :caption: Python 3.15t (free-threaded), structtype 0.5.1.dev21, msgspec 0.21.1, pydantic 2.13.4
+
+    Dump (struct → dict)
+    -------------------------------------------------------
+      structtype           1457.6 μs   (1.00x)
+      msgspec              1471.7 μs   (1.01x)
+      pydantic             6583.8 μs   (4.52x)
+
+    Load (dict → struct)
+    -------------------------------------------------------
+      structtype           1459.9 μs   (1.00x)
+      msgspec              1570.9 μs   (1.08x)
+      pydantic             8502.1 μs   (5.82x)
+
+    Dump JSON (struct → bytes)
+    -------------------------------------------------------
+      structtype           1004.4 μs   (1.00x)
+      msgspec              1123.8 μs   (1.12x)
+      pydantic             5056.6 μs   (5.03x)
+
+    Load JSON (bytes → struct)
+    -------------------------------------------------------
+      structtype           2527.6 μs   (1.00x)
+      msgspec              2624.4 μs   (1.04x)
+      pydantic            10573.1 μs   (4.18x)
+
+    Dump JSON (tagged union)
+    -------------------------------------------------------
+      structtype              1.5 μs   (1.00x)
+      msgspec                 1.7 μs   (1.17x)
+      pydantic               26.8 μs   (18.38x)
+
+    Load JSON (tagged union)
+    -------------------------------------------------------
+      structtype              4.0 μs   (1.01x)
+      msgspec                 4.0 μs   (1.00x)
+      pydantic               24.7 μs   (6.24x)
+
 For flat data, ``structtype`` and ``msgspec`` perform within ~5% of each other
 across all operations, while ``pydantic`` is 3–5x slower. The tagged union
 benchmark tells the same story: both libraries are essentially tied,
@@ -159,6 +198,25 @@ The full benchmark source can be found `here
 - For order comparison, structtype Structs are roughly 5x to 60x faster than the
   alternatives.
 
+.. code-block:: text
+    :caption: Python 3.15t (free-threaded), structtype 0.5.1.dev21, attrs 26.1.0, msgspec 0.21.1, pydantic 2.13.4
+
+    +----------------------+-------------+-------------+---------------+------------+
+    |                      | import (μs) | create (μs) | equality (μs) | order (μs) |
+    +======================+=============+=============+===============+============+
+    | **structtype**       | 26.38       | 0.07        | 0.02          | 0.03       |
+    +----------------------+-------------+-------------+---------------+------------+
+    | **msgspec**          | 23.85       | 0.08        | 0.02          | 0.04       |
+    +----------------------+-------------+-------------+---------------+------------+
+    | **standard classes** | 26.77       | 0.33        | 0.06          | 0.15       |
+    +----------------------+-------------+-------------+---------------+------------+
+    | **attrs**            | 539.42      | 0.27        | 0.05          | 1.74       |
+    +----------------------+-------------+-------------+---------------+------------+
+    | **dataclasses**      | 460.36      | 0.30        | 0.05          | 0.12       |
+    +----------------------+-------------+-------------+---------------+------------+
+    | **pydantic**         | 398.79      | 1.40        | 0.98          | N/A        |
+    +----------------------+-------------+-------------+---------------+------------+
+
 .. _struct-gc-benchmark:
 
 Garbage Collection
@@ -189,6 +247,19 @@ The full benchmark source can be found `here
 - `structtype.Struct` instances have the same memory layout as a class with
   ``__slots__`` (and thus have the same memory usage), but due to deferred GC
   tracking a full GC pass completes in a fraction of the time.
+
+.. code-block:: text
+    :caption: Python 3.15t (free-threaded), structtype 0.5.1.dev21
+
+    +-----------------------------------+--------------+-------------------+
+    |                                   | GC time (ms) | Memory Used (MiB) |
+    +===================================+==============+===================+
+    | **standard class**                | 111.05       | 219.29            |
+    +-----------------------------------+--------------+-------------------+
+    | **standard class with __slots__** | 88.29        | 135.37            |
+    +-----------------------------------+--------------+-------------------+
+    | **structtype struct**             | 61.21        | 135.37            |
+    +-----------------------------------+--------------+-------------------+
 
 .. _structtype: https://structtype.dev
 .. _msgspec: https://jcristharif.com/msgspec/
