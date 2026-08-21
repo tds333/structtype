@@ -69,6 +69,16 @@ html_theme_options = {
     "sidebar_hide_name": True,
     "footer_icons": [
         {
+            "name": "PyPI",
+            "url": "https://pypi.org/project/structtype/",
+            "html": """
+<svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 16 16">
+  <path d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0zm0 3.5h-2a.25.25 0 0 0-.25.25V6h11V3.75a.25.25 0 0 0-.25-.25h-8.5zm-2.75 4v6.75c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V7.5zm4.75 2.5a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0v-1.5h-1.5a.75.75 0 0 1 0-1.5h1.5v-1.5a.75.75 0 0 1 .75-.75z"/>
+</svg>
+""".strip(),
+            "class": "",
+        },
+        {
             "name": "GitHub",
             "url": "https://github.com/tds333/structtype",
             "html": GITHUB_LOGO,

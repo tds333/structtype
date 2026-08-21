@@ -1,5 +1,9 @@
 # structtype
 
+[![PyPI version](https://img.shields.io/pypi/v/structtype)](https://pypi.org/project/structtype/)
+[![Python versions](https://img.shields.io/pypi/pyversions/structtype)](https://pypi.org/project/structtype/)
+[![Build status](https://img.shields.io/github/actions/workflow/status/tds333/structtype/build.yml?branch=main)](https://github.com/tds333/structtype/actions/workflows/build.yml)
+
 Fast Struct type with validation + JSON serialization for Python.
 
 - **High performance** — 5-60x faster than dataclasses, attrs, or pydantic for common operations
@@ -54,8 +58,11 @@ structtype is as fast as msgspec and about 3-5x faster than pydantic. See the
 
 ## Links
 
+- [Documentation](https://tds333.github.io/structtype/)
 - [Changelog](https://tds333.github.io/structtype/changelog.html)
+- [PyPI](https://pypi.org/project/structtype/)
 - [Source code](https://github.com/tds333/structtype)
+- [Issue tracker](https://github.com/tds333/structtype/issues)
 
 ## License
 

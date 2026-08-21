@@ -33,9 +33,11 @@ dynamic = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tds333/structtype"
+Homepage = "https://tds333.github.io/structtype/"
+Documentation = "https://tds333.github.io/structtype/"
+Repository = "https://github.com/tds333/structtype"
+Changelog = "https://tds333.github.io/structtype/changelog.html"
 "Issue Tracker" = "https://github.com/tds333/structtype/issues"
-Source = "https://github.com/tds333/structtype"
 
 [dependency-groups]
 dev = [
