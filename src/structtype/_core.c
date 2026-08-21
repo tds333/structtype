@@ -9348,7 +9348,7 @@ found_val:
  * Shared Encoder structs/methods                                        *
  *************************************************************************/
 
-#define ENC_INIT_BUFSIZE 32
+#define ENC_INIT_BUFSIZE 256
 #define ENC_LINES_INIT_BUFSIZE 1024
 
 enum decimal_format {
@@ -9398,8 +9398,8 @@ ms_resize_bytes(PyObject** output_buffer, Py_ssize_t size)
 static MS_NOINLINE int
 ms_resize(EncoderState *self, Py_ssize_t size)
 {
-    /* Calculate growth: size + size/2, with overflow check */
-    Py_ssize_t growth = size / 2;
+    /* Calculate growth: 2x (was size + size/2), with overflow check */
+    Py_ssize_t growth = size;
     if (size > PY_SSIZE_T_MAX - growth) {
         PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
         return -1;
