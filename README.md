@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/structtype)](https://pypi.org/project/structtype/)
 [![Build status](https://img.shields.io/github/actions/workflow/status/tds333/structtype/build.yml?branch=main)](https://github.com/tds333/structtype/actions/workflows/build.yml)
 
-Fast Struct type with validation + JSON serialization for Python.
+Fast data struct type with validation + JSON serialization for Python.
 
 - **High performance** — 5-60x faster than dataclasses, attrs, or pydantic for common operations
 - **Schema validation** — familiar Python type annotations, enforced at decode time
