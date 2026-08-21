@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-08-21)
 
 - **Breaking:** rename `__struct_encode_fields__` to `__struct_alias_fields__`
   for consistency with the alias terminology. Internal C identifiers are also
