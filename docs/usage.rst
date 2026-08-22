@@ -399,14 +399,14 @@ You can also validate an existing struct instance at any time using
 
     ``struct_validate_self`` never modifies the struct — it only validates.
 
-    For custom types annotated with ``Serializer(load=...)``, the load callable is
-    called when a field value is **not** already an instance of the expected
-    type. The load callable may convert the value, but the converted result is
-    **discarded** — the field keeps its original value. This is intentional:
-    ``struct_validate_self`` is for *detecting* type mismatches, not fixing them.
-    (Contrast with :meth:`Struct.struct_validate` and
-    :meth:`Struct.struct_validate_json`, which construct a new struct using the
-    load callable's converted value.)
+    ``struct_validate_self`` is a **pure type check**: if a custom-typed
+    field's value is not already an instance of the declared type, a
+    ``ValidationError`` is raised immediately.  ``Serializer.load`` and
+    protocol fallbacks (``struct_validate``/``model_validate`` methods)
+    are **not** called — use ``struct_validate`` or
+    ``struct_validate_json`` when you need conversion.
+
+    Any annotated ``Validator`` **is** called on correctly-typed values.
 
 
 Pattern Matching

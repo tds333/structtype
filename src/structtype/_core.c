@@ -10500,7 +10500,13 @@ PyDoc_STRVAR(Struct_validate_self__doc__,
 "Validate this struct's fields against their declared types.\n"
 "\n"
 "Raises a ``ValidationError`` if any field's value does not match its\n"
-"declared type.\n"
+"declared type.  No type conversion is performed: if the value is not\n"
+"already an instance of the declared custom type, the error is raised\n"
+"immediately (``Serializer.load`` and protocol fallbacks are skipped).\n"
+"Any annotated ``Validator`` is still called on correctly-typed values.\n"
+"\n"
+"If ``validate_on_init=True`` was set on the struct class, this\n"
+"check is also performed at construction time.\n"
 );
 
 static PyMethodDef Struct_methods[] = {
@@ -12079,6 +12085,61 @@ ms_decode_int(int64_t x, TypeNode *type, PathNode *path) {
         return ms_decode_constr_int(x, type, path);
     }
     return PyLong_FromLongLong(x);
+}
+
+/* Pure type-check path for struct_validate_self / validate_on_init:
+ * isinstance-checks the value against the custom type and raises on
+ * mismatch.  No conversion (load, protocol, auto-coerce) is performed.
+ * Any annotated user validator (MS_CONSTR_USER_VALIDATOR) is still called
+ * on the already-typed value. */
+static PyObject *
+ms_decode_custom_check_only(PyObject *obj, TypeNode *type, PathNode *path) {
+    bool generic = type->types & MS_TYPE_CUSTOM_GENERIC;
+
+    if (obj == NULL) return NULL;
+
+    /* Optional types: None is valid without isinstance check */
+    if (obj == Py_None && type->types & MS_TYPE_NONE) return obj;
+
+    /* Resolve the custom class */
+    PyObject *custom_cls;
+    if (generic) {
+        StructspecState *st = structtype_get_global_state();
+        PyObject *custom_obj = TypeNode_get_custom(type);
+        custom_cls = PyObject_GetAttr(custom_obj, st->str___origin__);
+        if (custom_cls == NULL) {
+            Py_DECREF(obj);
+            return NULL;
+        }
+    }
+    else {
+        custom_cls = TypeNode_get_custom(type);
+    }
+
+    /* Pure isinstance check — no conversion */
+    int status = PyObject_IsInstance(obj, custom_cls);
+    if (status < 0) {
+        Py_DECREF(obj);
+        if (generic) Py_DECREF(custom_cls);
+        return NULL;
+    }
+    if (status == 0) {
+        ms_raise_validation_error(
+            path,
+            "Expected `%s`, got `%s`%U",
+            ((PyTypeObject *)custom_cls)->tp_name,
+            Py_TYPE(obj)->tp_name
+        );
+        Py_CLEAR(obj);
+    }
+
+    /* Run any annotated user validator */
+    if (obj != NULL && type->types & MS_CONSTR_USER_VALIDATOR) {
+        obj = ms_call_user_validator(obj, type, path);
+    }
+
+    if (generic) Py_DECREF(custom_cls);
+    return obj;
 }
 
 static MS_NOINLINE PyObject *
@@ -18998,6 +19059,7 @@ typedef struct ValidateState {
     bool str_keys;
     bool from_attributes;
     bool strict;
+    bool check_types_only;
 } ValidateState;
 
 static PyObject * validate_obj(ValidateState *, PyObject *, TypeNode *, PathNode *);
@@ -20485,6 +20547,9 @@ validate_obj_dispatch(
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_ANY))) {
         Py_INCREF(obj);
         if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
+            if (self->check_types_only) {
+                return ms_decode_custom_check_only(obj, type, path);
+            }
             return ms_decode_custom(obj, type, path);
         }
         return obj;
@@ -20601,6 +20666,7 @@ structtype_validate(PyObject *self, PyObject *args, PyObject *kwargs)
     state.builtin_types = 0;
     state.from_attributes = from_attributes;
     state.strict = strict;
+    state.check_types_only = false;
     if (strict) {
         state.str_keys = str_keys;
         if (ms_process_builtin_types(state.mod, builtin_types, &(state.builtin_types), NULL) < 0) {
@@ -20799,6 +20865,7 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
     state.from_attributes = from_attributes;
     state.str_keys = strict ? false : true;
     state.builtin_types = 0;
+    state.check_types_only = false;
 
     if (ms_is_struct_cls(cls)) {
         PyObject *info = StructInfo_Convert(cls);
@@ -20888,6 +20955,7 @@ struct_check_recursive(
         state.from_attributes = 0;
         state.str_keys = 0;
         state.builtin_types = 0;
+        state.check_types_only = true;
         PyObject *out = validate_obj(&state, val, field_type, &field_path);
         if (out == NULL) {
             ret = -1;

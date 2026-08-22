@@ -164,12 +164,10 @@ definition enables type and constraint checking during ``__init__``:
 
 .. note::
 
-    For custom types annotated with ``Serializer(load=...)``, the load callable is
-    called when a field value is **not** already an instance of the expected
-    type. The load callable may convert the value, but the converted result is
-    **discarded** — the field keeps its original value. This is the same
-    behavior as ``struct_validate_self`` (both use the same validation logic).
-    If you need the converted value stored back, use ``struct_validate`` or
+    For custom types annotated with ``Serializer(load=...)``, if a field
+    value is **not** already an instance of the expected type, a
+    ``ValidationError`` is raised immediately — ``load`` is **not** called.
+    If you need type coercion, use ``struct_validate`` or
     ``struct_validate_json`` instead.
 
 While convenient, this adds overhead to every ``__init__`` call. Prefer static

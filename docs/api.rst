@@ -193,6 +193,7 @@ Serializer
     :members:
 
     .. attribute:: dump
+        :no-index:
 
         :type: Callable[[Any], Any] | None
 
@@ -205,25 +206,21 @@ Serializer
         ``StructAdapter``. See :doc:`extending`.
 
     .. attribute:: load
+        :no-index:
 
         :type: Callable[[Any], Any] | None
 
         A callable converting a value composed of natively supported types
         back into a custom-type value. Called during decoding
-        (``struct_validate`` / ``struct_validate_json``) and during
-        ``struct_validate_self`` when the field value is not already an instance
-        of the custom type. Only valid for custom types; attaching a
-        ``load`` codec to a natively supported type or a union (including
-        optional types such as ``Annotated[complex | None, ...]``) raises
-        a ``TypeError`` — at class creation time for ``Struct``, at construction
-        for ``StructAdapter``. See :doc:`extending`.
-
-        .. note::
-
-            In ``struct_validate_self`` the loader's converted value is
-            discarded — the struct instance is not modified. Use
-            ``struct_validate`` / ``struct_validate_json`` when you need the
-            converted value stored back into a (new) struct.
+        (``struct_validate`` / ``struct_validate_json``). In
+        ``struct_validate_self`` / ``validate_on_init``, if the field value is
+        not already an instance of the custom type, a ``ValidationError`` is
+        raised instead — ``load`` is **not** called. Only valid for custom
+        types; attaching a ``load`` codec to a natively supported type or a
+        union (including optional types such as
+        ``Annotated[complex | None, ...]``) raises a ``TypeError`` — at
+        class creation time for ``Struct``, at construction for
+        ``StructAdapter``. See :doc:`extending`.
 
 
 Validator
@@ -237,6 +234,34 @@ NumericValidator
 ----------------
 
 .. autoclass:: NumericValidator
+    :members:
+
+
+StrValidator
+------------
+
+.. autoclass:: StrValidator
+    :members:
+
+
+BytesValidator
+--------------
+
+.. autoclass:: BytesValidator
+    :members:
+
+
+CollectionValidator
+-------------------
+
+.. autoclass:: CollectionValidator
+    :members:
+
+
+TimezoneValidator
+-----------------
+
+.. autoclass:: TimezoneValidator
     :members:
 
 

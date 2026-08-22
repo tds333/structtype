@@ -37,6 +37,15 @@
   annotation position; cross-kind combinations encouraged. Passing constraint
   params to `Field` now raises `TypeError`.
 
+- **Breaking:** `struct_validate_self()` and `validate_on_init=True` are now
+  pure type-checks. If a custom-typed field's value is not already an instance
+  of the declared type, a `ValidationError` is raised immediately —
+  `Serializer.load` and protocol fallbacks (`struct_validate`/`model_validate`)
+  methods are **not** called. Any annotated `Validator` is still invoked on
+  correctly-typed values. Previously, `load` was called and its converted result
+  silently discarded; this was wasteful and conflated conversion with
+  validation.
+
 ## 0.6.0 (2026-08-21)
 
 - **Breaking:** rename `__struct_encode_fields__` to `__struct_alias_fields__`

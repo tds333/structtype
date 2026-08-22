@@ -1268,6 +1268,150 @@ class TestUserValidatorInvocation:
         assert calls == []
 
 
+class TestValidateSelfCheckTypesOnly:
+    """struct_validate_self and validate_on_init are pure type-checks:
+    no Serializer.load, no protocol conversion, only isinstance + Validators."""
+
+    def test_custom_field_wrong_type_raises(self):
+        calls = []
+
+        class Color:
+            def __init__(self, v):
+                self.v = v
+
+        ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
+
+        class Ex(Struct, validate_on_init=True):
+            c: Annotated[Color, ser]
+
+        # validate_on_init should raise because "blue" isn't a Color
+        with pytest.raises(ValidationError, match="Expected `Color`, got `str`"):
+            Ex("blue")
+        assert calls == []  # load was NOT called
+
+    def test_custom_field_correct_type_passes(self):
+        calls = []
+
+        class Color:
+            def __init__(self, v):
+                self.v = v
+
+        ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
+
+        class Ex(Struct, validate_on_init=True):
+            c: Annotated[Color, ser]
+
+        # Already the right type — passes, load not called
+        Ex(Color("red")).struct_validate_self()
+        assert calls == []
+
+    def test_validate_self_raises_on_wrong_type(self):
+        calls = []
+
+        class Color:
+            def __init__(self, v):
+                self.v = v
+
+        ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
+
+        class Ex(Struct):
+            c: Annotated[Color, ser]
+
+        ex = Ex(Color("x"))
+        ex.c = "blue"  # bypass type safety
+        with pytest.raises(ValidationError, match="Expected `Color`, got `str`"):
+            ex.struct_validate_self()
+        assert calls == []  # load was NOT called
+
+    def test_protocol_not_called_on_mismatch(self):
+        calls = []
+
+        class Color:
+            @classmethod
+            def struct_validate(cls, d):
+                calls.append("protocol")
+                return cls(d["v"])
+
+        class Ex(Struct, validate_on_init=True):
+            c: Color
+
+        with pytest.raises(ValidationError, match="Expected `Color`, got `dict`"):
+            Ex({"v": 1})
+        assert calls == []  # protocol was NOT called
+
+    def test_optional_none_passes(self):
+        class Color:
+            def __init__(self, v):
+                self.v = v
+
+        class Ex(Struct, validate_on_init=True):
+            c: Optional[Annotated[Color, Serializer(load=Color)]]
+
+        # None is valid for Optional[Color]
+        Ex(None).struct_validate_self()
+
+    def test_validator_called_on_correct_type(self):
+        seen = []
+
+        class Color:
+            def __init__(self, v):
+                self.v = v
+
+        class Ex(Struct, validate_on_init=True):
+            c: Annotated[Color, Serializer(load=Color), Validator(lambda v: seen.append(v.v))]
+
+        Ex(Color("ok"))
+        assert seen == ["ok"]  # called once during construction
+
+    def test_validate_json_still_converts(self):
+        """struct_validate_json must still call load (conversion)."""
+        calls = []
+
+        class Color:
+            def __init__(self, v):
+                self.v = v
+
+        ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
+
+        class Ex(Struct):
+            c: Annotated[Color, ser]
+
+        Ex.struct_validate_json(b'{"c": "blue"}')
+        assert calls == ["load"]  # load WAS called in json path
+
+    def test_struct_validate_still_converts(self):
+        """struct_validate must still call load (conversion)."""
+        calls = []
+
+        class Color:
+            def __init__(self, v):
+                self.v = v
+
+        ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
+
+        class Ex(Struct):
+            c: Annotated[Color, ser]
+
+        Ex.struct_validate({"c": "blue"})
+        assert calls == ["load"]  # load WAS called in struct_validate path
+
+    def test_validate_on_init_raises(self):
+        calls = []
+
+        class Color:
+            def __init__(self, v):
+                self.v = v
+
+        ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
+
+        class Ex(Struct, validate_on_init=True):
+            c: Annotated[Color, ser]
+
+        with pytest.raises(ValidationError):
+            Ex("blue")
+        assert calls == []  # load was NOT called on constructor
+
+
 class TestCompositionRules:
     """Class-creation enforcement of at most one Field, Serializer, Validator
     per annotation position."""
