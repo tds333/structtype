@@ -155,6 +155,86 @@ def test_bad_kwarg_raises():
         p.struct_validate_self(bad=True)
 
 
+# ── union fields ──
+
+
+def test_struct_union_valid_member_passes():
+    class A(Struct, tag="a"):
+        a: int
+
+    class B(Struct, tag="b"):
+        b: str
+
+    class AB(Struct, validate_on_init=True):
+        x: A | B
+
+    ab = AB(A(1))
+    assert ab.struct_validate_self() is None
+
+    ab2 = AB(B("hi"))
+    assert ab2.struct_validate_self() is None
+
+
+def test_struct_union_none_passes():
+    class A(Struct, tag="a"):
+        a: int
+
+    class AO(Struct, validate_on_init=True):
+        x: A | None
+
+    AO(None).struct_validate_self()
+    AO(A(1)).struct_validate_self()
+
+
+def test_struct_union_non_member_rejected():
+    class A(Struct, tag="a"):
+        a: int
+
+    class B(Struct, tag="b"):
+        b: str
+
+    class AB(Struct):
+        x: A | B
+
+    class C(Struct):
+        c: float
+
+    ab = AB(A(1))
+    ab.x = C(1.5)  # C is NOT a member of A|B
+    with pytest.raises(ValidationError):
+        ab.struct_validate_self()
+
+
+def test_struct_union_non_member_at_init():
+    class A(Struct, tag="a"):
+        a: int
+
+    class B(Struct, tag="b"):
+        b: str
+
+    class C(Struct):
+        c: float
+
+    class AB(Struct, validate_on_init=True):
+        x: A | B
+
+    with pytest.raises(ValidationError):
+        AB(C(1.5))
+
+
+def test_struct_union_nested_field_mutation_caught():
+    class A(Struct, tag="a"):
+        a: int
+
+    class AB(Struct, validate_on_init=True):
+        x: A | None
+
+    ab = AB(A(1))
+    ab.x.a = "bad"
+    with pytest.raises(ValidationError):
+        ab.struct_validate_self()
+
+
 # ── frozen struct ──
 
 

@@ -20930,11 +20930,16 @@ struct_check_recursive(
                 continue;
             }
         }
-        /* Struct union fields (e.g. Point | None, A | B): recurse if value is a struct */
+        /* Struct union fields (e.g. Point | None, A | B): recurse if value
+         * is a struct AND is actually a member of the union (not just any
+         * struct instance). */
         else if (
             field_type->types & (MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION)
         ) {
-            if (ms_is_struct_inst(val)) {
+            Lookup *lookup = TypeNode_get_struct_union(field_type);
+            if (ms_is_struct_inst(val) &&
+                Lookup_union_contains_type(lookup, Py_TYPE(val)))
+            {
                 ret = struct_check_recursive(val, mod, &field_path);
                 if (ret == 0 && field_type->types & MS_CONSTR_USER_VALIDATOR) {
                     Py_INCREF(val);
