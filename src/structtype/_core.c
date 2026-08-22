@@ -1695,6 +1695,10 @@ ensure_is_finite_numeric(PyObject *val, const char *param, bool positive) {
     double x;
     if (PyLong_CheckExact(val)) {
         x = PyLong_AsDouble(val);
+        if (x == -1.0 && PyErr_Occurred()) {
+            /* e.g. an int too large for a float */
+            return false;
+        }
     }
     else if (PyFloat_CheckExact(val)) {
         x = PyFloat_AS_DOUBLE(val);
@@ -2023,21 +2027,13 @@ static PyTypeObject Field_Type;
 
 typedef struct {
     PyObject_HEAD
-    /* Constraint/metadata fields */
-    PyObject *gt, *ge, *lt, *le, *multiple_of;
-    PyObject *pattern, *regex;
-    PyObject *min_length, *max_length, *tz;
     PyObject *title, *description, *examples, *deprecated;
     PyObject *json_schema_extra;
-    /* Field-specific fields */
     PyObject *alias;
-    /* Codec callables: custom <-> native conversion */
-    PyObject *dump;      /* custom object -> serializable value */
-    PyObject *validate;  /* serializable value -> custom object */
 } Field;
 
 PyDoc_STRVAR(Field__doc__,
-"Configuration for a Struct field.\n"
+"Configuration for a Struct field identity and json-schema metadata.\n"
 "\n"
 "Parameters\n"
 "----------\n"
@@ -2045,29 +2041,6 @@ PyDoc_STRVAR(Field__doc__,
 "    An alternative name to use when encoding/decoding this field.\n"
 "    If present, this will override any struct-level configuration using\n"
 "    the ``rename`` option for this field.\n"
-"gt : int or float, optional\n"
-"    The annotated value must be greater than ``gt``.\n"
-"ge : int or float, optional\n"
-"    The annotated value must be greater than or equal to ``ge``.\n"
-"lt : int or float, optional\n"
-"    The annotated value must be less than ``lt``.\n"
-"le : int or float, optional\n"
-"    The annotated value must be less than or equal to ``le``.\n"
-"multiple_of : int or float, optional\n"
-"    The annotated value must be a multiple of ``multiple_of``.\n"
-"pattern : str, optional\n"
-"    A regex pattern that the annotated value must match against.\n"
-"    Note that the pattern is treated as **unanchored**, meaning the\n"
-"    ``re.search`` method is used when matching.\n"
-"min_length : int, optional\n"
-"    The annotated value must have a length >= ``min_length``.\n"
-"max_length : int, optional\n"
-"    The annotated value must have a length <= ``max_length``.\n"
-"tz : bool, optional\n"
-"    Configures the timezone-requirements for annotated ``datetime``/\n"
-"    ``time`` types. Set to ``True`` to require timezone-aware values,\n"
-"    or ``False`` to require timezone-naive values. The default is\n"
-"    ``None``, which accepts either.\n"
 "title : str, optional\n"
 "    The title to use for the annotated value when generating a\n"
 "    json-schema.\n"
@@ -2086,113 +2059,45 @@ PyDoc_STRVAR(Field__doc__,
 "\n"
 "Examples\n"
 "--------\n"
-"Here we use ``Field`` to add constraints on two different types. The first\n"
-"defines a new type alias ``NonNegativeInt``, which is an integer that must be\n"
-"``>= 0``. This type alias can be reused in multiple locations. The second uses\n"
-"``Field`` inline in a struct definition to restrict the ``name`` string field\n"
-"to a maximum length of 32 characters.\n"
-"\n"
 ">>> from typing import Annotated\n"
 ">>> from structtype import Struct, Field\n"
-">>> NonNegativeInt = Annotated[int, Field(ge=0)]\n"
 ">>> class User(Struct):\n"
-"...     name: Annotated[str, Field(max_length=32)]\n"
-"...     age: NonNegativeInt\n"
+"...     name: Annotated[str, Field(alias=\"user_name\")]\n"
 "...\n"
-">>> User.struct_validate_json(b'{\"name\": \"alice\", \"age\": 25}')\n"
-"User(name='alice', age=25)\n"
+">>> User.struct_validate_json(b'{\"user_name\": \"alice\"}')\n"
+"User(name='alice')\n"
 );
 static PyObject *
 Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     char *kwlist[] = {
-        "gt", "ge", "lt", "le", "multiple_of",
-        "pattern", "min_length", "max_length", "tz",
         "alias",
         "title", "description", "examples", "json_schema_extra",
         "deprecated",
-        "dump", "validate",
         NULL
     };
-    PyObject *gt = NULL, *ge = NULL, *lt = NULL, *le = NULL, *multiple_of = NULL;
-    PyObject *pattern = NULL, *min_length = NULL, *max_length = NULL, *tz = NULL;
     PyObject *alias = Py_None;
     PyObject *title = NULL, *description = NULL, *examples = NULL;
     PyObject *deprecated = NULL;
     PyObject *json_schema_extra = NULL;
-    PyObject *regex = NULL;
-    PyObject *dump = NULL, *validate = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|$OOOOOOOOOOOOOOOOO:Field.__new__", kwlist,
-            &gt, &ge, &lt, &le, &multiple_of,
-            &pattern, &min_length, &max_length, &tz,
+            args, kwargs, "|$OOOOOO:Field.__new__", kwlist,
             &alias,
             &title, &description, &examples, &json_schema_extra,
-            &deprecated,
-            &dump, &validate
+            &deprecated
         )
     )
         return NULL;
 
 #define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
-    NONE_TO_NULL(gt);
-    NONE_TO_NULL(ge);
-    NONE_TO_NULL(lt);
-    NONE_TO_NULL(le);
-    NONE_TO_NULL(multiple_of);
-    NONE_TO_NULL(pattern);
-    NONE_TO_NULL(min_length);
-    NONE_TO_NULL(max_length);
-    NONE_TO_NULL(tz);
     NONE_TO_NULL(title);
     NONE_TO_NULL(description);
     NONE_TO_NULL(examples);
     NONE_TO_NULL(deprecated);
     NONE_TO_NULL(json_schema_extra);
-    NONE_TO_NULL(dump);
-    NONE_TO_NULL(validate);
 #undef NONE_TO_NULL
 
-    if (dump != NULL && !PyCallable_Check(dump)) {
-        PyErr_SetString(PyExc_TypeError, "dump must be callable");
-        return NULL;
-    }
-    if (validate != NULL && !PyCallable_Check(validate)) {
-        PyErr_SetString(PyExc_TypeError, "validate must be callable");
-        return NULL;
-    }
-
-    /* Check constraint parameter types/values */
-    if (gt != NULL && !ensure_is_finite_numeric(gt, "gt", false)) return NULL;
-    if (ge != NULL && !ensure_is_finite_numeric(ge, "ge", false)) return NULL;
-    if (lt != NULL && !ensure_is_finite_numeric(lt, "lt", false)) return NULL;
-    if (le != NULL && !ensure_is_finite_numeric(le, "le", false)) return NULL;
-    if (multiple_of != NULL && !ensure_is_finite_numeric(multiple_of, "multiple_of", true)) return NULL;
-    if (pattern != NULL && !ensure_is_string(pattern, "pattern")) return NULL;
-    if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
-    if (max_length != NULL && !ensure_is_nonnegative_integer(max_length, "max_length")) return NULL;
-    if (tz != NULL && !ensure_is_bool(tz, "tz")) return NULL;
     if (deprecated != NULL && !ensure_is_bool(deprecated, "deprecated")) return NULL;
-
-    /* Check multiple constraint restrictions */
-    if (gt != NULL && ge != NULL) {
-        PyErr_SetString(PyExc_ValueError, "Cannot specify both `gt` and `ge`");
-        return NULL;
-    }
-    if (lt != NULL && le != NULL) {
-        PyErr_SetString(PyExc_ValueError, "Cannot specify both `lt` and `le`");
-        return NULL;
-    }
-    bool numeric = (gt != NULL || ge != NULL || lt != NULL || le != NULL || multiple_of != NULL);
-    bool other = (pattern != NULL || min_length != NULL || max_length != NULL || tz != NULL);
-    if (numeric && other) {
-        PyErr_SetString(
-            PyExc_ValueError,
-            "Cannot mix numeric constraints (gt, lt, ...) with non-numeric "
-            "constraints (pattern, min_length, max_length, tz)"
-        );
-        return NULL;
-    }
 
     /* Check Field-specific defaults */
     if (alias == Py_None) {
@@ -2223,31 +2128,12 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
         return NULL;
     }
 
-    /* regex compile pattern if provided */
-    if (pattern != NULL) {
-        StructspecState *mod = structtype_get_global_state();
-        regex = PyObject_CallOneArg(mod->re_compile, pattern);
-        if (regex == NULL) return NULL;
-    }
-
     Field *self = (Field *)Field_Type.tp_alloc(&Field_Type, 0);
     if (self == NULL) {
-        Py_XDECREF(regex);
         return NULL;
     }
 
 #define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
-#define SET_FIELD_OWNED(x) do { self->x = x; } while(0)
-    SET_FIELD(gt);
-    SET_FIELD(ge);
-    SET_FIELD(lt);
-    SET_FIELD(le);
-    SET_FIELD(multiple_of);
-    SET_FIELD(pattern);
-    SET_FIELD_OWNED(regex);
-    SET_FIELD(min_length);
-    SET_FIELD(max_length);
-    SET_FIELD(tz);
     Py_XINCREF(alias);
     self->alias = alias;
     SET_FIELD(title);
@@ -2255,10 +2141,7 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     SET_FIELD(examples);
     SET_FIELD(deprecated);
     SET_FIELD(json_schema_extra);
-    SET_FIELD(dump);
-    SET_FIELD(validate);
 #undef SET_FIELD
-#undef SET_FIELD_OWNED
 
     return (PyObject *)self;
 }
@@ -2275,23 +2158,12 @@ Field_repr(Field *self) {
         } \
     } \
 } while(0)
-    DO_REPR(gt);
-    DO_REPR(ge);
-    DO_REPR(lt);
-    DO_REPR(le);
-    DO_REPR(multiple_of);
-    DO_REPR(pattern);
-    DO_REPR(min_length);
-    DO_REPR(max_length);
-    DO_REPR(tz);
+    DO_REPR(alias);
     DO_REPR(title);
     DO_REPR(description);
     DO_REPR(examples);
     DO_REPR(deprecated);
     DO_REPR(json_schema_extra);
-    DO_REPR(alias);
-    DO_REPR(dump);
-    DO_REPR(validate);
 #undef DO_REPR
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
@@ -2313,23 +2185,12 @@ Field_rich_repr(PyObject *py_self, PyObject *args) {
         Py_DECREF(part);\
         if (ret < 0) goto error;\
     } } while(0)
-    DO_REPR(gt);
-    DO_REPR(ge);
-    DO_REPR(lt);
-    DO_REPR(le);
-    DO_REPR(multiple_of);
-    DO_REPR(pattern);
-    DO_REPR(min_length);
-    DO_REPR(max_length);
-    DO_REPR(tz);
+    DO_REPR(alias);
     DO_REPR(title);
     DO_REPR(description);
     DO_REPR(examples);
     DO_REPR(deprecated);
     DO_REPR(json_schema_extra);
-    DO_REPR(alias);
-    DO_REPR(dump);
-    DO_REPR(validate);
 #undef DO_REPR
     return out;
 error:
@@ -2357,23 +2218,12 @@ Field_richcompare(Field *self, PyObject *py_other, int op) {
         if (equal < 0) return NULL; \
         if (!equal) goto done; \
     } while (0)
-        DO_COMPARE(gt);
-        DO_COMPARE(ge);
-        DO_COMPARE(lt);
-        DO_COMPARE(le);
-        DO_COMPARE(multiple_of);
-        DO_COMPARE(pattern);
-        DO_COMPARE(min_length);
-        DO_COMPARE(max_length);
-        DO_COMPARE(tz);
+        DO_COMPARE(alias);
         DO_COMPARE(title);
         DO_COMPARE(description);
         DO_COMPARE(examples);
         DO_COMPARE(deprecated);
         DO_COMPARE(json_schema_extra);
-        DO_COMPARE(alias);
-        DO_COMPARE(dump);
-        DO_COMPARE(validate);
     }
 #undef DO_COMPARE
 done:
@@ -2401,22 +2251,11 @@ Field_hash(Field *self) {
         acc *= MS_HASH_XXPRIME_1; \
         nfields += 1; \
     }
-    DO_HASH(gt);
-    DO_HASH(ge);
-    DO_HASH(lt);
-    DO_HASH(le);
-    DO_HASH(multiple_of);
-    DO_HASH(pattern);
-    DO_HASH(min_length);
-    DO_HASH(max_length);
-    DO_HASH(tz);
+    DO_HASH(alias);
     DO_HASH(title);
     DO_HASH(description);
     DO_HASH(deprecated);
     /* Leave out examples & json_schema_extra, since they could be unhashable */
-    DO_HASH(alias);
-    DO_HASH(dump);
-    DO_HASH(validate);
 #undef DO_HASH
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
@@ -2430,48 +2269,24 @@ static PyMethodDef Field_methods[] = {
 static int
 Field_traverse(Field *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->gt);
-    Py_VISIT(self->ge);
-    Py_VISIT(self->lt);
-    Py_VISIT(self->le);
-    Py_VISIT(self->multiple_of);
-    Py_VISIT(self->pattern);
-    Py_VISIT(self->regex);
-    Py_VISIT(self->min_length);
-    Py_VISIT(self->max_length);
-    Py_VISIT(self->tz);
     Py_VISIT(self->title);
     Py_VISIT(self->description);
     Py_VISIT(self->examples);
     Py_VISIT(self->deprecated);
     Py_VISIT(self->json_schema_extra);
     Py_VISIT(self->alias);
-    Py_VISIT(self->dump);
-    Py_VISIT(self->validate);
     return 0;
 }
 
 static int
 Field_clear(Field *self)
 {
-    Py_CLEAR(self->gt);
-    Py_CLEAR(self->ge);
-    Py_CLEAR(self->lt);
-    Py_CLEAR(self->le);
-    Py_CLEAR(self->multiple_of);
-    Py_CLEAR(self->pattern);
-    Py_CLEAR(self->regex);
-    Py_CLEAR(self->min_length);
-    Py_CLEAR(self->max_length);
-    Py_CLEAR(self->tz);
     Py_CLEAR(self->title);
     Py_CLEAR(self->description);
     Py_CLEAR(self->examples);
     Py_CLEAR(self->deprecated);
     Py_CLEAR(self->json_schema_extra);
     Py_CLEAR(self->alias);
-    Py_CLEAR(self->dump);
-    Py_CLEAR(self->validate);
     return 0;
 }
 
@@ -2484,26 +2299,13 @@ Field_dealloc(Field *self)
 }
 
 static PyMemberDef Field_members[] = {
-    {"gt", T_OBJECT, offsetof(Field, gt), READONLY, NULL},
-    {"ge", T_OBJECT, offsetof(Field, ge), READONLY, NULL},
-    {"lt", T_OBJECT, offsetof(Field, lt), READONLY, NULL},
-    {"le", T_OBJECT, offsetof(Field, le), READONLY, NULL},
-    {"multiple_of", T_OBJECT, offsetof(Field, multiple_of), READONLY, NULL},
-    {"pattern", T_OBJECT, offsetof(Field, pattern), READONLY, NULL},
-    {"min_length", T_OBJECT, offsetof(Field, min_length), READONLY, NULL},
-    {"max_length", T_OBJECT, offsetof(Field, max_length), READONLY, NULL},
-    {"tz", T_OBJECT, offsetof(Field, tz), READONLY, NULL},
+    {"alias", T_OBJECT, offsetof(Field, alias), READONLY,
+     "An alternative name to use when encoding/decoding this field"},
     {"title", T_OBJECT, offsetof(Field, title), READONLY, NULL},
     {"description", T_OBJECT, offsetof(Field, description), READONLY, NULL},
     {"examples", T_OBJECT, offsetof(Field, examples), READONLY, NULL},
     {"deprecated", T_OBJECT, offsetof(Field, deprecated), READONLY, NULL},
     {"json_schema_extra", T_OBJECT, offsetof(Field, json_schema_extra), READONLY, NULL},
-    {"alias", T_OBJECT, offsetof(Field, alias), READONLY,
-     "An alternative name to use when encoding/decoding this field"},
-    {"dump", T_OBJECT, offsetof(Field, dump), READONLY,
-     "A callable converting a custom type value to a serializable value"},
-    {"validate", T_OBJECT, offsetof(Field, validate), READONLY,
-     "A callable converting a serializable value to a custom type value"},
     {NULL},
 };
 
@@ -2523,6 +2325,1980 @@ static PyTypeObject Field_Type = {
     .tp_hash = (hashfunc)Field_hash,
     .tp_methods = Field_methods,
     .tp_members = Field_members,
+};
+
+#define MS_HAS_TZINFO(o)  (((_PyDateTime_BaseTZInfo *)(o))->hastzinfo)
+#define MS_DATE_GET_TZINFO(o) PyDateTime_DATE_GET_TZINFO(o)
+#define MS_TIME_GET_TZINFO(o) PyDateTime_TIME_GET_TZINFO(o)
+
+/*************************************************************************
+ * Serializer                                                            *
+ *************************************************************************/
+
+static PyTypeObject Serializer_Type;
+
+typedef struct {
+    PyObject_HEAD
+    /* Codec callables: serializable <-> custom conversion */
+    PyObject *load;  /* serializable value -> custom object */
+    PyObject *dump;  /* custom object -> serializable value */
+} Serializer;
+
+PyDoc_STRVAR(Serializer__doc__,
+"Configuration for converting values to/from a custom type.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"load : callable, optional\n"
+"    A callable converting an incoming serializable value to an instance\n"
+"    of the annotated custom type during decoding/validation.\n"
+"dump : callable, optional\n"
+"    A callable converting an instance of the annotated custom type to a\n"
+"    serializable value during encoding.\n"
+"\n"
+"Both parameters default to ``None``, indicating no conversion is\n"
+"performed in that direction.\n"
+);
+static PyObject *
+Serializer_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    char *kwlist[] = {"load", "dump", NULL};
+    PyObject *load = Py_None, *dump = Py_None;
+
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "|$OO:Serializer.__new__", kwlist,
+            &load, &dump
+        )
+    )
+        return NULL;
+
+#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
+    NONE_TO_NULL(load);
+    NONE_TO_NULL(dump);
+#undef NONE_TO_NULL
+
+    if (load != NULL && !PyCallable_Check(load)) {
+        PyErr_SetString(PyExc_TypeError, "load must be callable");
+        return NULL;
+    }
+    if (dump != NULL && !PyCallable_Check(dump)) {
+        PyErr_SetString(PyExc_TypeError, "dump must be callable");
+        return NULL;
+    }
+
+    Serializer *self = (Serializer *)Serializer_Type.tp_alloc(&Serializer_Type, 0);
+    if (self == NULL) return NULL;
+
+#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
+    SET_FIELD(load);
+    SET_FIELD(dump);
+#undef SET_FIELD
+
+    return (PyObject *)self;
+}
+
+static PyObject *
+Serializer_repr(Serializer *self) {
+    strbuilder builder = {0};
+    bool first = true;
+    if (!strbuilder_extend_literal(&builder, "structtype.Serializer(")) return NULL;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
+            goto error; \
+        } \
+    } \
+} while(0)
+    DO_REPR(load);
+    DO_REPR(dump);
+#undef DO_REPR
+    if (!strbuilder_extend_literal(&builder, ")")) goto error;
+    return strbuilder_build(&builder);
+error:
+    strbuilder_reset(&builder);
+    return NULL;
+}
+
+static PyObject *
+Serializer_rich_repr(PyObject *py_self, PyObject *args) {
+    Serializer *self = (Serializer *)py_self;
+    PyObject *out = PyList_New(0);
+    if (out == NULL) goto error;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        PyObject *part = Py_BuildValue("(UO)", #field, self->field); \
+        if (part == NULL) goto error;\
+        int ret = PyList_Append(out, part);\
+        Py_DECREF(part);\
+        if (ret < 0) goto error;\
+    } } while(0)
+    DO_REPR(load);
+    DO_REPR(dump);
+#undef DO_REPR
+    return out;
+error:
+    Py_XDECREF(out);
+    return NULL;
+}
+
+static PyObject *
+Serializer_richcompare(Serializer *self, PyObject *py_other, int op) {
+    int equal = 1;
+    PyObject *out;
+
+    if (Py_TYPE(py_other) != &Serializer_Type) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (!(op == Py_EQ || op == Py_NE)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    Serializer *other = (Serializer *)py_other;
+
+    /* Only need to loop if self is not other */
+    if (MS_LIKELY(self != other)) {
+#define DO_COMPARE(field) do { \
+        equal = _meta_richcompare_part(self->field, other->field); \
+        if (equal < 0) return NULL; \
+        if (!equal) goto done; \
+    } while (0)
+        DO_COMPARE(load);
+        DO_COMPARE(dump);
+    }
+#undef DO_COMPARE
+done:
+    if (op == Py_EQ) {
+        out = equal ? Py_True : Py_False;
+    }
+    else {
+        out = (!equal) ? Py_True : Py_False;
+    }
+    Py_INCREF(out);
+    return out;
+}
+
+static Py_hash_t
+Serializer_hash(Serializer *self) {
+    Py_ssize_t nfields = 0;
+    Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+#define DO_HASH(field) \
+    if (self->field != NULL) { \
+        Py_uhash_t lane = PyObject_Hash(self->field); \
+        if (lane == (Py_uhash_t)-1) return -1; \
+        acc += lane * MS_HASH_XXPRIME_2; \
+        acc = MS_HASH_XXROTATE(acc); \
+        acc *= MS_HASH_XXPRIME_1; \
+        nfields += 1; \
+    }
+    DO_HASH(load);
+    DO_HASH(dump);
+#undef DO_HASH
+    acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
+    return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
+}
+
+static PyMethodDef Serializer_methods[] = {
+    {"__rich_repr__", Serializer_rich_repr, METH_NOARGS, "rich repr"},
+    {NULL, NULL},
+};
+
+static int
+Serializer_traverse(Serializer *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->load);
+    Py_VISIT(self->dump);
+    return 0;
+}
+
+static int
+Serializer_clear(Serializer *self)
+{
+    Py_CLEAR(self->load);
+    Py_CLEAR(self->dump);
+    return 0;
+}
+
+static void
+Serializer_dealloc(Serializer *self)
+{
+    PyObject_GC_UnTrack(self);
+    Serializer_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyMemberDef Serializer_members[] = {
+    {"load", T_OBJECT, offsetof(Serializer, load), READONLY,
+     "A callable converting a serializable value to a custom type value"},
+    {"dump", T_OBJECT, offsetof(Serializer, dump), READONLY,
+     "A callable converting a custom type value to a serializable value"},
+    {NULL},
+};
+
+static PyTypeObject Serializer_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "structtype._core.Serializer",
+    .tp_doc = Serializer__doc__,
+    .tp_basicsize = sizeof(Serializer),
+    .tp_itemsize = 0,
+    .tp_new = Serializer_new,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
+    .tp_clear = (inquiry)Serializer_clear,
+    .tp_traverse = (traverseproc)Serializer_traverse,
+    .tp_dealloc = (destructor) Serializer_dealloc,
+    .tp_repr = (reprfunc)Serializer_repr,
+    .tp_richcompare = (richcmpfunc)Serializer_richcompare,
+    .tp_hash = (hashfunc)Serializer_hash,
+    .tp_methods = Serializer_methods,
+    .tp_members = Serializer_members,
+};
+
+/*************************************************************************
+ * Validator                                                             *
+ *************************************************************************/
+
+static PyTypeObject Validator_Type;
+
+typedef struct {
+    PyObject_HEAD
+    /* User-provided validation callable */
+    PyObject *fn;  /* value -> None, signals failure by raising */
+} Validator;
+
+PyDoc_STRVAR(Validator__doc__,
+"A user-defined validator.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"fn : callable, optional\n"
+"    A callable invoked with the annotated value after decoding/coercion.\n"
+"    The return value is ignored; the validator must signal failure by\n"
+"    raising an exception. When omitted, calling the validator is a no-op,\n"
+"    making bare ``Validator()`` an inert base meant for subclassing.\n"
+);
+static PyObject *
+Validator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    char *kwlist[] = {"fn", NULL};
+    PyObject *fn = Py_None;
+
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "|O:Validator.__new__", kwlist,
+            &fn
+        )
+    )
+        return NULL;
+
+#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
+    NONE_TO_NULL(fn);
+#undef NONE_TO_NULL
+
+    if (fn != NULL && !PyCallable_Check(fn)) {
+        PyErr_SetString(PyExc_TypeError, "fn must be callable");
+        return NULL;
+    }
+
+    /* Allocate via `type` so that user-defined Python subclasses of
+     * `Validator` get correctly-typed instances */
+    Validator *self = (Validator *)type->tp_alloc(type, 0);
+    if (self == NULL) return NULL;
+
+    Py_XINCREF(fn);
+    self->fn = fn;
+
+    return (PyObject *)self;
+}
+
+/* Calling a validator invokes its stored callable with the value (the
+ * return value is ignored); without one it is a no-op */
+static PyObject *
+Validator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
+    Validator *self = (Validator *)py_self;
+    PyObject *value;
+
+    if (!PyArg_ParseTuple(args, "O:Validator.__call__", &value)) {
+        return NULL;
+    }
+
+    if (self->fn != NULL) {
+        PyObject *res = PyObject_CallOneArg(self->fn, value);
+        if (res == NULL) return NULL;
+        Py_DECREF(res);
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+Validator_repr(Validator *self) {
+    strbuilder builder = {0};
+    bool first = true;
+    if (!strbuilder_extend_literal(&builder, "structtype.Validator(")) return NULL;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
+            goto error; \
+        } \
+    } \
+} while(0)
+    DO_REPR(fn);
+#undef DO_REPR
+    if (!strbuilder_extend_literal(&builder, ")")) goto error;
+    return strbuilder_build(&builder);
+error:
+    strbuilder_reset(&builder);
+    return NULL;
+}
+
+static PyObject *
+Validator_rich_repr(PyObject *py_self, PyObject *args) {
+    Validator *self = (Validator *)py_self;
+    PyObject *out = PyList_New(0);
+    if (out == NULL) goto error;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        PyObject *part = Py_BuildValue("(UO)", #field, self->field); \
+        if (part == NULL) goto error;\
+        int ret = PyList_Append(out, part);\
+        Py_DECREF(part);\
+        if (ret < 0) goto error;\
+    } } while(0)
+    DO_REPR(fn);
+#undef DO_REPR
+    return out;
+error:
+    Py_XDECREF(out);
+    return NULL;
+}
+
+static PyObject *
+Validator_richcompare(Validator *self, PyObject *py_other, int op) {
+    int equal = 1;
+    PyObject *out;
+
+    if (Py_TYPE(py_other) != &Validator_Type) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (!(op == Py_EQ || op == Py_NE)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    Validator *other = (Validator *)py_other;
+
+    /* Only need to loop if self is not other */
+    if (MS_LIKELY(self != other)) {
+#define DO_COMPARE(field) do { \
+        equal = _meta_richcompare_part(self->field, other->field); \
+        if (equal < 0) return NULL; \
+        if (!equal) goto done; \
+    } while (0)
+        DO_COMPARE(fn);
+    }
+#undef DO_COMPARE
+done:
+    if (op == Py_EQ) {
+        out = equal ? Py_True : Py_False;
+    }
+    else {
+        out = (!equal) ? Py_True : Py_False;
+    }
+    Py_INCREF(out);
+    return out;
+}
+
+static Py_hash_t
+Validator_hash(Validator *self) {
+    Py_ssize_t nfields = 0;
+    Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+#define DO_HASH(field) \
+    if (self->field != NULL) { \
+        Py_uhash_t lane = PyObject_Hash(self->field); \
+        if (lane == (Py_uhash_t)-1) return -1; \
+        acc += lane * MS_HASH_XXPRIME_2; \
+        acc = MS_HASH_XXROTATE(acc); \
+        acc *= MS_HASH_XXPRIME_1; \
+        nfields += 1; \
+    }
+    DO_HASH(fn);
+#undef DO_HASH
+    acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
+    return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
+}
+
+static PyMethodDef Validator_methods[] = {
+    {"__rich_repr__", Validator_rich_repr, METH_NOARGS, "rich repr"},
+    {NULL, NULL},
+};
+
+static int
+Validator_traverse(Validator *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->fn);
+    return 0;
+}
+
+static int
+Validator_clear(Validator *self)
+{
+    Py_CLEAR(self->fn);
+    return 0;
+}
+
+static void
+Validator_dealloc(Validator *self)
+{
+    PyObject_GC_UnTrack(self);
+    Validator_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyMemberDef Validator_members[] = {
+    {"fn", T_OBJECT, offsetof(Validator, fn), READONLY,
+     "A callable validating the annotated value"},
+    {NULL},
+};
+
+static PyTypeObject Validator_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "structtype._core.Validator",
+    .tp_doc = Validator__doc__,
+    .tp_basicsize = sizeof(Validator),
+    .tp_itemsize = 0,
+    .tp_new = Validator_new,
+    .tp_call = Validator_tp_call,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_BASETYPE,
+    .tp_clear = (inquiry)Validator_clear,
+    .tp_traverse = (traverseproc)Validator_traverse,
+    .tp_dealloc = (destructor) Validator_dealloc,
+    .tp_repr = (reprfunc)Validator_repr,
+    .tp_richcompare = (richcmpfunc)Validator_richcompare,
+    .tp_hash = (hashfunc)Validator_hash,
+    .tp_methods = Validator_methods,
+    .tp_members = Validator_members,
+};
+
+/*************************************************************************
+ * NumericValidator                                                      *
+ *************************************************************************/
+
+static PyTypeObject NumericValidator_Type;
+
+typedef struct {
+    Validator base;  /* embedded Validator_Type instance state */
+    /* Numeric constraint fields */
+    PyObject *gt, *ge, *lt, *le, *multiple_of;
+} NumericValidator;
+
+PyDoc_STRVAR(NumericValidator__doc__,
+"Numeric constraints for ``int``/``float`` values.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"gt : int or float, optional\n"
+"    The annotated value must be greater than ``gt``.\n"
+"ge : int or float, optional\n"
+"    The annotated value must be greater than or equal to ``ge``.\n"
+"lt : int or float, optional\n"
+"    The annotated value must be less than ``lt``.\n"
+"le : int or float, optional\n"
+"    The annotated value must be less than or equal to ``le``.\n"
+"multiple_of : int or float, optional\n"
+"    The annotated value must be a multiple of ``multiple_of``.\n"
+);
+static PyObject *
+NumericValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    char *kwlist[] = {"gt", "ge", "lt", "le", "multiple_of", NULL};
+    PyObject *gt = NULL, *ge = NULL, *lt = NULL, *le = NULL, *multiple_of = NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "|$OOOOO:NumericValidator.__new__", kwlist,
+            &gt, &ge, &lt, &le, &multiple_of
+        )
+    )
+        return NULL;
+
+#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
+    NONE_TO_NULL(gt);
+    NONE_TO_NULL(ge);
+    NONE_TO_NULL(lt);
+    NONE_TO_NULL(le);
+    NONE_TO_NULL(multiple_of);
+#undef NONE_TO_NULL
+
+    /* Check constraint parameter types/values */
+    if (gt != NULL && !ensure_is_finite_numeric(gt, "gt", false)) return NULL;
+    if (ge != NULL && !ensure_is_finite_numeric(ge, "ge", false)) return NULL;
+    if (lt != NULL && !ensure_is_finite_numeric(lt, "lt", false)) return NULL;
+    if (le != NULL && !ensure_is_finite_numeric(le, "le", false)) return NULL;
+    if (multiple_of != NULL && !ensure_is_finite_numeric(multiple_of, "multiple_of", true)) return NULL;
+
+    /* Check multiple constraint restrictions */
+    if (gt != NULL && ge != NULL) {
+        PyErr_SetString(PyExc_ValueError, "Cannot specify both `gt` and `ge`");
+        return NULL;
+    }
+    if (lt != NULL && le != NULL) {
+        PyErr_SetString(PyExc_ValueError, "Cannot specify both `lt` and `le`");
+        return NULL;
+    }
+
+    NumericValidator *self = (NumericValidator *)NumericValidator_Type.tp_alloc(&NumericValidator_Type, 0);
+    if (self == NULL) return NULL;
+
+#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
+    SET_FIELD(gt);
+    SET_FIELD(ge);
+    SET_FIELD(lt);
+    SET_FIELD(le);
+    SET_FIELD(multiple_of);
+#undef SET_FIELD
+
+    return (PyObject *)self;
+}
+
+/* ---- numeric constraint checks for `NumericValidator.__call__` ---- */
+
+/* Mirrors `_constr_as_i64`: true when an exact int fits in an int64.
+ * Never sets an exception on the overflow path */
+static bool
+validator_int_as_i64(PyObject *obj, int64_t *out) {
+    int overflow = 0;
+    int64_t x = PyLong_AsLongLongAndOverflow(obj, &overflow);
+    if (overflow != 0) return false;
+    if (x == -1 && PyErr_Occurred()) return false;
+    *out = x;
+    return true;
+}
+
+/* Converts a finite numeric value to a double. Returns false on failure
+ * (an int too large for a double) with the error set */
+static bool
+validator_num_as_f64(PyObject *obj, double *out) {
+    double x;
+    if (PyLong_CheckExact(obj)) {
+        x = PyLong_AsDouble(obj);
+        if (x == -1.0 && PyErr_Occurred()) return false;
+    }
+    else {
+        x = PyFloat_AS_DOUBLE(obj);
+    }
+    *out = x;
+    return true;
+}
+
+static void
+numeric_validator_raise(
+    const char *noun, const char *op, PyObject *bound
+) {
+    PyErr_Format(PyExc_ValueError, "Expected `%s` %s %R", noun, op, bound);
+}
+
+/* ge/gt check against a stored bound (`strict` selects gt). Returns true
+ * when the value passes; raises ValueError and returns false otherwise.
+ * Mirrors the decode-path lowering: ints compare as int64 where safe,
+ * else as doubles (with nextafter adjustment for strict bounds). */
+static bool
+numeric_check_min(PyObject *value, bool is_int, PyObject *bound, bool strict)
+{
+    const char *noun = is_int ? "int" : "float";
+    int64_t vi, bi;
+    if (
+        is_int &&
+        PyLong_CheckExact(bound) &&
+        validator_int_as_i64(value, &vi) &&
+        validator_int_as_i64(bound, &bi)
+    ) {
+        int64_t c = bi;
+        if (strict) {
+            /* lower gt to ge by +1, like `_constr_as_i64(..., 1)` */
+            if (bi == INT64_MAX) {
+                numeric_validator_raise(noun, ">", bound);
+                return false;
+            }
+            c = bi + 1;
+        }
+        if (vi >= c) return true;
+        numeric_validator_raise(noun, strict ? ">" : ">=", bound);
+        return false;
+    }
+
+    double dv, db;
+    if (!validator_num_as_f64(value, &dv) || !validator_num_as_f64(bound, &db))
+    {
+        /* int too large for a double: fall back to Python comparison */
+        PyErr_Clear();
+        int cmp = PyObject_RichCompareBool(
+            value, bound, strict ? Py_GT : Py_GE
+        );
+        if (cmp < 0) return false;
+        if (cmp) return true;
+        numeric_validator_raise(noun, strict ? ">" : ">=", bound);
+        return false;
+    }
+    double c = strict ? nextafter(db, DBL_MAX) : db;
+    if (dv >= c) return true;
+    numeric_validator_raise(noun, strict ? ">" : ">=", bound);
+    return false;
+}
+
+/* le/lt check against a stored bound (`strict` selects lt) */
+static bool
+numeric_check_max(PyObject *value, bool is_int, PyObject *bound, bool strict)
+{
+    const char *noun = is_int ? "int" : "float";
+    int64_t vi, bi;
+    if (
+        is_int &&
+        PyLong_CheckExact(bound) &&
+        validator_int_as_i64(value, &vi) &&
+        validator_int_as_i64(bound, &bi)
+    ) {
+        int64_t c = bi;
+        if (strict) {
+            /* lower lt to le by -1, like `_constr_as_i64(..., -1)` */
+            if (bi == INT64_MIN) {
+                numeric_validator_raise(noun, "<", bound);
+                return false;
+            }
+            c = bi - 1;
+        }
+        if (vi <= c) return true;
+        numeric_validator_raise(noun, strict ? "<" : "<=", bound);
+        return false;
+    }
+
+    double dv, db;
+    if (!validator_num_as_f64(value, &dv) || !validator_num_as_f64(bound, &db))
+    {
+        PyErr_Clear();
+        int cmp = PyObject_RichCompareBool(
+            value, bound, strict ? Py_LT : Py_LE
+        );
+        if (cmp < 0) return false;
+        if (cmp) return true;
+        numeric_validator_raise(noun, strict ? "<" : "<=", bound);
+        return false;
+    }
+    double c = strict ? nextafter(db, -DBL_MAX) : db;
+    if (dv <= c) return true;
+    numeric_validator_raise(noun, strict ? "<" : "<=", bound);
+    return false;
+}
+
+/* multiple_of check. Integer pairs use C remainder (sign-independent for
+ * the zero test); everything else uses fmod like the float decode path,
+ * falling back to an exact Python remainder for ints too large for a
+ * double (mirroring `ms_passes_big_int_constraints`) */
+static bool
+numeric_check_multiple_of(PyObject *value, bool is_int, PyObject *bound)
+{
+    const char *noun = is_int ? "int" : "float";
+    int64_t vi, bi;
+    if (
+        is_int &&
+        PyLong_CheckExact(bound) &&
+        validator_int_as_i64(value, &vi) &&
+        validator_int_as_i64(bound, &bi)
+    ) {
+        if ((vi % bi) == 0) return true;
+    }
+    else {
+        double dv, db;
+        if (
+            validator_num_as_f64(value, &dv) &&
+            validator_num_as_f64(bound, &db)
+        ) {
+            if (dv == 0 || fmod(dv, db) == 0.0) return true;
+        }
+        else {
+            PyErr_Clear();
+            PyObject *rem = PyNumber_Remainder(value, bound);
+            if (rem == NULL) return false;
+            int nonzero = PyObject_IsTrue(rem);
+            Py_DECREF(rem);
+            if (nonzero < 0) return false;
+            if (!nonzero) return true;
+        }
+    }
+    PyErr_Format(
+        PyExc_ValueError,
+        "Expected `%s` that's a multiple of %R",
+        noun, bound
+    );
+    return false;
+}
+
+static PyObject *
+NumericValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
+    NumericValidator *self = (NumericValidator *)py_self;
+    PyObject *value;
+
+    if (!PyArg_ParseTuple(args, "O:NumericValidator.__call__", &value)) {
+        return NULL;
+    }
+
+    /* Bools are their own family in the decode path, never numerics */
+    bool is_int = PyLong_Check(value) && !PyBool_Check(value);
+    bool is_float = Py_TYPE(value) == &PyFloat_Type;
+    if (!is_int && !is_float) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "Expected `int` or `float`, got `%.200s`",
+            Py_TYPE(value)->tp_name
+        );
+        return NULL;
+    }
+
+    if (self->ge != NULL) {
+        if (!numeric_check_min(value, is_int, self->ge, false)) return NULL;
+    }
+    else if (self->gt != NULL) {
+        if (!numeric_check_min(value, is_int, self->gt, true)) return NULL;
+    }
+    if (self->le != NULL) {
+        if (!numeric_check_max(value, is_int, self->le, false)) return NULL;
+    }
+    else if (self->lt != NULL) {
+        if (!numeric_check_max(value, is_int, self->lt, true)) return NULL;
+    }
+    if (self->multiple_of != NULL) {
+        if (!numeric_check_multiple_of(value, is_int, self->multiple_of)) {
+            return NULL;
+        }
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+NumericValidator_repr(NumericValidator *self) {
+    strbuilder builder = {0};
+    bool first = true;
+    if (!strbuilder_extend_literal(&builder, "structtype.NumericValidator(")) return NULL;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
+            goto error; \
+        } \
+    } \
+} while(0)
+    DO_REPR(gt);
+    DO_REPR(ge);
+    DO_REPR(lt);
+    DO_REPR(le);
+    DO_REPR(multiple_of);
+#undef DO_REPR
+    if (!strbuilder_extend_literal(&builder, ")")) goto error;
+    return strbuilder_build(&builder);
+error:
+    strbuilder_reset(&builder);
+    return NULL;
+}
+
+static PyObject *
+NumericValidator_rich_repr(PyObject *py_self, PyObject *args) {
+    NumericValidator *self = (NumericValidator *)py_self;
+    PyObject *out = PyList_New(0);
+    if (out == NULL) goto error;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        PyObject *part = Py_BuildValue("(UO)", #field, self->field); \
+        if (part == NULL) goto error;\
+        int ret = PyList_Append(out, part);\
+        Py_DECREF(part);\
+        if (ret < 0) goto error;\
+    } } while(0)
+    DO_REPR(gt);
+    DO_REPR(ge);
+    DO_REPR(lt);
+    DO_REPR(le);
+    DO_REPR(multiple_of);
+#undef DO_REPR
+    return out;
+error:
+    Py_XDECREF(out);
+    return NULL;
+}
+
+static PyObject *
+NumericValidator_richcompare(NumericValidator *self, PyObject *py_other, int op) {
+    int equal = 1;
+    PyObject *out;
+
+    if (Py_TYPE(py_other) != &NumericValidator_Type) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (!(op == Py_EQ || op == Py_NE)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    NumericValidator *other = (NumericValidator *)py_other;
+
+    /* Only need to loop if self is not other */
+    if (MS_LIKELY(self != other)) {
+#define DO_COMPARE(field) do { \
+        equal = _meta_richcompare_part(self->field, other->field); \
+        if (equal < 0) return NULL; \
+        if (!equal) goto done; \
+    } while (0)
+        DO_COMPARE(gt);
+        DO_COMPARE(ge);
+        DO_COMPARE(lt);
+        DO_COMPARE(le);
+        DO_COMPARE(multiple_of);
+    }
+#undef DO_COMPARE
+done:
+    if (op == Py_EQ) {
+        out = equal ? Py_True : Py_False;
+    }
+    else {
+        out = (!equal) ? Py_True : Py_False;
+    }
+    Py_INCREF(out);
+    return out;
+}
+
+static Py_hash_t
+NumericValidator_hash(NumericValidator *self) {
+    Py_ssize_t nfields = 0;
+    Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+#define DO_HASH(field) \
+    if (self->field != NULL) { \
+        Py_uhash_t lane = PyObject_Hash(self->field); \
+        if (lane == (Py_uhash_t)-1) return -1; \
+        acc += lane * MS_HASH_XXPRIME_2; \
+        acc = MS_HASH_XXROTATE(acc); \
+        acc *= MS_HASH_XXPRIME_1; \
+        nfields += 1; \
+    }
+    DO_HASH(gt);
+    DO_HASH(ge);
+    DO_HASH(lt);
+    DO_HASH(le);
+    DO_HASH(multiple_of);
+#undef DO_HASH
+    acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
+    return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
+}
+
+static PyMethodDef NumericValidator_methods[] = {
+    {"__rich_repr__", NumericValidator_rich_repr, METH_NOARGS, "rich repr"},
+    {NULL, NULL},
+};
+
+static int
+NumericValidator_traverse(NumericValidator *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->base.fn);
+    Py_VISIT(self->gt);
+    Py_VISIT(self->ge);
+    Py_VISIT(self->lt);
+    Py_VISIT(self->le);
+    Py_VISIT(self->multiple_of);
+    return 0;
+}
+
+static int
+NumericValidator_clear(NumericValidator *self)
+{
+    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->gt);
+    Py_CLEAR(self->ge);
+    Py_CLEAR(self->lt);
+    Py_CLEAR(self->le);
+    Py_CLEAR(self->multiple_of);
+    return 0;
+}
+
+static void
+NumericValidator_dealloc(NumericValidator *self)
+{
+    PyObject_GC_UnTrack(self);
+    NumericValidator_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyMemberDef NumericValidator_members[] = {
+    {"gt", T_OBJECT, offsetof(NumericValidator, gt), READONLY, NULL},
+    {"ge", T_OBJECT, offsetof(NumericValidator, ge), READONLY, NULL},
+    {"lt", T_OBJECT, offsetof(NumericValidator, lt), READONLY, NULL},
+    {"le", T_OBJECT, offsetof(NumericValidator, le), READONLY, NULL},
+    {"multiple_of", T_OBJECT, offsetof(NumericValidator, multiple_of), READONLY, NULL},
+    {NULL},
+};
+
+static PyTypeObject NumericValidator_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "structtype._core.NumericValidator",
+    .tp_doc = NumericValidator__doc__,
+    .tp_basicsize = sizeof(NumericValidator),
+    .tp_itemsize = 0,
+    .tp_new = NumericValidator_new,
+    .tp_call = NumericValidator_tp_call,
+    .tp_base = &Validator_Type,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
+    .tp_clear = (inquiry)NumericValidator_clear,
+    .tp_traverse = (traverseproc)NumericValidator_traverse,
+    .tp_dealloc = (destructor) NumericValidator_dealloc,
+    .tp_repr = (reprfunc)NumericValidator_repr,
+    .tp_richcompare = (richcmpfunc)NumericValidator_richcompare,
+    .tp_hash = (hashfunc)NumericValidator_hash,
+    .tp_methods = NumericValidator_methods,
+    .tp_members = NumericValidator_members,
+};
+
+/*************************************************************************
+ * StrValidator                                                          *
+ *************************************************************************/
+
+static PyTypeObject StrValidator_Type;
+
+typedef struct {
+    Validator base;  /* embedded Validator_Type instance state */
+    /* String constraint fields */
+    PyObject *pattern, *regex;
+    PyObject *min_length, *max_length;
+} StrValidator;
+
+PyDoc_STRVAR(StrValidator__doc__,
+"Constraints for ``str`` values.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"pattern : str, optional\n"
+"    A regex pattern that the annotated value must match against.\n"
+"    Note that the pattern is treated as **unanchored**, meaning the\n"
+"    ``re.search`` method is used when matching.\n"
+"min_length : int, optional\n"
+"    The annotated value must have a length >= ``min_length``.\n"
+"max_length : int, optional\n"
+"    The annotated value must have a length <= ``max_length``.\n"
+);
+static PyObject *
+StrValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    char *kwlist[] = {"pattern", "min_length", "max_length", NULL};
+    PyObject *pattern = NULL, *min_length = NULL, *max_length = NULL;
+    PyObject *regex = NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "|$OOO:StrValidator.__new__", kwlist,
+            &pattern, &min_length, &max_length
+        )
+    )
+        return NULL;
+
+#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
+    NONE_TO_NULL(pattern);
+    NONE_TO_NULL(min_length);
+    NONE_TO_NULL(max_length);
+#undef NONE_TO_NULL
+
+    /* Check constraint parameter types/values */
+    if (pattern != NULL && !ensure_is_string(pattern, "pattern")) return NULL;
+    if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
+    if (max_length != NULL && !ensure_is_nonnegative_integer(max_length, "max_length")) return NULL;
+
+    /* regex compile pattern if provided */
+    if (pattern != NULL) {
+        StructspecState *mod = structtype_get_global_state();
+        regex = PyObject_CallOneArg(mod->re_compile, pattern);
+        if (regex == NULL) return NULL;
+    }
+
+    StrValidator *self = (StrValidator *)StrValidator_Type.tp_alloc(&StrValidator_Type, 0);
+    if (self == NULL) {
+        Py_XDECREF(regex);
+        return NULL;
+    }
+
+#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
+#define SET_FIELD_OWNED(x) do { self->x = x; } while(0)
+    SET_FIELD(pattern);
+    SET_FIELD_OWNED(regex);
+    SET_FIELD(min_length);
+    SET_FIELD(max_length);
+#undef SET_FIELD_OWNED
+#undef SET_FIELD
+
+    return (PyObject *)self;
+}
+
+static PyObject *
+StrValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
+    StrValidator *self = (StrValidator *)py_self;
+    PyObject *value;
+
+    if (!PyArg_ParseTuple(args, "O:StrValidator.__call__", &value)) {
+        return NULL;
+    }
+
+    if (!PyUnicode_Check(value)) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "Expected `str`, got `%.200s`",
+            Py_TYPE(value)->tp_name
+        );
+        return NULL;
+    }
+
+    if (self->min_length != NULL) {
+        /* Validated as a non-negative int at construction */
+        Py_ssize_t c = PyLong_AsSsize_t(self->min_length);
+        if (PyUnicode_GET_LENGTH(value) < c) {
+            PyErr_Format(PyExc_ValueError, "Expected `str` of length >= %zd", c);
+            return NULL;
+        }
+    }
+    if (self->max_length != NULL) {
+        Py_ssize_t c = PyLong_AsSsize_t(self->max_length);
+        if (PyUnicode_GET_LENGTH(value) > c) {
+            PyErr_Format(PyExc_ValueError, "Expected `str` of length <= %zd", c);
+            return NULL;
+        }
+    }
+    if (self->regex != NULL) {
+        /* Unanchored match, same as the decode path */
+        PyObject *res = PyObject_CallMethod(self->regex, "search", "O", value);
+        if (res == NULL) return NULL;
+        bool ok = (res != Py_None);
+        Py_DECREF(res);
+        if (!ok) {
+            PyObject *pattern = PyObject_GetAttrString(self->regex, "pattern");
+            if (pattern == NULL) return NULL;
+            PyErr_Format(
+                PyExc_ValueError,
+                "Expected `str` matching regex %R",
+                pattern
+            );
+            Py_DECREF(pattern);
+            return NULL;
+        }
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+StrValidator_repr(StrValidator *self) {
+    strbuilder builder = {0};
+    bool first = true;
+    if (!strbuilder_extend_literal(&builder, "structtype.StrValidator(")) return NULL;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
+            goto error; \
+        } \
+    } \
+} while(0)
+    DO_REPR(pattern);
+    DO_REPR(min_length);
+    DO_REPR(max_length);
+#undef DO_REPR
+    if (!strbuilder_extend_literal(&builder, ")")) goto error;
+    return strbuilder_build(&builder);
+error:
+    strbuilder_reset(&builder);
+    return NULL;
+}
+
+static PyObject *
+StrValidator_rich_repr(PyObject *py_self, PyObject *args) {
+    StrValidator *self = (StrValidator *)py_self;
+    PyObject *out = PyList_New(0);
+    if (out == NULL) goto error;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        PyObject *part = Py_BuildValue("(UO)", #field, self->field); \
+        if (part == NULL) goto error;\
+        int ret = PyList_Append(out, part);\
+        Py_DECREF(part);\
+        if (ret < 0) goto error;\
+    } } while(0)
+    DO_REPR(pattern);
+    DO_REPR(min_length);
+    DO_REPR(max_length);
+#undef DO_REPR
+    return out;
+error:
+    Py_XDECREF(out);
+    return NULL;
+}
+
+static PyObject *
+StrValidator_richcompare(StrValidator *self, PyObject *py_other, int op) {
+    int equal = 1;
+    PyObject *out;
+
+    if (Py_TYPE(py_other) != &StrValidator_Type) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (!(op == Py_EQ || op == Py_NE)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    StrValidator *other = (StrValidator *)py_other;
+
+    /* Only need to loop if self is not other */
+    if (MS_LIKELY(self != other)) {
+#define DO_COMPARE(field) do { \
+        equal = _meta_richcompare_part(self->field, other->field); \
+        if (equal < 0) return NULL; \
+        if (!equal) goto done; \
+    } while (0)
+        DO_COMPARE(pattern);
+        DO_COMPARE(min_length);
+        DO_COMPARE(max_length);
+    }
+#undef DO_COMPARE
+done:
+    if (op == Py_EQ) {
+        out = equal ? Py_True : Py_False;
+    }
+    else {
+        out = (!equal) ? Py_True : Py_False;
+    }
+    Py_INCREF(out);
+    return out;
+}
+
+static Py_hash_t
+StrValidator_hash(StrValidator *self) {
+    Py_ssize_t nfields = 0;
+    Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+#define DO_HASH(field) \
+    if (self->field != NULL) { \
+        Py_uhash_t lane = PyObject_Hash(self->field); \
+        if (lane == (Py_uhash_t)-1) return -1; \
+        acc += lane * MS_HASH_XXPRIME_2; \
+        acc = MS_HASH_XXROTATE(acc); \
+        acc *= MS_HASH_XXPRIME_1; \
+        nfields += 1; \
+    }
+    DO_HASH(pattern);
+    DO_HASH(min_length);
+    DO_HASH(max_length);
+#undef DO_HASH
+    acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
+    return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
+}
+
+static PyMethodDef StrValidator_methods[] = {
+    {"__rich_repr__", StrValidator_rich_repr, METH_NOARGS, "rich repr"},
+    {NULL, NULL},
+};
+
+static int
+StrValidator_traverse(StrValidator *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->base.fn);
+    Py_VISIT(self->pattern);
+    Py_VISIT(self->regex);
+    Py_VISIT(self->min_length);
+    Py_VISIT(self->max_length);
+    return 0;
+}
+
+static int
+StrValidator_clear(StrValidator *self)
+{
+    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->pattern);
+    Py_CLEAR(self->regex);
+    Py_CLEAR(self->min_length);
+    Py_CLEAR(self->max_length);
+    return 0;
+}
+
+static void
+StrValidator_dealloc(StrValidator *self)
+{
+    PyObject_GC_UnTrack(self);
+    StrValidator_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyMemberDef StrValidator_members[] = {
+    {"pattern", T_OBJECT, offsetof(StrValidator, pattern), READONLY, NULL},
+    {"min_length", T_OBJECT, offsetof(StrValidator, min_length), READONLY, NULL},
+    {"max_length", T_OBJECT, offsetof(StrValidator, max_length), READONLY, NULL},
+    {NULL},
+};
+
+static PyTypeObject StrValidator_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "structtype._core.StrValidator",
+    .tp_doc = StrValidator__doc__,
+    .tp_basicsize = sizeof(StrValidator),
+    .tp_itemsize = 0,
+    .tp_new = StrValidator_new,
+    .tp_call = StrValidator_tp_call,
+    .tp_base = &Validator_Type,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
+    .tp_clear = (inquiry)StrValidator_clear,
+    .tp_traverse = (traverseproc)StrValidator_traverse,
+    .tp_dealloc = (destructor) StrValidator_dealloc,
+    .tp_repr = (reprfunc)StrValidator_repr,
+    .tp_richcompare = (richcmpfunc)StrValidator_richcompare,
+    .tp_hash = (hashfunc)StrValidator_hash,
+    .tp_methods = StrValidator_methods,
+    .tp_members = StrValidator_members,
+};
+
+/*************************************************************************
+ * BytesValidator                                                        *
+ *************************************************************************/
+
+static PyTypeObject BytesValidator_Type;
+
+typedef struct {
+    Validator base;  /* embedded Validator_Type instance state */
+    /* Length constraint fields */
+    PyObject *min_length, *max_length;
+} BytesValidator;
+
+PyDoc_STRVAR(BytesValidator__doc__,
+"Length constraints for bytes-like values (``bytes``, ``bytearray``,\n"
+"``memoryview``).\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"min_length : int, optional\n"
+"    The annotated value must have a length >= ``min_length``.\n"
+"max_length : int, optional\n"
+"    The annotated value must have a length <= ``max_length``.\n"
+);
+static PyObject *
+BytesValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    char *kwlist[] = {"min_length", "max_length", NULL};
+    PyObject *min_length = NULL, *max_length = NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "|$OO:BytesValidator.__new__", kwlist,
+            &min_length, &max_length
+        )
+    )
+        return NULL;
+
+#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
+    NONE_TO_NULL(min_length);
+    NONE_TO_NULL(max_length);
+#undef NONE_TO_NULL
+
+    /* Check constraint parameter types/values */
+    if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
+    if (max_length != NULL && !ensure_is_nonnegative_integer(max_length, "max_length")) return NULL;
+
+    BytesValidator *self = (BytesValidator *)BytesValidator_Type.tp_alloc(&BytesValidator_Type, 0);
+    if (self == NULL) return NULL;
+
+#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
+    SET_FIELD(min_length);
+    SET_FIELD(max_length);
+#undef SET_FIELD
+
+    return (PyObject *)self;
+}
+
+/* min_length/max_length check for bytes-like and collection values.
+ * Returns true when the value passes; raises ValueError otherwise */
+static bool
+validator_check_length(PyObject *value, PyObject *min_length, PyObject *max_length)
+{
+    if (min_length != NULL || max_length != NULL) {
+        Py_ssize_t len = PyObject_Length(value);
+        if (len < 0) return false;
+        if (min_length != NULL) {
+            /* Validated as a non-negative int at construction */
+            Py_ssize_t c = PyLong_AsSsize_t(min_length);
+            if (len < c) {
+                PyErr_Format(
+                    PyExc_ValueError,
+                    "Expected `%s` of length >= %zd",
+                    Py_TYPE(value)->tp_name, c
+                );
+                return false;
+            }
+        }
+        if (max_length != NULL) {
+            Py_ssize_t c = PyLong_AsSsize_t(max_length);
+            if (len > c) {
+                PyErr_Format(
+                    PyExc_ValueError,
+                    "Expected `%s` of length <= %zd",
+                    Py_TYPE(value)->tp_name, c
+                );
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static PyObject *
+BytesValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
+    BytesValidator *self = (BytesValidator *)py_self;
+    PyObject *value;
+
+    if (!PyArg_ParseTuple(args, "O:BytesValidator.__call__", &value)) {
+        return NULL;
+    }
+
+    if (
+        !PyBytes_Check(value) &&
+        !PyByteArray_Check(value) &&
+        !PyMemoryView_Check(value)
+    ) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "Expected `bytes`, `bytearray`, or `memoryview`, got `%.200s`",
+            Py_TYPE(value)->tp_name
+        );
+        return NULL;
+    }
+
+    if (!validator_check_length(value, self->min_length, self->max_length)) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+BytesValidator_repr(BytesValidator *self) {
+    strbuilder builder = {0};
+    bool first = true;
+    if (!strbuilder_extend_literal(&builder, "structtype.BytesValidator(")) return NULL;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
+            goto error; \
+        } \
+    } \
+} while(0)
+    DO_REPR(min_length);
+    DO_REPR(max_length);
+#undef DO_REPR
+    if (!strbuilder_extend_literal(&builder, ")")) goto error;
+    return strbuilder_build(&builder);
+error:
+    strbuilder_reset(&builder);
+    return NULL;
+}
+
+static PyObject *
+BytesValidator_rich_repr(PyObject *py_self, PyObject *args) {
+    BytesValidator *self = (BytesValidator *)py_self;
+    PyObject *out = PyList_New(0);
+    if (out == NULL) goto error;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        PyObject *part = Py_BuildValue("(UO)", #field, self->field); \
+        if (part == NULL) goto error;\
+        int ret = PyList_Append(out, part);\
+        Py_DECREF(part);\
+        if (ret < 0) goto error;\
+    } } while(0)
+    DO_REPR(min_length);
+    DO_REPR(max_length);
+#undef DO_REPR
+    return out;
+error:
+    Py_XDECREF(out);
+    return NULL;
+}
+
+static PyObject *
+BytesValidator_richcompare(BytesValidator *self, PyObject *py_other, int op) {
+    int equal = 1;
+    PyObject *out;
+
+    if (Py_TYPE(py_other) != &BytesValidator_Type) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (!(op == Py_EQ || op == Py_NE)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    BytesValidator *other = (BytesValidator *)py_other;
+
+    /* Only need to loop if self is not other */
+    if (MS_LIKELY(self != other)) {
+#define DO_COMPARE(field) do { \
+        equal = _meta_richcompare_part(self->field, other->field); \
+        if (equal < 0) return NULL; \
+        if (!equal) goto done; \
+    } while (0)
+        DO_COMPARE(min_length);
+        DO_COMPARE(max_length);
+    }
+#undef DO_COMPARE
+done:
+    if (op == Py_EQ) {
+        out = equal ? Py_True : Py_False;
+    }
+    else {
+        out = (!equal) ? Py_True : Py_False;
+    }
+    Py_INCREF(out);
+    return out;
+}
+
+static Py_hash_t
+BytesValidator_hash(BytesValidator *self) {
+    Py_ssize_t nfields = 0;
+    Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+#define DO_HASH(field) \
+    if (self->field != NULL) { \
+        Py_uhash_t lane = PyObject_Hash(self->field); \
+        if (lane == (Py_uhash_t)-1) return -1; \
+        acc += lane * MS_HASH_XXPRIME_2; \
+        acc = MS_HASH_XXROTATE(acc); \
+        acc *= MS_HASH_XXPRIME_1; \
+        nfields += 1; \
+    }
+    DO_HASH(min_length);
+    DO_HASH(max_length);
+#undef DO_HASH
+    acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
+    return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
+}
+
+static PyMethodDef BytesValidator_methods[] = {
+    {"__rich_repr__", BytesValidator_rich_repr, METH_NOARGS, "rich repr"},
+    {NULL, NULL},
+};
+
+static int
+BytesValidator_traverse(BytesValidator *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->base.fn);
+    Py_VISIT(self->min_length);
+    Py_VISIT(self->max_length);
+    return 0;
+}
+
+static int
+BytesValidator_clear(BytesValidator *self)
+{
+    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->min_length);
+    Py_CLEAR(self->max_length);
+    return 0;
+}
+
+static void
+BytesValidator_dealloc(BytesValidator *self)
+{
+    PyObject_GC_UnTrack(self);
+    BytesValidator_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyMemberDef BytesValidator_members[] = {
+    {"min_length", T_OBJECT, offsetof(BytesValidator, min_length), READONLY, NULL},
+    {"max_length", T_OBJECT, offsetof(BytesValidator, max_length), READONLY, NULL},
+    {NULL},
+};
+
+static PyTypeObject BytesValidator_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "structtype._core.BytesValidator",
+    .tp_doc = BytesValidator__doc__,
+    .tp_basicsize = sizeof(BytesValidator),
+    .tp_itemsize = 0,
+    .tp_new = BytesValidator_new,
+    .tp_call = BytesValidator_tp_call,
+    .tp_base = &Validator_Type,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
+    .tp_clear = (inquiry)BytesValidator_clear,
+    .tp_traverse = (traverseproc)BytesValidator_traverse,
+    .tp_dealloc = (destructor) BytesValidator_dealloc,
+    .tp_repr = (reprfunc)BytesValidator_repr,
+    .tp_richcompare = (richcmpfunc)BytesValidator_richcompare,
+    .tp_hash = (hashfunc)BytesValidator_hash,
+    .tp_methods = BytesValidator_methods,
+    .tp_members = BytesValidator_members,
+};
+
+/*************************************************************************
+ * CollectionValidator                                                   *
+ *************************************************************************/
+
+static PyTypeObject CollectionValidator_Type;
+
+typedef struct {
+    Validator base;  /* embedded Validator_Type instance state */
+    /* Length constraint fields */
+    PyObject *min_length, *max_length;
+} CollectionValidator;
+
+PyDoc_STRVAR(CollectionValidator__doc__,
+"Length constraints for collection values (``list``, ``set``,\n"
+"``frozenset``, variadic ``tuple``, ``dict``).\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"min_length : int, optional\n"
+"    The annotated value must have a length >= ``min_length``.\n"
+"max_length : int, optional\n"
+"    The annotated value must have a length <= ``max_length``.\n"
+);
+static PyObject *
+CollectionValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    char *kwlist[] = {"min_length", "max_length", NULL};
+    PyObject *min_length = NULL, *max_length = NULL;
+
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "|$OO:CollectionValidator.__new__", kwlist,
+            &min_length, &max_length
+        )
+    )
+        return NULL;
+
+#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
+    NONE_TO_NULL(min_length);
+    NONE_TO_NULL(max_length);
+#undef NONE_TO_NULL
+
+    /* Check constraint parameter types/values */
+    if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
+    if (max_length != NULL && !ensure_is_nonnegative_integer(max_length, "max_length")) return NULL;
+
+    CollectionValidator *self = (CollectionValidator *)CollectionValidator_Type.tp_alloc(&CollectionValidator_Type, 0);
+    if (self == NULL) return NULL;
+
+#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
+    SET_FIELD(min_length);
+    SET_FIELD(max_length);
+#undef SET_FIELD
+
+    return (PyObject *)self;
+}
+
+static PyObject *
+CollectionValidator_tp_call(
+    PyObject *py_self, PyObject *args, PyObject *kwargs
+) {
+    CollectionValidator *self = (CollectionValidator *)py_self;
+    PyObject *value;
+
+    if (!PyArg_ParseTuple(args, "O:CollectionValidator.__call__", &value)) {
+        return NULL;
+    }
+
+    bool is_collection = (
+        PyList_Check(value) ||
+        PyTuple_Check(value) ||
+        PyAnySet_Check(value) ||
+        PyDict_Check(value)
+    );
+#if PY315_PLUS
+    is_collection = is_collection || PyFrozenDict_Check(value);
+#endif
+    if (!is_collection) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "Expected `list`, `set`, `frozenset`, `tuple`, or `dict`, "
+            "got `%.200s`",
+            Py_TYPE(value)->tp_name
+        );
+        return NULL;
+    }
+
+    if (!validator_check_length(value, self->min_length, self->max_length)) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+CollectionValidator_repr(CollectionValidator *self) {
+    strbuilder builder = {0};
+    bool first = true;
+    if (!strbuilder_extend_literal(&builder, "structtype.CollectionValidator(")) return NULL;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
+            goto error; \
+        } \
+    } \
+} while(0)
+    DO_REPR(min_length);
+    DO_REPR(max_length);
+#undef DO_REPR
+    if (!strbuilder_extend_literal(&builder, ")")) goto error;
+    return strbuilder_build(&builder);
+error:
+    strbuilder_reset(&builder);
+    return NULL;
+}
+
+static PyObject *
+CollectionValidator_rich_repr(PyObject *py_self, PyObject *args) {
+    CollectionValidator *self = (CollectionValidator *)py_self;
+    PyObject *out = PyList_New(0);
+    if (out == NULL) goto error;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        PyObject *part = Py_BuildValue("(UO)", #field, self->field); \
+        if (part == NULL) goto error;\
+        int ret = PyList_Append(out, part);\
+        Py_DECREF(part);\
+        if (ret < 0) goto error;\
+    } } while(0)
+    DO_REPR(min_length);
+    DO_REPR(max_length);
+#undef DO_REPR
+    return out;
+error:
+    Py_XDECREF(out);
+    return NULL;
+}
+
+static PyObject *
+CollectionValidator_richcompare(CollectionValidator *self, PyObject *py_other, int op) {
+    int equal = 1;
+    PyObject *out;
+
+    if (Py_TYPE(py_other) != &CollectionValidator_Type) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (!(op == Py_EQ || op == Py_NE)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    CollectionValidator *other = (CollectionValidator *)py_other;
+
+    /* Only need to loop if self is not other */
+    if (MS_LIKELY(self != other)) {
+#define DO_COMPARE(field) do { \
+        equal = _meta_richcompare_part(self->field, other->field); \
+        if (equal < 0) return NULL; \
+        if (!equal) goto done; \
+    } while (0)
+        DO_COMPARE(min_length);
+        DO_COMPARE(max_length);
+    }
+#undef DO_COMPARE
+done:
+    if (op == Py_EQ) {
+        out = equal ? Py_True : Py_False;
+    }
+    else {
+        out = (!equal) ? Py_True : Py_False;
+    }
+    Py_INCREF(out);
+    return out;
+}
+
+static Py_hash_t
+CollectionValidator_hash(CollectionValidator *self) {
+    Py_ssize_t nfields = 0;
+    Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+#define DO_HASH(field) \
+    if (self->field != NULL) { \
+        Py_uhash_t lane = PyObject_Hash(self->field); \
+        if (lane == (Py_uhash_t)-1) return -1; \
+        acc += lane * MS_HASH_XXPRIME_2; \
+        acc = MS_HASH_XXROTATE(acc); \
+        acc *= MS_HASH_XXPRIME_1; \
+        nfields += 1; \
+    }
+    DO_HASH(min_length);
+    DO_HASH(max_length);
+#undef DO_HASH
+    acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
+    return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
+}
+
+static PyMethodDef CollectionValidator_methods[] = {
+    {"__rich_repr__", CollectionValidator_rich_repr, METH_NOARGS, "rich repr"},
+    {NULL, NULL},
+};
+
+static int
+CollectionValidator_traverse(CollectionValidator *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->base.fn);
+    Py_VISIT(self->min_length);
+    Py_VISIT(self->max_length);
+    return 0;
+}
+
+static int
+CollectionValidator_clear(CollectionValidator *self)
+{
+    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->min_length);
+    Py_CLEAR(self->max_length);
+    return 0;
+}
+
+static void
+CollectionValidator_dealloc(CollectionValidator *self)
+{
+    PyObject_GC_UnTrack(self);
+    CollectionValidator_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyMemberDef CollectionValidator_members[] = {
+    {"min_length", T_OBJECT, offsetof(CollectionValidator, min_length), READONLY, NULL},
+    {"max_length", T_OBJECT, offsetof(CollectionValidator, max_length), READONLY, NULL},
+    {NULL},
+};
+
+static PyTypeObject CollectionValidator_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "structtype._core.CollectionValidator",
+    .tp_doc = CollectionValidator__doc__,
+    .tp_basicsize = sizeof(CollectionValidator),
+    .tp_itemsize = 0,
+    .tp_new = CollectionValidator_new,
+    .tp_call = CollectionValidator_tp_call,
+    .tp_base = &Validator_Type,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
+    .tp_clear = (inquiry)CollectionValidator_clear,
+    .tp_traverse = (traverseproc)CollectionValidator_traverse,
+    .tp_dealloc = (destructor) CollectionValidator_dealloc,
+    .tp_repr = (reprfunc)CollectionValidator_repr,
+    .tp_richcompare = (richcmpfunc)CollectionValidator_richcompare,
+    .tp_hash = (hashfunc)CollectionValidator_hash,
+    .tp_methods = CollectionValidator_methods,
+    .tp_members = CollectionValidator_members,
+};
+
+/*************************************************************************
+ * TimezoneValidator                                                     *
+ *************************************************************************/
+
+static PyTypeObject TimezoneValidator_Type;
+
+typedef struct {
+    Validator base;  /* embedded Validator_Type instance state */
+    /* Timezone requirement field */
+    PyObject *tz;
+} TimezoneValidator;
+
+PyDoc_STRVAR(TimezoneValidator__doc__,
+"Timezone requirements for ``datetime.datetime``/``datetime.time`` values.\n"
+"\n"
+"Parameters\n"
+"----------\n"
+"tz : bool\n"
+"    Set to ``True`` to require timezone-aware values, or ``False`` to\n"
+"    require timezone-naive values.\n"
+);
+static PyObject *
+TimezoneValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    char *kwlist[] = {"tz", NULL};
+    PyObject *tz;
+
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "O:TimezoneValidator.__new__", kwlist,
+            &tz
+        )
+    )
+        return NULL;
+
+    /* Check constraint parameter types/values */
+    if (!ensure_is_bool(tz, "tz")) return NULL;
+
+    TimezoneValidator *self = (TimezoneValidator *)TimezoneValidator_Type.tp_alloc(&TimezoneValidator_Type, 0);
+    if (self == NULL) return NULL;
+
+    Py_INCREF(tz);
+    self->tz = tz;
+
+    return (PyObject *)self;
+}
+
+static PyObject *
+TimezoneValidator_tp_call(
+    PyObject *py_self, PyObject *args, PyObject *kwargs
+) {
+    TimezoneValidator *self = (TimezoneValidator *)py_self;
+    PyObject *value;
+
+    if (!PyArg_ParseTuple(args, "O:TimezoneValidator.__call__", &value)) {
+        return NULL;
+    }
+
+    /* Same exact-type dispatch as the decode path */
+    PyTypeObject *pytype = Py_TYPE(value);
+    const char *kind;
+    bool aware;
+    if (pytype == PyDateTimeAPI->DateTimeType) {
+        kind = "datetime";
+        aware = MS_DATE_GET_TZINFO(value) != Py_None;
+    }
+    else if (pytype == PyDateTimeAPI->TimeType) {
+        kind = "time";
+        aware = MS_TIME_GET_TZINFO(value) != Py_None;
+    }
+    else {
+        PyErr_Format(
+            PyExc_TypeError,
+            "Expected `datetime` or `time`, got `%.200s`",
+            pytype->tp_name
+        );
+        return NULL;
+    }
+
+    bool require_aware = (self->tz == Py_True);
+    if (aware != require_aware) {
+        PyErr_Format(
+            PyExc_ValueError,
+            "Expected `%s` with %s timezone component",
+            kind, require_aware ? "a" : "no"
+        );
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+TimezoneValidator_repr(TimezoneValidator *self) {
+    strbuilder builder = {0};
+    bool first = true;
+    if (!strbuilder_extend_literal(&builder, "structtype.TimezoneValidator(")) return NULL;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
+            goto error; \
+        } \
+    } \
+} while(0)
+    DO_REPR(tz);
+#undef DO_REPR
+    if (!strbuilder_extend_literal(&builder, ")")) goto error;
+    return strbuilder_build(&builder);
+error:
+    strbuilder_reset(&builder);
+    return NULL;
+}
+
+static PyObject *
+TimezoneValidator_rich_repr(PyObject *py_self, PyObject *args) {
+    TimezoneValidator *self = (TimezoneValidator *)py_self;
+    PyObject *out = PyList_New(0);
+    if (out == NULL) goto error;
+#define DO_REPR(field) do { \
+    if (self->field != NULL) { \
+        PyObject *part = Py_BuildValue("(UO)", #field, self->field); \
+        if (part == NULL) goto error;\
+        int ret = PyList_Append(out, part);\
+        Py_DECREF(part);\
+        if (ret < 0) goto error;\
+    } } while(0)
+    DO_REPR(tz);
+#undef DO_REPR
+    return out;
+error:
+    Py_XDECREF(out);
+    return NULL;
+}
+
+static PyObject *
+TimezoneValidator_richcompare(TimezoneValidator *self, PyObject *py_other, int op) {
+    int equal = 1;
+    PyObject *out;
+
+    if (Py_TYPE(py_other) != &TimezoneValidator_Type) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    if (!(op == Py_EQ || op == Py_NE)) {
+        Py_RETURN_NOTIMPLEMENTED;
+    }
+    TimezoneValidator *other = (TimezoneValidator *)py_other;
+
+    /* Only need to loop if self is not other */
+    if (MS_LIKELY(self != other)) {
+#define DO_COMPARE(field) do { \
+        equal = _meta_richcompare_part(self->field, other->field); \
+        if (equal < 0) return NULL; \
+        if (!equal) goto done; \
+    } while (0)
+        DO_COMPARE(tz);
+    }
+#undef DO_COMPARE
+done:
+    if (op == Py_EQ) {
+        out = equal ? Py_True : Py_False;
+    }
+    else {
+        out = (!equal) ? Py_True : Py_False;
+    }
+    Py_INCREF(out);
+    return out;
+}
+
+static Py_hash_t
+TimezoneValidator_hash(TimezoneValidator *self) {
+    Py_ssize_t nfields = 0;
+    Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+#define DO_HASH(field) \
+    if (self->field != NULL) { \
+        Py_uhash_t lane = PyObject_Hash(self->field); \
+        if (lane == (Py_uhash_t)-1) return -1; \
+        acc += lane * MS_HASH_XXPRIME_2; \
+        acc = MS_HASH_XXROTATE(acc); \
+        acc *= MS_HASH_XXPRIME_1; \
+        nfields += 1; \
+    }
+    DO_HASH(tz);
+#undef DO_HASH
+    acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
+    return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
+}
+
+static PyMethodDef TimezoneValidator_methods[] = {
+    {"__rich_repr__", TimezoneValidator_rich_repr, METH_NOARGS, "rich repr"},
+    {NULL, NULL},
+};
+
+static int
+TimezoneValidator_traverse(TimezoneValidator *self, visitproc visit, void *arg)
+{
+    Py_VISIT(self->base.fn);
+    Py_VISIT(self->tz);
+    return 0;
+}
+
+static int
+TimezoneValidator_clear(TimezoneValidator *self)
+{
+    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->tz);
+    return 0;
+}
+
+static void
+TimezoneValidator_dealloc(TimezoneValidator *self)
+{
+    PyObject_GC_UnTrack(self);
+    TimezoneValidator_clear(self);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyMemberDef TimezoneValidator_members[] = {
+    {"tz", T_OBJECT_EX, offsetof(TimezoneValidator, tz), READONLY, NULL},
+    {NULL},
+};
+
+static PyTypeObject TimezoneValidator_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "structtype._core.TimezoneValidator",
+    .tp_doc = TimezoneValidator__doc__,
+    .tp_basicsize = sizeof(TimezoneValidator),
+    .tp_itemsize = 0,
+    .tp_new = TimezoneValidator_new,
+    .tp_call = TimezoneValidator_tp_call,
+    .tp_base = &Validator_Type,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
+    .tp_clear = (inquiry)TimezoneValidator_clear,
+    .tp_traverse = (traverseproc)TimezoneValidator_traverse,
+    .tp_dealloc = (destructor) TimezoneValidator_dealloc,
+    .tp_repr = (reprfunc)TimezoneValidator_repr,
+    .tp_richcompare = (richcmpfunc)TimezoneValidator_richcompare,
+    .tp_hash = (hashfunc)TimezoneValidator_hash,
+    .tp_methods = TimezoneValidator_methods,
+    .tp_members = TimezoneValidator_members,
 };
 
 /*************************************************************************
@@ -2786,6 +4562,8 @@ AssocList_Sort(AssocList* list) {
 #define MS_CONSTR_TZ_AWARE          (1ull << 59)
 #define MS_CONSTR_TZ_NAIVE          (1ull << 60)
 #define MS_CONSTR_CODEC             (1ull << 61)
+/* Base/user `Validator` instances; the instance itself is stored in details */
+#define MS_CONSTR_USER_VALIDATOR    (1ull << 62)
 /* Extra flag bit, used by TypedDict/dataclass implementations */
 #define MS_EXTRA_FLAG               (1ull << 63)
 
@@ -2810,6 +4588,8 @@ AssocList_Sort(AssocList* list) {
  * O | ENUM | STRLITERAL |
  * O | TYPEDDICT | DATACLASS |
  * O | NAMEDTUPLE |
+ * C | CODEC (custom types only) |
+ * O | USER_VALIDATOR |
  * O | STR_REGEX |
  * T | DICT [key, value] | FROZENDICT [key, value] |
  * T | LIST | SET | FROZENSET | VARTUPLE |
@@ -2827,7 +4607,6 @@ AssocList_Sort(AssocList* list) {
  * S | ARRAY_MAX_LENGTH |
  * S | MAP_MIN_LENGTH |
  * S | MAP_MAX_LENGTH |
- * C | CODEC |
  * T | FIXTUPLE [size, types ...]
  * */
 
@@ -2857,6 +4636,7 @@ AssocList_Sort(AssocList* list) {
 #define SLOT_19 MS_CONSTR_ARRAY_MAX_LENGTH
 #define SLOT_20 MS_CONSTR_MAP_MIN_LENGTH
 #define SLOT_21 MS_CONSTR_MAP_MAX_LENGTH
+#define SLOT_22 MS_CONSTR_USER_VALIDATOR
 
 /* Common groups */
 #define MS_INT_CONSTRS (SLOT_08 | SLOT_09 | SLOT_10)
@@ -3092,8 +4872,22 @@ TypeNode_get_custom(TypeNode *type) {
 static MS_INLINE PyObject *
 TypeNode_get_codec(TypeNode *type) {
     /* Codecs are only valid on custom types, which occupy the first detail
-     * slot; the codec (a Field*) is therefore always the next one. */
+     * slot; the codec (a Serializer*) is therefore always the next one.
+     * A user validator may follow it (details[2]), but never precede it. */
     return type->details[1].pointer;
+}
+
+static MS_INLINE PyObject *
+TypeNode_get_user_validator(TypeNode *type) {
+    /* The validator packs after the object details (SLOT_00..SLOT_04) and an
+     * optional codec, but BEFORE regex/dict/array/scalar constraint details,
+     * so only those preceding slots may be counted here. */
+    Py_ssize_t i = ms_popcount(
+        type->types & (
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | MS_CONSTR_CODEC
+        )
+    );
+    return type->details[i].pointer;
 }
 
 static MS_INLINE IntLookup *
@@ -3167,7 +4961,7 @@ static MS_INLINE PyObject *
 TypeNode_get_constr_str_regex(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_22
         )
     );
     return type->details[i].pointer;
@@ -3177,7 +4971,8 @@ static MS_INLINE void
 TypeNode_get_dict(TypeNode *type, TypeNode **key, TypeNode **val) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 |
+            SLOT_22
         )
     );
     *key = type->details[i].pointer;
@@ -3188,7 +4983,8 @@ static MS_INLINE TypeNode *
 TypeNode_get_array(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 |
+            SLOT_22
         )
     );
     return type->details[i].pointer;
@@ -3198,7 +4994,8 @@ static MS_INLINE int64_t
 TypeNode_get_constr_int_min(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
+            SLOT_22
         )
     );
     return type->details[i].i64;
@@ -3209,7 +5006,7 @@ TypeNode_get_constr_int_max(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08
+            SLOT_08 | SLOT_22
         )
     );
     return type->details[i].i64;
@@ -3220,7 +5017,7 @@ TypeNode_get_constr_int_multiple_of(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09
+            SLOT_08 | SLOT_09 | SLOT_22
         )
     );
     return type->details[i].i64;
@@ -3231,7 +5028,7 @@ TypeNode_get_constr_float_min(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10
+            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_22
         )
     );
     return type->details[i].f64;
@@ -3242,7 +5039,7 @@ TypeNode_get_constr_float_max(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11
+            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_22
         )
     );
     return type->details[i].f64;
@@ -3253,7 +5050,7 @@ TypeNode_get_constr_float_multiple_of(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12
+            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_22
         )
     );
     return type->details[i].f64;
@@ -3264,7 +5061,7 @@ TypeNode_get_constr_str_min_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13
+            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -3275,7 +5072,7 @@ TypeNode_get_constr_str_max_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14
+            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -3286,7 +5083,8 @@ TypeNode_get_constr_bytes_min_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15
+            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
+            SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -3298,7 +5096,7 @@ TypeNode_get_constr_bytes_max_length(TypeNode *type) {
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
             SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16
+            SLOT_16 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -3310,7 +5108,7 @@ TypeNode_get_constr_array_min_length(TypeNode *type) {
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
             SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17
+            SLOT_16 | SLOT_17 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -3322,7 +5120,7 @@ TypeNode_get_constr_array_max_length(TypeNode *type) {
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
             SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_18
+            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -3334,7 +5132,7 @@ TypeNode_get_constr_map_min_length(TypeNode *type) {
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
             SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19
+            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -3346,7 +5144,7 @@ TypeNode_get_constr_map_max_length(TypeNode *type) {
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
             SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_20
+            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_20 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -3358,7 +5156,7 @@ TypeNode_get_fixtuple(TypeNode *type, Py_ssize_t *offset, Py_ssize_t *size) {
         type->types & (
             SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
             SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_20 | SLOT_21
+            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_20 | SLOT_21 | SLOT_22
         )
     );
     *size = type->details[i].py_ssize_t;
@@ -3377,6 +5175,9 @@ TypeNode_get_traverse_ranges(
         if (type->types & MS_CONSTR_CODEC) {
             n_obj += 1;
         }
+        if (type->types & MS_CONSTR_USER_VALIDATOR) {
+            n_obj += 1;
+        }
     }
     else if (!(type->types & MS_TYPE_ANY)) {
         /* Number of pyobject details */
@@ -3387,7 +5188,8 @@ TypeNode_get_traverse_ranges(
                 MS_TYPE_INTENUM | MS_TYPE_INTLITERAL |
                 MS_TYPE_ENUM | MS_TYPE_STRLITERAL |
                 MS_TYPE_TYPEDDICT | MS_TYPE_DATACLASS |
-                MS_TYPE_NAMEDTUPLE
+                MS_TYPE_NAMEDTUPLE |
+                MS_CONSTR_USER_VALIDATOR
             )
         );
         /* Number of typenode details */
@@ -3516,16 +5318,8 @@ typenode_simple_repr(TypeNode *self) {
 }
 
 typedef struct {
-    PyObject *gt;
-    PyObject *ge;
-    PyObject *lt;
-    PyObject *le;
-    PyObject *multiple_of;
-    PyObject *regex;
-    PyObject *min_length;
-    PyObject *max_length;
-    PyObject *tz;
-    PyObject *codec;  /* the Field carrying dump/validate, or NULL */
+    PyObject *serializer;  /* the Serializer carrying load/dump, or NULL */
+    PyObject *validator;   /* the Validator instance (never .fn), or NULL */
 } Constraints;
 
 typedef struct {
@@ -3561,7 +5355,8 @@ typedef struct {
     double c_float_max;
     double c_float_multiple_of;
     PyObject *c_str_regex;
-    PyObject *codec_obj;  /* Field* with dump/validate, or NULL */
+    PyObject *serializer_obj;  /* Serializer* with load/dump, or NULL */
+    PyObject *validator_obj;   /* owned Validator instance (never .fn), or NULL */
     Py_ssize_t c_str_min_length;
     Py_ssize_t c_str_max_length;
     Py_ssize_t c_bytes_min_length;
@@ -3575,72 +5370,9 @@ typedef struct {
 static MS_INLINE bool
 constraints_is_empty(Constraints *self) {
     return (
-        self->gt == NULL &&
-        self->ge == NULL &&
-        self->lt == NULL &&
-        self->le == NULL &&
-        self->multiple_of == NULL &&
-        self->regex == NULL &&
-        self->min_length == NULL &&
-        self->max_length == NULL &&
-        self->tz == NULL &&
-        self->codec == NULL
+        self->serializer == NULL &&
+        self->validator == NULL
     );
-}
-
-static int
-_set_constraint(PyObject *source, PyObject **target, const char *name, PyObject *type) {
-    if (source == NULL) return 0;
-    if (*target == NULL) {
-        *target = source;
-        return 0;
-    }
-    PyErr_Format(
-        PyExc_TypeError,
-        "Multiple `Field` annotations setting `%s` found, "
-        "type `%R` is invalid",
-        name, type
-    );
-    return -1;
-}
-
-static int
-constraints_update(Constraints *self, Field *meta, PyObject *type) {
-#define set_constraint(field) do { \
-    if (_set_constraint(meta->field, &(self->field), #field, type) < 0) return -1; \
-} while (0)
-    set_constraint(gt);
-    set_constraint(ge);
-    set_constraint(lt);
-    set_constraint(le);
-    set_constraint(multiple_of);
-    set_constraint(regex);
-    set_constraint(min_length);
-    set_constraint(max_length);
-    set_constraint(tz);
-    if (meta->dump != NULL || meta->validate != NULL) {
-        if (_set_constraint((PyObject *)meta, &(self->codec), "dump", type) < 0) return -1;
-    }
-    if (self->gt != NULL && self->ge != NULL) {
-        PyErr_Format(
-            PyExc_TypeError,
-            "Cannot set both `gt` and `ge` on the same annotated type, "
-            "type `%R` is invalid",
-            type
-        );
-        return -1;
-    }
-    if (self->lt != NULL && self->le != NULL) {
-        PyErr_Format(
-            PyExc_TypeError,
-            "Cannot set both `lt` and `le` on the same annotated type, "
-            "type `%R` is invalid",
-            type
-        );
-        return -1;
-    }
-    return 0;
-#undef set_constraint
 }
 
 enum constraint_kind {
@@ -3736,8 +5468,8 @@ typenode_collect_constraints(
     if (constraints == NULL) return 0;
     if (constraints_is_empty(constraints)) return 0;
 
-    /* Codecs are only supported on custom (non-native) types */
-    if (constraints->codec != NULL) {
+    /* Serializers (codecs) are only supported on custom (non-native) types */
+    if (constraints->serializer != NULL) {
         bool is_custom = (
             state->custom_obj != NULL &&
             (state->types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_NONE)) == 0
@@ -3745,136 +5477,166 @@ typenode_collect_constraints(
         if (!is_custom) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`Field(dump=...)`/`Field(validate=...)` codecs can only be used "
-                "on custom types - type `%R` is invalid",
+                "`Serializer(load=...)`/`Serializer(dump=...)` codecs can only be "
+                "used on custom types - type `%R` is invalid",
                 obj
             );
             return -1;
         }
         state->types |= MS_CONSTR_CODEC;
-        Py_INCREF(constraints->codec);
-        state->codec_obj = constraints->codec;
+        Py_INCREF(constraints->serializer);
+        state->serializer_obj = constraints->serializer;
     }
 
-    /* Check that the constraints are valid for the corresponding type */
-    if (kind != CK_INT && kind != CK_FLOAT) {
-        if (constraints->gt != NULL) return err_invalid_constraint("gt", "numeric", obj);
-        if (constraints->ge != NULL) return err_invalid_constraint("ge", "numeric", obj);
-        if (constraints->lt != NULL) return err_invalid_constraint("lt", "numeric", obj);
-        if (constraints->le != NULL) return err_invalid_constraint("le", "numeric", obj);
-        if (constraints->multiple_of != NULL) return err_invalid_constraint("multiple_of", "numeric", obj);
-    }
-    if (kind != CK_STR) {
-        if (constraints->regex != NULL) return err_invalid_constraint("pattern", "str", obj);
-    }
-    if (kind != CK_STR && kind != CK_BYTES && kind != CK_ARRAY && kind != CK_MAP) {
-        if (constraints->min_length != NULL) return err_invalid_constraint("min_length", "str, bytes, or collection", obj);
-        if (constraints->max_length != NULL) return err_invalid_constraint("max_length", "str, bytes, or collection", obj);
-    }
-    if (kind != CK_TIME) {
-        if (constraints->tz != NULL) return err_invalid_constraint("tz", "datetime or time", obj);
-    }
-
-    /* Next attempt to fill in the state. */
-    if (kind == CK_INT) {
-        if (constraints->gt != NULL) {
-            state->types |= MS_CONSTR_INT_MIN;
-            if (!_constr_as_i64(constraints->gt, &(state->c_int_min), 1)) return -1;
+    /* Fast `Validator` subclasses lower into the same constraint machinery as
+     * constraints via `Validator` subclasses; base/user-defined validators are kept
+     * as instances for the decode path. */
+    if (constraints->validator != NULL) {
+        Validator *validator = (Validator *)constraints->validator;
+        PyTypeObject *vtype = Py_TYPE(validator);
+        if (vtype == &NumericValidator_Type) {
+            NumericValidator *v = (NumericValidator *)validator;
+            if (kind == CK_INT) {
+                if (v->gt != NULL) {
+                    state->types |= MS_CONSTR_INT_MIN;
+                    if (!_constr_as_i64(v->gt, &(state->c_int_min), 1)) return -1;
+                }
+                else if (v->ge != NULL) {
+                    state->types |= MS_CONSTR_INT_MIN;
+                    if (!_constr_as_i64(v->ge, &(state->c_int_min), 0)) return -1;
+                }
+                if (v->lt != NULL) {
+                    state->types |= MS_CONSTR_INT_MAX;
+                    if (!_constr_as_i64(v->lt, &(state->c_int_max), -1)) return -1;
+                }
+                else if (v->le != NULL) {
+                    state->types |= MS_CONSTR_INT_MAX;
+                    if (!_constr_as_i64(v->le, &(state->c_int_max), 0)) return -1;
+                }
+                if (v->multiple_of != NULL) {
+                    state->types |= MS_CONSTR_INT_MULTIPLE_OF;
+                    if (!_constr_as_i64(v->multiple_of, &(state->c_int_multiple_of), 0)) return -1;
+                }
+            }
+            else if (kind == CK_FLOAT) {
+                if (v->gt != NULL) {
+                    state->types |= MS_CONSTR_FLOAT_GT;
+                    if (!_constr_as_f64(v->gt, &(state->c_float_min), 1)) return -1;
+                }
+                else if (v->ge != NULL) {
+                    state->types |= MS_CONSTR_FLOAT_GE;
+                    if (!_constr_as_f64(v->ge, &(state->c_float_min), 0)) return -1;
+                }
+                if (v->lt != NULL) {
+                    state->types |= MS_CONSTR_FLOAT_LT;
+                    if (!_constr_as_f64(v->lt, &(state->c_float_max), -1)) return -1;
+                }
+                else if (v->le != NULL) {
+                    state->types |= MS_CONSTR_FLOAT_LE;
+                    if (!_constr_as_f64(v->le, &(state->c_float_max), 0)) return -1;
+                }
+                if (v->multiple_of != NULL) {
+                    state->types |= MS_CONSTR_FLOAT_MULTIPLE_OF;
+                    if (!_constr_as_f64(v->multiple_of, &(state->c_float_multiple_of), 0)) return -1;
+                }
+            }
+            else {
+                /* Numeric parameters are only applicable to numeric types */
+                if (v->gt != NULL) return err_invalid_constraint("gt", "numeric", obj);
+                if (v->ge != NULL) return err_invalid_constraint("ge", "numeric", obj);
+                if (v->lt != NULL) return err_invalid_constraint("lt", "numeric", obj);
+                if (v->le != NULL) return err_invalid_constraint("le", "numeric", obj);
+                if (v->multiple_of != NULL) return err_invalid_constraint("multiple_of", "numeric", obj);
+            }
         }
-        else if (constraints->ge != NULL) {
-            state->types |= MS_CONSTR_INT_MIN;
-            if (!_constr_as_i64(constraints->ge, &(state->c_int_min), 0)) return -1;
+        else if (vtype == &StrValidator_Type) {
+            StrValidator *v = (StrValidator *)validator;
+            if (kind != CK_STR) {
+                if (v->pattern != NULL) return err_invalid_constraint("pattern", "str", obj);
+                if (v->min_length != NULL) return err_invalid_constraint("min_length", "str", obj);
+                if (v->max_length != NULL) return err_invalid_constraint("max_length", "str", obj);
+            }
+            else {
+                if (v->regex != NULL) {
+                    state->types |= MS_CONSTR_STR_REGEX;
+                    Py_INCREF(v->regex);
+                    state->c_str_regex = v->regex;
+                }
+                if (v->min_length != NULL) {
+                    state->types |= MS_CONSTR_STR_MIN_LENGTH;
+                    if (!_constr_as_py_ssize_t(v->min_length, &(state->c_str_min_length))) return -1;
+                }
+                if (v->max_length != NULL) {
+                    state->types |= MS_CONSTR_STR_MAX_LENGTH;
+                    if (!_constr_as_py_ssize_t(v->max_length, &(state->c_str_max_length))) return -1;
+                }
+            }
         }
-        if (constraints->lt != NULL) {
-            state->types |= MS_CONSTR_INT_MAX;
-            if (!_constr_as_i64(constraints->lt, &(state->c_int_max), -1)) return -1;
+        else if (vtype == &BytesValidator_Type) {
+            BytesValidator *v = (BytesValidator *)validator;
+            if (kind != CK_BYTES) {
+                if (v->min_length != NULL) return err_invalid_constraint("min_length", "bytes-like", obj);
+                if (v->max_length != NULL) return err_invalid_constraint("max_length", "bytes-like", obj);
+            }
+            else {
+                if (v->min_length != NULL) {
+                    state->types |= MS_CONSTR_BYTES_MIN_LENGTH;
+                    if (!_constr_as_py_ssize_t(v->min_length, &(state->c_bytes_min_length))) return -1;
+                }
+                if (v->max_length != NULL) {
+                    state->types |= MS_CONSTR_BYTES_MAX_LENGTH;
+                    if (!_constr_as_py_ssize_t(v->max_length, &(state->c_bytes_max_length))) return -1;
+                }
+            }
         }
-        else if (constraints->le != NULL) {
-            state->types |= MS_CONSTR_INT_MAX;
-            if (!_constr_as_i64(constraints->le, &(state->c_int_max), 0)) return -1;
+        else if (vtype == &CollectionValidator_Type) {
+            CollectionValidator *v = (CollectionValidator *)validator;
+            if (kind == CK_ARRAY) {
+                if (v->min_length != NULL) {
+                    state->types |= MS_CONSTR_ARRAY_MIN_LENGTH;
+                    if (!_constr_as_py_ssize_t(v->min_length, &(state->c_array_min_length))) return -1;
+                }
+                if (v->max_length != NULL) {
+                    state->types |= MS_CONSTR_ARRAY_MAX_LENGTH;
+                    if (!_constr_as_py_ssize_t(v->max_length, &(state->c_array_max_length))) return -1;
+                }
+            }
+            else if (kind == CK_MAP) {
+                if (v->min_length != NULL) {
+                    state->types |= MS_CONSTR_MAP_MIN_LENGTH;
+                    if (!_constr_as_py_ssize_t(v->min_length, &(state->c_map_min_length))) return -1;
+                }
+                if (v->max_length != NULL) {
+                    state->types |= MS_CONSTR_MAP_MAX_LENGTH;
+                    if (!_constr_as_py_ssize_t(v->max_length, &(state->c_map_max_length))) return -1;
+                }
+            }
+            else {
+                if (v->min_length != NULL) return err_invalid_constraint("min_length", "collection", obj);
+                if (v->max_length != NULL) return err_invalid_constraint("max_length", "collection", obj);
+            }
         }
-        if (constraints->multiple_of != NULL) {
-            state->types |= MS_CONSTR_INT_MULTIPLE_OF;
-            if (!_constr_as_i64(constraints->multiple_of, &(state->c_int_multiple_of), 0)) return -1;
-        }
-    }
-    else if (kind == CK_FLOAT) {
-        if (constraints->gt != NULL) {
-            state->types |= MS_CONSTR_FLOAT_GT;
-            if (!_constr_as_f64(constraints->gt, &(state->c_float_min), 1)) return -1;
-        }
-        else if (constraints->ge != NULL) {
-            state->types |= MS_CONSTR_FLOAT_GE;
-            if (!_constr_as_f64(constraints->ge, &(state->c_float_min), 0)) return -1;
-        }
-        if (constraints->lt != NULL) {
-            state->types |= MS_CONSTR_FLOAT_LT;
-            if (!_constr_as_f64(constraints->lt, &(state->c_float_max), -1)) return -1;
-        }
-        else if (constraints->le != NULL) {
-            state->types |= MS_CONSTR_FLOAT_LE;
-            if (!_constr_as_f64(constraints->le, &(state->c_float_max), 0)) return -1;
-        }
-        if (constraints->multiple_of != NULL) {
-            state->types |= MS_CONSTR_FLOAT_MULTIPLE_OF;
-            if (!_constr_as_f64(constraints->multiple_of, &(state->c_float_multiple_of), 0)) return -1;
-        }
-    }
-    else if (kind == CK_STR) {
-        if (constraints->regex != NULL) {
-            state->types |= MS_CONSTR_STR_REGEX;
-            Py_INCREF(constraints->regex);
-            state->c_str_regex = constraints->regex;
-        }
-        if (constraints->min_length != NULL) {
-            state->types |= MS_CONSTR_STR_MIN_LENGTH;
-            if (!_constr_as_py_ssize_t(constraints->min_length, &(state->c_str_min_length))) return -1;
-        }
-        if (constraints->max_length != NULL) {
-            state->types |= MS_CONSTR_STR_MAX_LENGTH;
-            if (!_constr_as_py_ssize_t(constraints->max_length, &(state->c_str_max_length))) return -1;
-        }
-    }
-    else if (kind == CK_BYTES) {
-        if (constraints->min_length != NULL) {
-            state->types |= MS_CONSTR_BYTES_MIN_LENGTH;
-            if (!_constr_as_py_ssize_t(constraints->min_length, &(state->c_bytes_min_length))) return -1;
-        }
-        if (constraints->max_length != NULL) {
-            state->types |= MS_CONSTR_BYTES_MAX_LENGTH;
-            if (!_constr_as_py_ssize_t(constraints->max_length, &(state->c_bytes_max_length))) return -1;
-        }
-    }
-    else if (kind == CK_TIME) {
-        if (constraints->tz != NULL) {
-            if (constraints->tz == Py_True) {
+        else if (vtype == &TimezoneValidator_Type) {
+            TimezoneValidator *v = (TimezoneValidator *)validator;
+            if (kind != CK_TIME) {
+                return err_invalid_constraint("tz", "datetime or time", obj);
+            }
+            else if (v->tz == Py_True) {
                 state->types |= MS_CONSTR_TZ_AWARE;
             }
             else {
                 state->types |= MS_CONSTR_TZ_NAIVE;
             }
         }
-    }
-    else if (kind == CK_ARRAY) {
-        if (constraints->min_length != NULL) {
-            state->types |= MS_CONSTR_ARRAY_MIN_LENGTH;
-            if (!_constr_as_py_ssize_t(constraints->min_length, &(state->c_array_min_length))) return -1;
-        }
-        if (constraints->max_length != NULL) {
-            state->types |= MS_CONSTR_ARRAY_MAX_LENGTH;
-            if (!_constr_as_py_ssize_t(constraints->max_length, &(state->c_array_max_length))) return -1;
+        else {
+            /* Base `Validator` or a user-defined Python subclass: keep the
+             * instance itself for the decode path */
+            state->types |= MS_CONSTR_USER_VALIDATOR;
+            Py_INCREF(validator);
+            state->validator_obj = validator;
         }
     }
-    else if (kind == CK_MAP) {
-        if (constraints->min_length != NULL) {
-            state->types |= MS_CONSTR_MAP_MIN_LENGTH;
-            if (!_constr_as_py_ssize_t(constraints->min_length, &(state->c_map_min_length))) return -1;
-        }
-        if (constraints->max_length != NULL) {
-            state->types |= MS_CONSTR_MAP_MAX_LENGTH;
-            if (!_constr_as_py_ssize_t(constraints->max_length, &(state->c_map_max_length))) return -1;
-        }
-    }
+
     return 0;
 }
 
@@ -3911,7 +5673,8 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
             MS_CONSTR_ARRAY_MAX_LENGTH |
             MS_CONSTR_MAP_MIN_LENGTH |
             MS_CONSTR_MAP_MAX_LENGTH |
-            MS_CONSTR_CODEC
+            MS_CONSTR_CODEC |
+            MS_CONSTR_USER_VALIDATOR
         )
     );
     if (state->types & MS_TYPE_FIXTUPLE) {
@@ -3998,8 +5761,12 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
         out->details[e_ind++].pointer = info;
     }
     if (state->types & MS_CONSTR_CODEC) {
-        Py_INCREF(state->codec_obj);
-        out->details[e_ind++].pointer = state->codec_obj;
+        Py_INCREF(state->serializer_obj);
+        out->details[e_ind++].pointer = state->serializer_obj;
+    }
+    if (state->types & MS_CONSTR_USER_VALIDATOR) {
+        Py_INCREF(state->validator_obj);
+        out->details[e_ind++].pointer = state->validator_obj;
     }
     if (state->types & MS_CONSTR_STR_REGEX) {
         Py_INCREF(state->c_str_regex);
@@ -4118,7 +5885,8 @@ typenode_collect_check_invariants(TypeNodeCollectState *state) {
     /* If a custom type is used, this node may only contain that type and `None */
     if (
         state->custom_obj != NULL &&
-        state->types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_NONE | MS_CONSTR_CODEC)
+        state->types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_NONE |
+                         MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR)
     ) {
         PyErr_Format(
             PyExc_TypeError,
@@ -4737,7 +6505,8 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
     Py_CLEAR(state->literal_str_values);
     Py_CLEAR(state->literal_str_lookup);
     Py_CLEAR(state->c_str_regex);
-    Py_CLEAR(state->codec_obj);
+    Py_CLEAR(state->serializer_obj);
+    Py_CLEAR(state->validator_obj);
 }
 
 /* This decomposes an input type `obj`, stripping out any "wrapper" types
@@ -4748,7 +6517,8 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
  *   applied to work around differences in type spelling (List vs list) and
  *   python version.
  * - `args`: `__args__` on `t` (if present)
- * - `constraints`: Any constraints from `Field` objects annotated on the type
+ * - `constraints`: Any constraints from `Validator` objects and the codec
+ *   (`Serializer`) / validator (`Validator`) annotated on the type
  */
 static PyObject *
 typenode_origin_args_metadata(
@@ -4791,11 +6561,35 @@ typenode_origin_args_metadata(
                 if (metadata == NULL) goto error;
                 for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(metadata); i++) {
                     PyObject *annot = PyTuple_GET_ITEM(metadata, i);
-                    if (Py_TYPE(annot) == &Field_Type) {
-                        if (constraints_update(constraints, (Field *)annot, obj) < 0) {
+                    if (Py_TYPE(annot) == &Serializer_Type) {
+                        Serializer *ser = (Serializer *)annot;
+                        /* An empty Serializer carries no codecs - ignore it,
+                         * matching the old inert `Field()` behavior. */
+                        if (ser->load == NULL && ser->dump == NULL) continue;
+                        if (constraints->serializer != NULL) {
+                            PyErr_Format(
+                                PyExc_TypeError,
+                                "Multiple `Serializer` annotations found, "
+                                "type `%R` is invalid",
+                                obj
+                            );
                             Py_DECREF(metadata);
                             goto error;
                         }
+                        constraints->serializer = ser;
+                    }
+                    else if (PyObject_TypeCheck(annot, (PyTypeObject *)&Validator_Type)) {
+                        if (constraints->validator != NULL) {
+                            PyErr_Format(
+                                PyExc_TypeError,
+                                "Multiple `Validator` annotations found, "
+                                "type `%R` is invalid",
+                                obj
+                            );
+                            Py_DECREF(metadata);
+                            goto error;
+                        }
+                        constraints->validator = annot;
                     }
                 }
                 Py_DECREF(metadata);
@@ -5363,6 +7157,29 @@ ms_maybe_wrap_validation_error(PathNode *path) {
     }
     /* Restore the new exception state */
     PyErr_Restore(exc_type, exc, tb);
+}
+
+/* Invoke the stored base/user `Validator` instance on `value`. Only call
+ * this when `MS_CONSTR_USER_VALIDATOR` is set. Takes ownership of `value`;
+ * returns it unchanged when validation passes, or NULL (having DECREF'd
+ * `value`) after wrapping ValueError/TypeError failures into a
+ * ValidationError with path context. */
+static PyObject *
+ms_call_user_validator(PyObject *value, TypeNode *type, PathNode *path) {
+    /* Like the fast constraints, validators are skipped for optional
+     * (`X | None`) values decoding to `null` */
+    if (value == Py_None && type->types & MS_TYPE_NONE) {
+        return value;
+    }
+    PyObject *validator = TypeNode_get_user_validator(type);
+    PyObject *result = PyObject_CallOneArg(validator, value);
+    if (MS_UNLIKELY(result == NULL)) {
+        Py_DECREF(value);
+        ms_maybe_wrap_validation_error(path);
+        return NULL;
+    }
+    Py_DECREF(result);
+    return value;
 }
 
 static PyTypeObject StructMixinType;
@@ -6017,7 +7834,8 @@ ms_is_single_custom_type(PyObject *t, StructspecState *mod) {
     }
     out = (
         state.custom_obj != NULL &&
-        (state.types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_CONSTR_CODEC)) == 0
+        (state.types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC |
+                         MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR)) == 0
     );
 done:
     typenode_collect_clear_state(&state);
@@ -6033,8 +7851,8 @@ codec_map_set(PyObject *codecs, PyObject *base_type, PyObject *dump, PyObject *c
         if (existing != dump) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`Field(dump=...)` codecs for type `%R` conflict within a single "
-                "field - type `%R` is invalid",
+                "`Serializer(dump=...)` codecs for type `%R` conflict within a "
+                "single field - type `%R` is invalid",
                 base_type, ctx
             );
             return -1;
@@ -6044,15 +7862,122 @@ codec_map_set(PyObject *codecs, PyObject *base_type, PyObject *dump, PyObject *c
     return PyDict_SetItem(codecs, base_type, dump);
 }
 
-/* Recursively walk an annotation, collecting Field codecs into a per-field
- * codec map and validating that each codec is attached to a custom type. */
+/* Classify a resolved type into its constraint kind for validator-applicability
+ * checks at class creation time.  Returns CK_OTHER for types whose kind cannot
+ * be determined statically (unions, forward refs, unknown generics) so the
+ * caller can defer to the lazy decoder-build check. */
+static enum constraint_kind
+classify_annotation_kind(PyObject *t, StructspecState *mod) {
+    if (t == (PyObject *)(&PyLong_Type)) return CK_INT;
+    if (t == (PyObject *)(&PyFloat_Type)) return CK_FLOAT;
+    if (t == (PyObject *)(&PyUnicode_Type)) return CK_STR;
+    if (t == (PyObject *)(&PyBytes_Type)) return CK_BYTES;
+    if (t == (PyObject *)(&PyByteArray_Type)) return CK_BYTES;
+    if (t == (PyObject *)(&PyMemoryView_Type)) return CK_BYTES;
+    if (t == (PyObject *)(PyDateTimeAPI->DateTimeType)) return CK_TIME;
+    if (t == (PyObject *)(PyDateTimeAPI->TimeType)) return CK_TIME;
+
+    PyObject *origin = PyObject_GetAttr(t, mod->str___origin__);
+    if (origin != NULL) {
+        enum constraint_kind k = CK_OTHER;
+        if (origin == (PyObject *)(&PyDict_Type)) k = CK_MAP;
+        else if (origin == (PyObject *)(&PyList_Type)) k = CK_ARRAY;
+        else if (origin == (PyObject *)(&PySet_Type)) k = CK_ARRAY;
+        else if (origin == (PyObject *)(&PyFrozenSet_Type)) k = CK_ARRAY;
+        else if (origin == (PyObject *)(&PyTuple_Type)) k = CK_ARRAY;
+        Py_DECREF(origin);
+        return k;
+    }
+    PyErr_Clear();
+    return CK_OTHER;
+}
+
+/* Validate that a fast Validator subclass is applicable to the given type
+ * kind at class creation time.  Returns 0 on success, -1 with TypeError on
+ * mismatch.  Base Validators (and user-defined subclasses) always pass --
+ * their kind check is deferred to the lazy decoder-build path. */
+static int
+validate_fast_validator_kind(
+    PyObject *validator, enum constraint_kind kind, PyObject *obj
+) {
+    PyTypeObject *vtype = Py_TYPE(validator);
+
+    if (vtype == &NumericValidator_Type) {
+        if (kind != CK_INT && kind != CK_FLOAT) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "`NumericValidator` can only be applied to numeric types "
+                "- type `%R` is invalid",
+                obj
+            );
+            return -1;
+        }
+    }
+    else if (vtype == &StrValidator_Type) {
+        if (kind != CK_STR) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "`StrValidator` can only be applied to `str` types "
+                "- type `%R` is invalid",
+                obj
+            );
+            return -1;
+        }
+    }
+    else if (vtype == &BytesValidator_Type) {
+        if (kind != CK_BYTES) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "`BytesValidator` can only be applied to bytes-like types "
+                "- type `%R` is invalid",
+                obj
+            );
+            return -1;
+        }
+    }
+    else if (vtype == &CollectionValidator_Type) {
+        if (kind != CK_ARRAY && kind != CK_MAP) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "`CollectionValidator` can only be applied to collection types "
+                "- type `%R` is invalid",
+                obj
+            );
+            return -1;
+        }
+    }
+    else if (vtype == &TimezoneValidator_Type) {
+        if (kind != CK_TIME) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "`TimezoneValidator` can only be applied to `datetime` or "
+                "`time` types - type `%R` is invalid",
+                obj
+            );
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* Recursively walk an annotation, enforcing composition rules (at most one
+ * Field, Serializer, and Validator per Annotated position), validating
+ * Validator-vs-type-kind applicability, and collecting Serializer.dump
+ * codecs into a per-field codec map. */
 static int
 codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyObject *ctx) {
     PyObject *t = ann;
     Py_INCREF(t);
     int out = -1;
 
-    /* Strip Annotated wrappers, collecting Field metadata at this level. */
+    /* Composition tracking across nested Annotated wrappers at this position. */
+    int n_fields = 0;
+    int n_serializers = 0;
+    int n_validators = 0;
+    PyObject *validator_obj = NULL;
+
+    /* Strip Annotated wrappers, enforcing composition rules and collecting
+     * Serializers/codecs at each level. */
     while (Py_TYPE(t) == (PyTypeObject *)(mod->typing_annotated_alias)) {
         PyObject *origin = PyObject_GetAttr(t, mod->str___origin__);
         if (origin == NULL) goto error;
@@ -6063,30 +7988,83 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
         }
         for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(metadata); i++) {
             PyObject *item = PyTuple_GET_ITEM(metadata, i);
-            if (Py_TYPE(item) != &Field_Type) continue;
-            Field *field = (Field *)item;
-            if (field->dump == NULL && field->validate == NULL) continue;
-            if (!ms_is_single_custom_type(origin, mod)) {
-                PyErr_Format(
-                    PyExc_TypeError,
-                    "`Field(dump=...)`/`Field(validate=...)` codecs can only be "
-                    "used on custom types - type `%R` is invalid",
-                    origin
-                );
-                Py_DECREF(metadata);
-                Py_DECREF(origin);
-                goto error;
-            }
-            if (field->dump != NULL) {
-                if (codec_map_set(codecs, origin, field->dump, ctx) < 0) {
+            if (Py_TYPE(item) == &Field_Type) {
+                n_fields++;
+                if (n_fields > 1) {
+                    PyErr_Format(
+                        PyExc_TypeError,
+                        "Multiple `Field` annotations found, "
+                        "type `%R` is invalid",
+                        ctx
+                    );
                     Py_DECREF(metadata);
                     Py_DECREF(origin);
                     goto error;
                 }
             }
+            else if (Py_TYPE(item) == &Serializer_Type) {
+                n_serializers++;
+                if (n_serializers > 1) {
+                    PyErr_Format(
+                        PyExc_TypeError,
+                        "Multiple `Serializer` annotations found, "
+                        "type `%R` is invalid",
+                        ctx
+                    );
+                    Py_DECREF(metadata);
+                    Py_DECREF(origin);
+                    goto error;
+                }
+                Serializer *serializer = (Serializer *)item;
+                if (serializer->dump == NULL && serializer->load == NULL) continue;
+                if (!ms_is_single_custom_type(origin, mod)) {
+                    PyErr_Format(
+                        PyExc_TypeError,
+                        "`Serializer(load=...)`/`Serializer(dump=...)` codecs can "
+                        "only be used on custom types - type `%R` is invalid",
+                        origin
+                    );
+                    Py_DECREF(metadata);
+                    Py_DECREF(origin);
+                    goto error;
+                }
+                if (serializer->dump != NULL) {
+                    if (codec_map_set(codecs, origin, serializer->dump, ctx) < 0) {
+                        Py_DECREF(metadata);
+                        Py_DECREF(origin);
+                        goto error;
+                    }
+                }
+            }
+            else if (PyObject_TypeCheck(item, (PyTypeObject *)&Validator_Type)) {
+                n_validators++;
+                if (n_validators > 1) {
+                    PyErr_Format(
+                        PyExc_TypeError,
+                        "Multiple `Validator` annotations found, "
+                        "type `%R` is invalid",
+                        ctx
+                    );
+                    Py_DECREF(metadata);
+                    Py_DECREF(origin);
+                    goto error;
+                }
+                validator_obj = item;
+            }
         }
         Py_DECREF(metadata);
         Py_SETREF(t, origin);
+    }
+
+    /* Validate Validator-vs-type-kind applicability.  After stripping all
+     * Annotated wrappers `t` is the base type for this position. */
+    if (validator_obj != NULL) {
+        enum constraint_kind kind = classify_annotation_kind(t, mod);
+        if (kind != CK_OTHER) {
+            if (validate_fast_validator_kind(validator_obj, kind, ctx) < 0) {
+                goto error;
+            }
+        }
     }
 
     /* Strip NewType / TypeAliasType / Final wrappers. */
@@ -6138,8 +8116,8 @@ error:
 }
 
 /* Build per-field codec maps ({base_type: dump}) from field annotations.
- * Validates at class creation that codecs are on custom types and that a
- * single field doesn't register two different dumps for one type. Fields
+ * Delegates per-position work to the unified codec_walk_annotation which now
+ * also enforces composition rules and Validator applicability.  Fields
  * inherited from struct base classes keep their base codec maps. */
 static int
 structmeta_collect_codecs(StructMetaInfo *info, StructspecState *mod, PyObject *bases) {
@@ -7724,7 +9702,7 @@ Struct_build_abstract_error(PyTypeObject *cls) {
     Py_DECREF(joined);
 }
 
-static int struct_check_recursive(PyObject *, StructspecState *);
+static int struct_check_recursive(PyObject *, StructspecState *, PathNode *);
 
 static PyObject *
 Struct_vectorcall(PyTypeObject *cls, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
@@ -7845,7 +9823,7 @@ kw_found:
     if (st_type->validate_on_init == OPT_TRUE) {
         StructspecState *mod = structtype_get_global_state();
         if (mod == NULL) goto error;
-        if (struct_check_recursive(self, mod) < 0) goto error;
+        if (struct_check_recursive(self, mod, NULL) < 0) goto error;
     }
 
     if (Struct_post_init(st_type, self) < 0) goto error;
@@ -9880,11 +11858,11 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
         custom_cls = custom_obj;
     }
 
-    /* Field codec (Annotated[X, Field(validate=...)]) takes precedence over the
+    /* Serializer (Annotated[X, Serializer(load=...)]) takes precedence over the
      * protocol fallback chain, but only when the value isn't already the type. */
     if (type->types & MS_CONSTR_CODEC) {
-        Field *codec = (Field *)TypeNode_get_codec(type);
-        if (codec->validate != NULL) {
+        Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
+        if (serializer->load != NULL) {
             int is_inst = PyObject_IsInstance(out, custom_cls);
             if (is_inst < 0) {
                 Py_DECREF(out);
@@ -9892,7 +11870,7 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
                 return NULL;
             }
             if (!is_inst) {
-                PyObject *temp = PyObject_CallOneArg(codec->validate, out);
+                PyObject *temp = PyObject_CallOneArg(serializer->load, out);
                 Py_DECREF(out);
                 if (temp == NULL) {
                     ms_maybe_wrap_validation_error(path);
@@ -9900,7 +11878,7 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
                     return NULL;
                 }
                 out = temp;
-                goto done;
+                goto validate;
             }
         }
     }
@@ -9983,7 +11961,12 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
         Py_CLEAR(out);
     }
 
-done:
+validate:
+    /* User validators run last, on the fully decoded/loaded value */
+    if (out != NULL && type->types & MS_CONSTR_USER_VALIDATOR) {
+        out = ms_call_user_validator(out, type, path);
+    }
+
     if (generic) {
         Py_DECREF(custom_cls);
     }
@@ -10502,10 +12485,6 @@ ms_encode_err_type_unsupported(PyTypeObject *type) {
 /*************************************************************************
  * Datetime utilities                                                    *
  *************************************************************************/
-
-#define MS_HAS_TZINFO(o)  (((_PyDateTime_BaseTZInfo *)(o))->hastzinfo)
-#define MS_DATE_GET_TZINFO(o) PyDateTime_DATE_GET_TZINFO(o)
-#define MS_TIME_GET_TZINFO(o) PyDateTime_TIME_GET_TZINFO(o)
 
 /* Returns a new reference */
 static PyObject*
@@ -14403,7 +16382,17 @@ json_decode_dict_key(JSONDecoderState *self, TypeNode *type, PathNode *path) {
     Py_ssize_t size;
     size = json_decode_string_view(self, &view, &is_ascii);
     if (size < 0) return NULL;
-    return json_decode_dict_key_fallback(self, view, size, is_ascii, type, path);
+    PyObject *key = json_decode_dict_key_fallback(self, view, size, is_ascii, type, path);
+    /* Custom keys already had any user validator applied by
+     * `ms_decode_custom` inside the fallback */
+    if (
+        MS_UNLIKELY(type->types & MS_CONSTR_USER_VALIDATOR) &&
+        !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC)) &&
+        key != NULL
+    ) {
+        return ms_call_user_validator(key, type, path);
+    }
+    return key;
 }
 
 static PyObject *
@@ -15742,6 +17731,9 @@ json_decode(
     PyObject *obj = json_decode_nocustom(self, type, path);
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
         return ms_decode_custom(obj, type, path);
+    }
+    if (MS_UNLIKELY(type->types & MS_CONSTR_USER_VALIDATOR) && obj != NULL) {
+        return ms_call_user_validator(obj, type, path);
     }
     return obj;
 }
@@ -18421,7 +20413,7 @@ validate_other(
 }
 
 static PyObject *
-validate_obj(
+validate_obj_dispatch(
     ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_ANY))) {
@@ -18504,6 +20496,21 @@ validate_obj(
     }
 }
 
+static PyObject *
+validate_obj(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
+) {
+    PyObject *out = validate_obj_dispatch(self, obj, type, path);
+    /* Custom types had any user validator applied by `ms_decode_custom` */
+    if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
+        return out;
+    }
+    if (MS_UNLIKELY(type->types & MS_CONSTR_USER_VALIDATOR) && out != NULL) {
+        return ms_call_user_validator(out, type, path);
+    }
+    return out;
+}
+
 static PyObject*
 structtype_validate(PyObject *self, PyObject *args, PyObject *kwargs)
 {
@@ -18574,7 +20581,7 @@ Struct_dump_json(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObje
             if (PyUnicode_CompareWithASCIIString(name, "enc_hook") == 0) {
                 return PyErr_Format(PyExc_TypeError,
                     "`enc_hook` has been removed; use "
-                    "`Annotated[T, Field(dump=...)]` or a `struct_dump` method "
+                    "`Annotated[T, Serializer(dump=...)]` or a `struct_dump` method "
                     "on the custom type instead");
             }
         }
@@ -18752,7 +20759,8 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
 static int
 struct_check_recursive(
     PyObject *self,
-    StructspecState *mod
+    StructspecState *mod,
+    PathNode *path
 ) {
     StructMetaObject *st_type = (StructMetaObject *)Py_TYPE(self);
 
@@ -18770,11 +20778,22 @@ struct_check_recursive(
         TypeNode *field_type = info->types[i];
         if (field_type == NULL) continue;
 
+        PathNode field_path = {path, i, (PyObject *)st_type};
+
         /* Direct struct fields: recurse into them */
         if (field_type->types & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
             StructInfo *nested_info = TypeNode_get_struct_info(field_type);
             if (Py_TYPE(val) == (PyTypeObject *)nested_info->class) {
-                ret = struct_check_recursive(val, mod);
+                ret = struct_check_recursive(val, mod, &field_path);
+                if (ret == 0 && field_type->types & MS_CONSTR_USER_VALIDATOR) {
+                    /* `ms_call_user_validator` steals the reference */
+                    Py_INCREF(val);
+                    PyObject *checked = ms_call_user_validator(
+                        val, field_type, &field_path
+                    );
+                    Py_XDECREF(checked);
+                    if (checked == NULL) ret = -1;
+                }
                 continue;
             }
         }
@@ -18783,7 +20802,15 @@ struct_check_recursive(
             field_type->types & (MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION)
         ) {
             if (ms_is_struct_inst(val)) {
-                ret = struct_check_recursive(val, mod);
+                ret = struct_check_recursive(val, mod, &field_path);
+                if (ret == 0 && field_type->types & MS_CONSTR_USER_VALIDATOR) {
+                    Py_INCREF(val);
+                    PyObject *checked = ms_call_user_validator(
+                        val, field_type, &field_path
+                    );
+                    Py_XDECREF(checked);
+                    if (checked == NULL) ret = -1;
+                }
                 continue;
             }
         }
@@ -18795,7 +20822,7 @@ struct_check_recursive(
         state.from_attributes = 0;
         state.str_keys = 0;
         state.builtin_types = 0;
-        PyObject *out = validate_obj(&state, val, field_type, NULL);
+        PyObject *out = validate_obj(&state, val, field_type, &field_path);
         if (out == NULL) {
             ret = -1;
         } else {
@@ -18831,7 +20858,7 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
         return NULL;
     }
 
-    if (struct_check_recursive(self, mod) < 0)
+    if (struct_check_recursive(self, mod, NULL) < 0)
         return NULL;
 
     Py_RETURN_NONE;
@@ -19002,6 +21029,20 @@ PyInit__core(void)
         return NULL;
     if (PyType_Ready(&Field_Type) < 0)
         return NULL;
+    if (PyType_Ready(&Serializer_Type) < 0)
+        return NULL;
+    if (PyType_Ready(&Validator_Type) < 0)
+        return NULL;
+    if (PyType_Ready(&NumericValidator_Type) < 0)
+        return NULL;
+    if (PyType_Ready(&StrValidator_Type) < 0)
+        return NULL;
+    if (PyType_Ready(&BytesValidator_Type) < 0)
+        return NULL;
+    if (PyType_Ready(&CollectionValidator_Type) < 0)
+        return NULL;
+    if (PyType_Ready(&TimezoneValidator_Type) < 0)
+        return NULL;
     if (PyType_Ready(&IntLookup_Type) < 0)
         return NULL;
     if (PyType_Ready(&StrLookup_Type) < 0)
@@ -19039,6 +21080,20 @@ PyInit__core(void)
     if (PyModule_AddObjectRef(m, "Factory", (PyObject *)&Factory_Type) < 0)
         return NULL;
     if (PyModule_AddObjectRef(m, "Field", (PyObject *)&Field_Type) < 0)
+        return NULL;
+    if (PyModule_AddObjectRef(m, "Serializer", (PyObject *)&Serializer_Type) < 0)
+        return NULL;
+    if (PyModule_AddObjectRef(m, "Validator", (PyObject *)&Validator_Type) < 0)
+        return NULL;
+    if (PyModule_AddObjectRef(m, "NumericValidator", (PyObject *)&NumericValidator_Type) < 0)
+        return NULL;
+    if (PyModule_AddObjectRef(m, "StrValidator", (PyObject *)&StrValidator_Type) < 0)
+        return NULL;
+    if (PyModule_AddObjectRef(m, "BytesValidator", (PyObject *)&BytesValidator_Type) < 0)
+        return NULL;
+    if (PyModule_AddObjectRef(m, "CollectionValidator", (PyObject *)&CollectionValidator_Type) < 0)
+        return NULL;
+    if (PyModule_AddObjectRef(m, "TimezoneValidator", (PyObject *)&TimezoneValidator_Type) < 0)
         return NULL;
 
     if (PyModule_AddObjectRef(m, "StructConfig", (PyObject *)&StructConfig_Type) < 0)

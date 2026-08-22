@@ -177,7 +177,20 @@ Field
 
 .. autoclass:: Field
     :members:
-    :exclude-members: dump, validate
+
+
+Factory
+-------
+
+.. autoclass:: Factory
+    :members:
+
+
+Serializer
+----------
+
+.. autoclass:: Serializer
+    :members:
 
     .. attribute:: dump
 
@@ -187,11 +200,11 @@ Field
         :doc:`natively supported <supported-types>` types. Used during
         encoding. Only valid for custom types; attaching a ``dump`` codec to a
         natively supported type or a union (including optional types such as
-        ``Annotated[complex | None, Field(...)]``) raises a ``TypeError`` — at
+        ``Annotated[complex | None, ...]``) raises a ``TypeError`` — at
         class creation time for ``Struct``, at construction for
         ``StructAdapter``. See :doc:`extending`.
 
-    .. attribute:: validate
+    .. attribute:: load
 
         :type: Callable[[Any], Any] | None
 
@@ -200,23 +213,30 @@ Field
         (``struct_validate`` / ``struct_validate_json``) and during
         ``struct_validate_self`` when the field value is not already an instance
         of the custom type. Only valid for custom types; attaching a
-        ``validate`` codec to a natively supported type or a union (including
-        optional types such as ``Annotated[complex | None, Field(...)]``) raises
+        ``load`` codec to a natively supported type or a union (including
+        optional types such as ``Annotated[complex | None, ...]``) raises
         a ``TypeError`` — at class creation time for ``Struct``, at construction
         for ``StructAdapter``. See :doc:`extending`.
 
         .. note::
 
-            In ``struct_validate_self`` the validator's converted value is
+            In ``struct_validate_self`` the loader's converted value is
             discarded — the struct instance is not modified. Use
             ``struct_validate`` / ``struct_validate_json`` when you need the
             converted value stored back into a (new) struct.
 
 
-Factory
--------
+Validator
+---------
 
-.. autoclass:: Factory
+.. autoclass:: Validator
+    :members:
+
+
+NumericValidator
+----------------
+
+.. autoclass:: NumericValidator
     :members:
 
 

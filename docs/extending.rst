@@ -8,7 +8,7 @@ To encode and decode types other than those :doc:`natively supported
   ``struct_validate`` methods. Pydantic's ``model_dump`` / ``model_validate``
   are also recognized. This is the primary mechanism: it works for any custom
   type and nests automatically.
-- **Per-field codecs** — an ``Annotated[X, Field(dump=..., validate=...)]``
+- **Per-field codecs** — an ``Annotated[X, Serializer(dump=..., load=...)]``
   attaches codecs to a single field. This is the escape hatch for types that
   can't declare methods, such as builtins or third-party types you don't
   control.
@@ -109,12 +109,12 @@ Annotation escape hatch
 
 Some types can't implement the protocol. This includes builtins like
 `complex` and third-party types you don't control. For these, attach codecs
-to the field itself with :class:`Field`:
+to the field itself with :class:`Serializer`:
 
 .. code-block:: python
 
     from typing import Annotated
-    from structtype import Struct, Field
+    from structtype import Struct, Serializer
 
     def dump(c: complex) -> tuple[float, float]:
         # Convert the value into natively supported types
@@ -125,7 +125,7 @@ to the field itself with :class:`Field`:
         return complex(obj[0], obj[1])
 
     class Message(Struct):
-        value: Annotated[complex, Field(dump=dump, validate=validate)]
+        value: Annotated[complex, Serializer(dump=dump, load=validate)]
 
     msg = Message(complex(1.0, 2.0))
     assert msg.struct_dump_json() == b'{"value":[1.0,2.0]}'
@@ -133,11 +133,11 @@ to the field itself with :class:`Field`:
     msg2 = Message.struct_validate_json(b'{"value":[1.0,2.0]}')
     assert msg2.value == complex(1.0, 2.0)
 
-``dump`` and ``validate`` may be provided independently:
+``dump`` and ``load`` may be provided independently:
 
-- A ``dump``-only codec controls encoding; decoding falls back to the
+- A ``dump``-only serializer controls encoding; decoding falls back to the
   protocol (if the type implements one), or fails with a ``ValidationError``.
-- A ``validate``-only codec controls decoding; encoding falls back to the
+- A ``load``-only serializer controls decoding; encoding falls back to the
   protocol, or fails with a ``TypeError``.
 
 Codecs are per-field. Different fields may use different codecs for the same
@@ -147,22 +147,22 @@ that field — including nested inside lists, dicts, and tuples:
 .. code-block:: python
 
     class Message(Struct):
-        a: Annotated[complex, Field(dump=dump_pair)]        # -> [real, imag]
-        b: Annotated[complex, Field(dump=dump_real)]        # -> real
-        values: list[Annotated[complex, Field(dump=dump_pair)]]
+        a: Annotated[complex, Serializer(dump=dump_pair)]        # -> [real, imag]
+        b: Annotated[complex, Serializer(dump=dump_real)]        # -> real
+        values: list[Annotated[complex, Serializer(dump=dump_pair)]]
 
 Codecs may only be attached to a *custom* type. ``structtype`` validates
 this when the class is created, raising a ``TypeError`` when:
 
-- the type is natively supported — ``Annotated[int, Field(dump=...)]``,
+- the type is natively supported — ``Annotated[int, Serializer(dump=...)]``,
 - the type is a union — including optional types such as
-  ``Annotated[complex | None, Field(dump=...)]``
-  (``Annotated[int | str, Field(dump=...)]``),
+  ``Annotated[complex | None, Serializer(dump=...)]``
+  (``Annotated[int | str, Serializer(dump=...)]``),
 - two different ``dump`` codecs apply within a single field, e.g.
-  ``tuple[Annotated[complex, Field(dump=a)], Annotated[complex, Field(dump=b)]]``.
+  ``tuple[Annotated[complex, Serializer(dump=a)], Annotated[complex, Serializer(dump=b)]]``.
 
 Codecs are only supported on :class:`Struct` fields.
-:class:`StructAdapter` rejects annotations containing a ``Field`` codec —
+:class:`StructAdapter` rejects annotations containing a ``Serializer`` —
 use the protocol methods on the type there, or a :class:`Struct`:
 
 .. code-block:: python
@@ -171,14 +171,14 @@ use the protocol methods on the type there, or a :class:`Struct`:
 
     # Raises TypeError — use a `struct_dump`/`struct_validate` protocol method
     # on the type, or a `Struct` instead.
-    StructAdapter(Annotated[complex, Field(dump=dump, validate=validate)])
+    StructAdapter(Annotated[complex, Serializer(dump=dump, load=validate)])
 
 Recipes
 -------
 
 The escape hatch can be defined once as an annotated alias and reused across a
 project. These are the common Python stdlib types that ``structtype`` doesn't
-:doc:`natively support <supported-types>`, with a ``Field`` codec for each:
+:natively support <supported-types>`, with a ``Serializer`` for each:
 
 .. code-block:: python
 
@@ -189,76 +189,76 @@ project. These are the common Python stdlib types that ``structtype`` doesn't
     import types
     from collections import deque
     from typing import Annotated
-    from structtype import Field
+    from structtype import Serializer
 
-    Complex = Annotated[complex, Field(
+    Complex = Annotated[complex, Serializer(
         dump=lambda c: (c.real, c.imag),
-        validate=lambda o: complex(o[0], o[1]))]
+        load=lambda o: complex(o[0], o[1]))]
 
-    Fraction = Annotated[fractions.Fraction, Field(
+    Fraction = Annotated[fractions.Fraction, Serializer(
         dump=lambda f: (f.numerator, f.denominator),
-        validate=lambda o: fractions.Fraction(o[0], o[1]))]
+        load=lambda o: fractions.Fraction(o[0], o[1]))]
 
-    Deque = Annotated[deque, Field(
+    Deque = Annotated[deque, Serializer(
         dump=lambda d: list(d),
-        validate=lambda o: deque(o))]
+        load=lambda o: deque(o))]
 
-    Path = Annotated[pathlib.Path, Field(
+    Path = Annotated[pathlib.Path, Serializer(
         dump=lambda p: str(p),
-        validate=lambda o: pathlib.Path(o))]
+        load=lambda o: pathlib.Path(o))]
 
-    Pattern = Annotated[re.Pattern, Field(
+    Pattern = Annotated[re.Pattern, Serializer(
         dump=lambda p: p.pattern,
-        validate=lambda o: re.compile(o))]
+        load=lambda o: re.compile(o))]
 
-    Range = Annotated[range, Field(
+    Range = Annotated[range, Serializer(
         dump=lambda r: (r.start, r.stop, r.step),
-        validate=lambda o: range(o[0], o[1], o[2]))]
+        load=lambda o: range(o[0], o[1], o[2]))]
 
-    SimpleNamespace = Annotated[types.SimpleNamespace, Field(
+    SimpleNamespace = Annotated[types.SimpleNamespace, Serializer(
         dump=lambda n: vars(n),
-        validate=lambda o: types.SimpleNamespace(**o))]
+        load=lambda o: types.SimpleNamespace(**o))]
 
-    IPv4Address = Annotated[ipaddress.IPv4Address, Field(
-        dump=str, validate=ipaddress.IPv4Address)]
+    IPv4Address = Annotated[ipaddress.IPv4Address, Serializer(
+        dump=str, load=ipaddress.IPv4Address)]
 
 These aliases nest (``list[Complex]``, ``dict[str, Fraction]``), and the
-``dump`` / ``validate`` callables must map to :doc:`natively supported
+``dump`` / ``load`` callables must map to :doc:`natively supported
 <supported-types>` values. Codec aliases are supported on :class:`Struct`
 fields only — :class:`StructAdapter` rejects them (see above). For types you
 control, prefer the ``struct_dump`` / ``struct_validate`` protocol methods.
 Single-argument string-constructible types such as ``IPv4Address`` may also use
-``Annotated[T, Field(dump=str, validate=T)]`` codecs.
+``Annotated[T, Serializer(dump=str, load=T)]`` codecs.
 
 Pydantic custom types
 ~~~~~~~~~~~~~~~~~~~~~
 
 pydantic lets you define *custom types* via the ``__get_pydantic_core_schema__``
 protocol. ``structtype`` has no runtime dependency on pydantic, so these are
-bridged from the user side with a :class:`Field` codec and
+bridged from the user side with a :class:`Serializer` and
 ``pydantic.TypeAdapter``:
 
 .. code-block:: python
 
     from typing import Annotated
     from pydantic import TypeAdapter
-    from structtype import Field
+    from structtype import Serializer
 
     class Zip:  # a pydantic custom type whose core schema defines validation
         def __init__(self, code: str):
             self.code = code
 
-    # `validate` always works — it's pydantic's own validation/coercion.
+    # `load` always works — it's pydantic's own validation/coercion.
     # Provide a small `dump` when the type has no serializer.
-    PostalCode = Annotated[Zip, Field(
+    PostalCode = Annotated[Zip, Serializer(
         dump=lambda p: p.code,
-        validate=TypeAdapter(Zip).validate_python)]
+        load=TypeAdapter(Zip).validate_python)]
 
     # ...or, if the custom type defines a serializer in its core schema,
     # both sides can use TypeAdapter directly:
-    PostalCode = Annotated[Zip, Field(
+    PostalCode = Annotated[Zip, Serializer(
         dump=TypeAdapter(Zip).dump_python,
-        validate=TypeAdapter(Zip).validate_python)]
+        load=TypeAdapter(Zip).validate_python)]
 
 .. note::
 
@@ -272,8 +272,8 @@ A reusable helper:
 
     def pydantic_type(t, dump=None):
         ta = TypeAdapter(t)
-        return Annotated[t, Field(dump=dump or ta.dump_python,
-                                  validate=ta.validate_python)]
+        return Annotated[t, Serializer(dump=dump or ta.dump_python,
+                                       load=ta.validate_python)]
 
 Like the stdlib recipes above, this applies to :class:`Struct` fields only
 (``StructAdapter`` rejects codec'd annotations). pydantic ``BaseModel`` types
@@ -284,12 +284,12 @@ Migrating from hooks
 --------------------
 
 The previous ``enc_hook`` / ``dec_hook`` callbacks were removed. Replace them
-with a protocol method or a ``Field`` codec:
+with a protocol method or a ``Serializer``:
 
 - For types you control, implement ``struct_dump`` and ``struct_validate``
   directly on the type.
 - For types that can't declare methods, attach a
-  ``Field(dump=..., validate=...)`` codec to the field's annotation.
+  ``Serializer(dump=..., load=...)`` to the field's annotation.
 - The hooks were passed as keyword arguments to ``struct_dump`` /
   ``struct_dump_json`` / ``struct_validate`` / ``struct_validate_json``.
   Those arguments no longer exist; passing them raises a ``TypeError``.

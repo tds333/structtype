@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.7.0 (2026-08-22)
+
+- **Breaking:** Split `Field` into three focused annotation types:
+  `Field` (identity + schema metadata), `Serializer` (value conversion),
+  and `Validator` (validation constraints). This is a hard break with no
+  deprecation shims.
+
+  Migration table:
+
+  | Old | New |
+  |---|---|
+  | `Field(gt=...)` | `NumericValidator(gt=...)` |
+  | `Field(ge=...)` | `NumericValidator(ge=...)` |
+  | `Field(lt=...)` | `NumericValidator(lt=...)` |
+  | `Field(le=...)` | `NumericValidator(le=...)` |
+  | `Field(multiple_of=...)` | `NumericValidator(multiple_of=...)` |
+  | `Field(pattern=...)` | `StrValidator(pattern=...)` |
+  | `Field(min_length=...)` | `StrValidator(min_length=...)` / `BytesValidator(min_length=...)` / `CollectionValidator(min_length=...)` |
+  | `Field(max_length=...)` | same as `min_length` |
+  | `Field(tz=...)` | `TimezoneValidator(tz=...)` |
+  | `Field(validate=f)` | `Serializer(load=f)` |
+  | `Field(dump=g)` | `Serializer(dump=g)` |
+  | `Field(alias=...)`, `Field(title=...)`, `Field(description=...)`, etc. | Unchanged — still `Field(...)` |
+
+  New public API:
+  - `Serializer(*, load=None, dump=None)` — value conversion codecs.
+  - `Validator(fn=None)` — base class for validation; callable with a value.
+  - `NumericValidator(*, gt=None, ge=None, lt=None, le=None, multiple_of=None)` — numeric constraints.
+  - `StrValidator(*, pattern=None, min_length=None, max_length=None)` — string constraints.
+  - `BytesValidator(*, min_length=None, max_length=None)` — bytes constraints.
+  - `CollectionValidator(*, min_length=None, max_length=None)` — list/set/frozenset/tuple/dict constraints.
+  - `TimezoneValidator(*, tz=True)` — datetime/timezone constraints.
+
+  Composition: at most one `Field`, one `Serializer`, and one `Validator` per
+  annotation position; cross-kind combinations encouraged. Passing constraint
+  params to `Field` now raises `TypeError`.
+
 ## 0.6.0 (2026-08-21)
 
 - **Breaking:** rename `__struct_encode_fields__` to `__struct_alias_fields__`

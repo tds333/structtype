@@ -179,107 +179,95 @@ class Factory:
 
 @final
 class Field:
-    # Numeric:
-    @overload
+    def __init__(
+        self,
+        *,
+        alias: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        json_schema_extra: dict[str, Any] | None = None,
+        examples: list[Any] | None = None,
+        deprecated: bool | None = None,
+    ) -> None: ...
+    alias: Final[str | None]
+    title: Final[str | None]
+    description: Final[str | None]
+    examples: Final[list[Any] | None]
+    deprecated: Final[bool | None]
+    json_schema_extra: Final[dict[str, Any] | None]
+    def __rich_repr__(self) -> list[tuple[str, Any]]: ...
+
+@final
+class Serializer:
+    def __init__(
+        self,
+        *,
+        load: Callable[[Any], Any] | None = None,
+        dump: Callable[[Any], Any] | None = None,
+    ) -> None: ...
+    load: Final[Callable[[Any], Any] | None]
+    dump: Final[Callable[[Any], Any] | None]
+
+class Validator:
+    def __init__(self, fn: Callable[[Any], Any] | None = None) -> None: ...
+    def __call__(self, value: Any) -> None: ...
+
+@final
+class NumericValidator(Validator):
     def __init__(
         self,
         *,
         gt: int | float | None = None,
-        lt: int | float | None = None,
-        multiple_of: int | float | None = None,
-        alias: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        json_schema_extra: dict[str, Any] | None = None,
-        examples: list[Any] | None = None,
-        deprecated: bool | None = None,
-        dump: Callable[[Any], Any] | None = None,
-        validate: Callable[[Any], Any] | None = None,
-    ) -> None: ...
-    @overload
-    def __init__(
-        self,
-        *,
-        gt: int | float | None = None,
-        le: int | float | None = None,
-        multiple_of: int | float | None = None,
-        alias: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        json_schema_extra: dict[str, Any] | None = None,
-        examples: list[Any] | None = None,
-        deprecated: bool | None = None,
-        dump: Callable[[Any], Any] | None = None,
-        validate: Callable[[Any], Any] | None = None,
-    ) -> None: ...
-    @overload
-    def __init__(
-        self,
-        *,
         ge: int | float | None = None,
         lt: int | float | None = None,
-        multiple_of: int | float | None = None,
-        alias: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        json_schema_extra: dict[str, Any] | None = None,
-        examples: list[Any] | None = None,
-        deprecated: bool | None = None,
-        dump: Callable[[Any], Any] | None = None,
-        validate: Callable[[Any], Any] | None = None,
-    ) -> None: ...
-    @overload
-    def __init__(
-        self,
-        *,
-        ge: int | float | None = None,
         le: int | float | None = None,
         multiple_of: int | float | None = None,
-        alias: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        json_schema_extra: dict[str, Any] | None = None,
-        examples: list[Any] | None = None,
-        deprecated: bool | None = None,
-        dump: Callable[[Any], Any] | None = None,
-        validate: Callable[[Any], Any] | None = None,
     ) -> None: ...
-    # Other (string/datetime):
-    @overload
+    gt: Final[int | float | None]
+    ge: Final[int | float | None]
+    lt: Final[int | float | None]
+    le: Final[int | float | None]
+    multiple_of: Final[int | float | None]
+
+@final
+class StrValidator(Validator):
     def __init__(
         self,
         *,
         pattern: str | None = None,
         min_length: _NonNegativeInt | None = None,
         max_length: _NonNegativeInt | None = None,
-        tz: bool | None = None,
-        alias: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        json_schema_extra: dict[str, Any] | None = None,
-        examples: list[Any] | None = None,
-        deprecated: bool | None = None,
-        dump: Callable[[Any], Any] | None = None,
-        validate: Callable[[Any], Any] | None = None,
     ) -> None: ...
-    alias: Final[str | None]
-    gt: Final[int | float | None]
-    ge: Final[int | float | None]
-    lt: Final[int | float | None]
-    le: Final[int | float | None]
-    multiple_of: Final[int | float | None]
     pattern: Final[str | None]
     min_length: Final[int | None]
     max_length: Final[int | None]
-    tz: Final[int | None]
-    title: Final[str | None]
-    description: Final[str | None]
-    examples: Final[list[Any] | None]
-    deprecated: Final[bool | None]
-    json_schema_extra: Final[dict[str, Any] | None]
-    dump: Final[Callable[[Any], Any] | None]
-    validate: Final[Callable[[Any], Any] | None]
-    def __rich_repr__(self) -> list[tuple[str, Any]]: ...
+
+@final
+class BytesValidator(Validator):
+    def __init__(
+        self,
+        *,
+        min_length: _NonNegativeInt | None = None,
+        max_length: _NonNegativeInt | None = None,
+    ) -> None: ...
+    min_length: Final[int | None]
+    max_length: Final[int | None]
+
+@final
+class CollectionValidator(Validator):
+    def __init__(
+        self,
+        *,
+        min_length: _NonNegativeInt | None = None,
+        max_length: _NonNegativeInt | None = None,
+    ) -> None: ...
+    min_length: Final[int | None]
+    max_length: Final[int | None]
+
+@final
+class TimezoneValidator(Validator):
+    def __init__(self, *, tz: bool) -> None: ...
+    tz: Final[bool]
 
 class FieldInfo(Struct):
     name: str

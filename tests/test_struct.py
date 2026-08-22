@@ -85,8 +85,8 @@ def test_field():
 
 
 def test_field_repr_roundtrip():
-    f = structtype.Field(gt=0)
-    assert "gt=0" in repr(f)
+    f = structtype.Field(alias="x")
+    assert "alias='x'" in repr(f)
     assert "default" not in repr(f)
     assert "default_factory" not in repr(f)
 
@@ -976,7 +976,7 @@ def test_field_outside_annotated_errors():
     with pytest.raises(TypeError, match="Annotated"):
 
         class Test(Struct):
-            x: int = Field(gt=0)
+            x: int = Field(alias="y")
 
 
 def test_field_default_kwargs_removed():

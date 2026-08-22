@@ -528,6 +528,8 @@ class _SchemaGenerator:
                 )
         else:
             # This should be unreachable
-            raise TypeError(f"json-schema doesn't support type {t!r}")  # pragma: no cover
+            raise TypeError(
+                f"json-schema doesn't support type {t!r}"
+            )  # pragma: no cover
 
         return schema

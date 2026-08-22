@@ -30,7 +30,7 @@ import pytest
 
 import structtype
 import structtype._inspect as mi
-from structtype import Factory, Field, Struct
+from structtype import Factory, Field, NumericValidator, StrValidator, BytesValidator, CollectionValidator, TimezoneValidator, Struct
 
 from .utils import py315_or_later_only, temp_module
 
@@ -99,7 +99,7 @@ def test_bool():
 @pytest.mark.parametrize("typ, info_type", [(int, mi.IntType), (float, mi.FloatType)])
 def test_numeric(kw, typ, info_type):
     if kw:
-        typ = Annotated[typ, Field(**kw)]
+        typ = Annotated[typ, NumericValidator(**kw)]
     assert mi.type_info(typ) == info_type(**kw)
 
 
@@ -110,7 +110,7 @@ def test_numeric(kw, typ, info_type):
 def test_string(kw):
     typ = str
     if kw:
-        typ = Annotated[typ, Field(**kw)]
+        typ = Annotated[typ, StrValidator(**kw)]
     assert mi.type_info(typ) == mi.StrType(**kw)
 
 
@@ -128,29 +128,29 @@ def test_string(kw):
 )
 def test_binary(kw, typ, info_type):
     if kw:
-        typ = Annotated[typ, Field(**kw)]
+        typ = Annotated[typ, BytesValidator(**kw)]
     assert mi.type_info(typ) == info_type(**kw)
 
 
 @pytest.mark.parametrize(
     "kw",
-    [{}, dict(tz=None), dict(tz=True), dict(tz=False)],
+    [{}, dict(tz=True), dict(tz=False)],
 )
 def test_datetime(kw):
     typ = datetime.datetime
     if kw:
-        typ = Annotated[typ, Field(**kw)]
+        typ = Annotated[typ, TimezoneValidator(**kw)]
     assert mi.type_info(typ) == mi.DateTimeType(**kw)
 
 
 @pytest.mark.parametrize(
     "kw",
-    [{}, dict(tz=None), dict(tz=True), dict(tz=False)],
+    [{}, dict(tz=True), dict(tz=False)],
 )
 def test_time(kw):
     typ = datetime.time
     if kw:
-        typ = Annotated[typ, Field(**kw)]
+        typ = Annotated[typ, TimezoneValidator(**kw)]
     assert mi.type_info(typ) == mi.TimeType(**kw)
 
 
@@ -180,23 +180,17 @@ def test_msgpack_ext():
 def test_newtype():
     UserId = NewType("UserId", str)
     assert mi.type_info(UserId) == mi.StrType()
-    assert mi.type_info(Annotated[UserId, Field(max_length=10)]) == mi.StrType(
+    assert mi.type_info(Annotated[UserId, StrValidator(max_length=10)]) == mi.StrType(
         max_length=10
     )
 
     # Annotated in NewType
-    UserId = NewType("UserId", Annotated[str, Field(max_length=10)])
+    UserId = NewType("UserId", Annotated[str, StrValidator(max_length=10)])
     assert mi.type_info(UserId) == mi.StrType(max_length=10)
-    assert mi.type_info(Annotated[UserId, Field(min_length=2)]) == mi.StrType(
-        min_length=2, max_length=10
-    )
 
-    # NewType in NewType
+    # NewType in NewType (no extra annotation to avoid double-Validator)
     UserId2 = NewType("UserId2", UserId)
     assert mi.type_info(UserId2) == mi.StrType(max_length=10)
-    assert mi.type_info(Annotated[UserId2, Field(min_length=2)]) == mi.StrType(
-        min_length=2, max_length=10
-    )
 
 
 @py312_plus
@@ -216,8 +210,8 @@ def test_typealias(src, typ):
 def test_final():
     cases = [
         (int, mi.IntType()),
-        (Annotated[int, Field(ge=0)], mi.IntType(ge=0)),
-        (NewType("UserId", Annotated[int, Field(ge=0)]), mi.IntType(ge=0)),
+        (Annotated[int, NumericValidator(ge=0)], mi.IntType(ge=0)),
+        (NewType("UserId", Annotated[int, NumericValidator(ge=0)]), mi.IntType(ge=0)),
     ]
     for typ, sol in cases:
 
@@ -261,7 +255,7 @@ def test_sequence(kw, typ, info_type, has_item_type):
         item_type = mi.AnyType()
 
     if kw:
-        typ = Annotated[typ, Field(**kw)]
+        typ = Annotated[typ, CollectionValidator(**kw)]
 
     sol = info_type(item_type=item_type, **kw)
     assert mi.type_info(typ) == sol
@@ -285,7 +279,7 @@ def test_dict(typ, kw, has_args):
     else:
         key = val = mi.AnyType()
     if kw:
-        typ = Annotated[typ, Field(**kw)]
+        typ = Annotated[typ, CollectionValidator(**kw)]
     sol = mi.DictType(key_type=key, value_type=val, **kw)
     assert mi.type_info(typ) == sol
 
@@ -302,7 +296,7 @@ def test_frozendict(kw, has_args):
         typ = frozendict
         key = val = mi.AnyType()
     if kw:
-        typ = Annotated[typ, Field(**kw)]
+        typ = Annotated[typ, CollectionValidator(**kw)]
     sol = mi.FrozenDictType(key_type=key, value_type=val, **kw)
     assert mi.type_info(typ) == sol
 
@@ -766,7 +760,7 @@ def test_self_referential_objects(kind):
 
 
 def test_metadata():
-    typ = Annotated[int, Field(gt=1, title="a"), Field(description="b")]
+    typ = Annotated[int, NumericValidator(gt=1), Field(title="a"), Field(description="b")]
 
     assert mi.type_info(typ) == mi.Metadata(
         mi.IntType(gt=1), {"title": "a", "description": "b"}

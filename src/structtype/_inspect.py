@@ -24,6 +24,9 @@ from ._core import (  # type: ignore
     StructMeta,
     _dump,
 )
+from ._core import (  # type: ignore
+    Validator as _Validator,
+)
 from ._utils import (
     _CONCRETE_TYPES,
     _AnnotatedAlias,
@@ -793,7 +796,9 @@ def _origin_args_metadata(t):
         if origin is not None:
             if type(t) is _AnnotatedAlias:
                 metadata.extend(
-                    m for m in t.__metadata__ if type(m) is structtype.Field
+                    m
+                    for m in t.__metadata__
+                    if type(m) is structtype.Field or isinstance(m, _Validator)
                 )
                 t = origin
             elif origin == Final:
@@ -906,31 +911,35 @@ class _Translator:
     def translate(self, typ):
         t, args, metadata = _origin_args_metadata(typ)
 
-        # Extract and merge components of any `Field` annotations
+        # Extract and merge components of annotations
         constrs = {}
         extra_json_schema = {}
         for meta in metadata:
-            for attr in (
-                "ge",
-                "gt",
-                "le",
-                "lt",
-                "multiple_of",
-                "pattern",
-                "min_length",
-                "max_length",
-                "tz",
-            ):
-                if (val := getattr(meta, attr)) is not None:
-                    constrs[attr] = val
-            for attr in ("title", "description", "examples", "deprecated"):
-                if (val := getattr(meta, attr)) is not None:
-                    extra_json_schema[attr] = val
-            if meta.json_schema_extra is not None:
-                extra_json_schema = _merge_json(
-                    extra_json_schema,
-                    _dump(meta.json_schema_extra, str_keys=True),
-                )
+            # Constraints come from Validator instances
+            if isinstance(meta, _Validator):
+                for attr in (
+                    "ge",
+                    "gt",
+                    "le",
+                    "lt",
+                    "multiple_of",
+                    "pattern",
+                    "min_length",
+                    "max_length",
+                    "tz",
+                ):
+                    if (val := getattr(meta, attr, None)) is not None:
+                        constrs[attr] = val
+            # Metadata comes from Field instances
+            if type(meta) is structtype.Field:
+                for attr in ("title", "description", "examples", "deprecated"):
+                    if (val := getattr(meta, attr)) is not None:
+                        extra_json_schema[attr] = val
+                if meta.json_schema_extra is not None:
+                    extra_json_schema = _merge_json(
+                        extra_json_schema,
+                        _dump(meta.json_schema_extra, str_keys=True),
+                    )
 
         out = self._translate_inner(t, args, **constrs)
         if extra_json_schema:

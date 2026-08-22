@@ -3,7 +3,13 @@ from typing import Annotated
 
 import pytest
 
-from structtype import Struct, ValidationError, Field
+from structtype import (
+    Struct,
+    ValidationError,
+    NumericValidator,
+    StrValidator,
+    TimezoneValidator,
+)
 
 
 class Point(Struct):
@@ -12,19 +18,19 @@ class Point(Struct):
 
 
 class Ranged(Struct):
-    age: Annotated[int, Field(ge=0, le=150)]
+    age: Annotated[int, NumericValidator(ge=0, le=150)]
 
 
 class Named(Struct):
-    name: Annotated[str, Field(min_length=1, max_length=100)]
+    name: Annotated[str, StrValidator(min_length=1, max_length=100)]
 
 
 class WithMultiple(Struct):
-    val: Annotated[int, Field(multiple_of=2)]
+    val: Annotated[int, NumericValidator(multiple_of=2)]
 
 
 class Timed(Struct):
-    ts: Annotated[datetime.datetime, Field(tz=True)]
+    ts: Annotated[datetime.datetime, TimezoneValidator(tz=True)]
 
 
 class Nested(Struct):

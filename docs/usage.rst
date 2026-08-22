@@ -399,14 +399,14 @@ You can also validate an existing struct instance at any time using
 
     ``struct_validate_self`` never modifies the struct — it only validates.
 
-    For custom types annotated with ``Field(validate=...)``, the validator is
+    For custom types annotated with ``Serializer(load=...)``, the load callable is
     called when a field value is **not** already an instance of the expected
-    type. The validator may convert the value, but the converted result is
+    type. The load callable may convert the value, but the converted result is
     **discarded** — the field keeps its original value. This is intentional:
     ``struct_validate_self`` is for *detecting* type mismatches, not fixing them.
     (Contrast with :meth:`Struct.struct_validate` and
     :meth:`Struct.struct_validate_json`, which construct a new struct using the
-    validator's converted value.)
+    load callable's converted value.)
 
 
 Pattern Matching
@@ -1247,7 +1247,7 @@ several configuration options:
 Custom types — types other than those :doc:`natively supported
 <supported-types>` — are handled by implementing the ``struct_dump`` /
 ``struct_validate`` protocol methods on the type, or by attaching a
-``Field(dump=..., validate=...)`` codec to the field annotation. See
+``Serializer(dump=..., load=...)`` codec to the field annotation. See
 :doc:`extending`.
 
 Mapping Protocol
@@ -1315,22 +1315,22 @@ String-constructible custom types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For a *custom* type that is constructed from a single string argument
-(``IPv4Address``, ``HttpUrl``, ...), attach :class:`Field` codecs:
+(``IPv4Address``, ``HttpUrl``, ...), attach :class:`Serializer` codecs:
 
 .. code-block:: python
 
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, Serializer
     >>> from typing import Annotated
     >>> from ipaddress import IPv4Address
 
     >>> class Config(Struct):
-    ...     ip: Annotated[IPv4Address, Field(dump=str, validate=IPv4Address)]
+    ...     ip: Annotated[IPv4Address, Serializer(dump=str, load=IPv4Address)]
 
     >>> Config.struct_validate_json(b'{"ip": "10.0.0.1"}')
     Config(ip=IPv4Address('10.0.0.1'))
 
 The field stores the ``IPv4Address`` object: ``dump=str`` serializes it to a
-string and ``validate=IPv4Address`` parses it back. See :doc:`extending` for
+string and ``load=IPv4Address`` parses it back. See :doc:`extending` for
 details on per-field codecs.
 
 

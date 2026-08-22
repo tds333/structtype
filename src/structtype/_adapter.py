@@ -1,7 +1,7 @@
 from typing import Any, get_args
 
 from ._core import (  # type: ignore
-    Field as _Field,
+    Serializer as _Serializer,
 )
 from ._core import (  # type: ignore
     _dump,
@@ -11,22 +11,22 @@ from ._core import (  # type: ignore
 )
 
 
-def _has_codec(ann):
-    """True if the annotation carries a ``Field`` with ``dump``/``validate``."""
+def _has_serializer(ann):
+    """True if the annotation carries a ``Serializer`` with ``load``/``dump``."""
     metadata = getattr(ann, "__metadata__", None)
     if metadata is not None:
         for meta in metadata:
-            if isinstance(meta, _Field) and (
-                meta.dump is not None or meta.validate is not None
+            if isinstance(meta, _Serializer) and (
+                meta.load is not None or meta.dump is not None
             ):
                 return True
     supertype = getattr(ann, "__supertype__", None)  # NewType
-    if supertype is not None and _has_codec(supertype):
+    if supertype is not None and _has_serializer(supertype):
         return True
     value = getattr(ann, "__value__", None)  # PEP 695 type alias
-    if value is not None and _has_codec(value):
+    if value is not None and _has_serializer(value):
         return True
-    return any(_has_codec(arg) for arg in get_args(ann))
+    return any(_has_serializer(arg) for arg in get_args(ann))
 
 
 class StructAdapter:
@@ -35,8 +35,8 @@ class StructAdapter:
     Useful when you want to validate or serialize plain Python types
     (e.g. ``list[int]``) without defining a full ``Struct`` subclass.
 
-    ``Field(dump=...)`` / ``Field(validate=...)`` codecs are not supported on
-    ``StructAdapter`` — annotations carrying one are rejected. Implement the
+    ``Serializer(load=...)`` / ``Serializer(dump=...)`` codecs are not supported
+    on ``StructAdapter`` — annotations carrying one are rejected. Implement the
     ``struct_dump`` / ``struct_validate`` protocol methods on the custom type,
     or use a ``Struct``.
 
@@ -49,11 +49,12 @@ class StructAdapter:
     __slots__ = ("_type",)
 
     def __init__(self, type: Any):
-        if _has_codec(type):
+        if _has_serializer(type):
             raise TypeError(
-                "`Field(dump=...)`/`Field(validate=...)` codecs are not supported "
-                "on StructAdapter; define `struct_dump`/`struct_validate` methods "
-                "on the custom type, or use a `Struct` instead"
+                "`Serializer(load=...)`/`Serializer(dump=...)` codecs are not "
+                "supported on StructAdapter; define `struct_dump`/"
+                "`struct_validate` methods on the custom type, or use a "
+                "`Struct` instead"
             )
         self._type = type
 

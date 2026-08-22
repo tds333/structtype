@@ -164,9 +164,9 @@ definition enables type and constraint checking during ``__init__``:
 
 .. note::
 
-    For custom types annotated with ``Field(validate=...)``, the validator is
+    For custom types annotated with ``Serializer(load=...)``, the load callable is
     called when a field value is **not** already an instance of the expected
-    type. The validator may convert the value, but the converted result is
+    type. The load callable may convert the value, but the converted result is
     **discarded** — the field keeps its original value. This is the same
     behavior as ``struct_validate_self`` (both use the same validation logic).
     If you need the converted value stored back, use ``struct_validate`` or

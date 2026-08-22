@@ -22,7 +22,7 @@ from structtype._core import (
 )
 
 import structtype
-from structtype import Field, Struct
+from structtype import Serializer, Struct
 
 from .utils import emscripten_stack_limited
 
@@ -1681,7 +1681,7 @@ class TestDict:
             dec.decode(b'{"apple": 1, "carrot": 2}')
 
     def test_decode_dict_str_key_constraints(self):
-        dec = JSONDecoder(dict[Annotated[str, structtype.Field(min_length=3)], int])
+        dec = JSONDecoder(dict[Annotated[str, structtype.StrValidator(min_length=3)], int])
         assert dec.decode(b'{"abc": 1, "def": 2}') == {"abc": 1, "def": 2}
 
         with pytest.raises(
@@ -1798,7 +1798,7 @@ class TestDict:
         assert type(list(res)[0]) is int
 
     def test_decode_dict_int_key_constraints(self):
-        dec = JSONDecoder(dict[Annotated[int, structtype.Field(ge=3)], int])
+        dec = JSONDecoder(dict[Annotated[int, structtype.NumericValidator(ge=3)], int])
         assert dec.decode(b'{"4": 1, "5": 2}') == {4: 1, 5: 2}
 
         with pytest.raises(structtype.ValidationError, match="Expected `int` >= 3"):
@@ -2731,43 +2731,43 @@ class TestRaw:
 
 
 class TestFieldCodecAPI:
-    def test_dump_validate_construction(self):
-        f = Field(dump=lambda c: (c.real, c.imag), validate=lambda o: complex(*o))
-        assert callable(f.dump)
-        assert callable(f.validate)
+    def test_dump_load_construction(self):
+        s = Serializer(dump=lambda c: (c.real, c.imag), load=lambda o: complex(*o))
+        assert callable(s.dump)
+        assert callable(s.load)
 
     def test_only_dump(self):
-        f = Field(dump=repr)
-        assert callable(f.dump)
-        assert f.validate is None
+        s = Serializer(dump=repr)
+        assert callable(s.dump)
+        assert s.load is None
 
-    def test_only_validate(self):
-        f = Field(validate=complex)
-        assert f.dump is None
-        assert callable(f.validate)
+    def test_only_load(self):
+        s = Serializer(load=complex)
+        assert s.dump is None
+        assert callable(s.load)
 
     def test_non_callable_dump(self):
         with pytest.raises(TypeError):
-            Field(dump=42)
+            Serializer(dump=42)
 
-    def test_non_callable_validate(self):
+    def test_non_callable_load(self):
         with pytest.raises(TypeError):
-            Field(validate="nope")
+            Serializer(load="nope")
 
     def test_repr_roundtrip(self):
         def dump(c):
             return (c.real, c.imag)
 
-        def validate(o):
+        def load(o):
             return complex(*o)
 
-        f = Field(dump=dump, validate=validate)
-        r = repr(f)
-        assert "dump=" in r and "validate=" in r
+        s = Serializer(dump=dump, load=load)
+        r = repr(s)
+        assert "dump=" in r and "load=" in r
 
     def test_equality(self):
-        a = Field(dump=repr)
-        b = Field(dump=repr)
+        a = Serializer(dump=repr)
+        b = Serializer(dump=repr)
         assert a == b
         assert hash(a) == hash(b)
 
@@ -2789,63 +2789,63 @@ class Point:
 
 
 class TestFieldCodecDecode:
-    def test_validate_roundtrip(self):
-        def validate(obj):
+    def test_load_roundtrip(self):
+        def load(obj):
             return complex(obj[0], obj[1])
 
         class Msg(Struct):
-            value: Annotated[complex, Field(validate=validate)]
+            value: Annotated[complex, Serializer(load=load)]
 
         out = Msg.struct_validate_json(b'{"value":[1.0,2.0]}')
         assert out.value == complex(1.0, 2.0)
 
-    def test_validate_python_obj(self):
-        def validate(obj):
+    def test_load_python_obj(self):
+        def load(obj):
             return complex(obj[0], obj[1])
 
         class Msg(Struct):
-            value: Annotated[complex, Field(validate=validate)]
+            value: Annotated[complex, Serializer(load=load)]
 
         out = Msg.struct_validate({"value": [1.0, 2.0]})
         assert out.value == complex(1.0, 2.0)
 
-    def test_nested_validate(self):
-        def validate(obj):
+    def test_nested_load(self):
+        def load(obj):
             return complex(obj[0], obj[1])
 
         class Msg(Struct):
-            values: list[Annotated[complex, Field(validate=validate)]]
+            values: list[Annotated[complex, Serializer(load=load)]]
 
         out = Msg.struct_validate_json(b'{"values":[[1.0,2.0],[3.0,4.0]]}')
         assert out.values == [complex(1.0, 2.0), complex(3.0, 4.0)]
 
-    def test_protocol_fallback_when_no_validate(self):
-        # A Field codec with only `dump` must not break decode of a protocol type
+    def test_protocol_fallback_when_no_load(self):
+        # A Serializer with only `dump` must not break decode of a protocol type
         class Msg(Struct):
-            value: Annotated[Point, Field(dump=lambda p: p.struct_dump())]
+            value: Annotated[Point, Serializer(dump=lambda p: p.struct_dump())]
 
         out = Msg.struct_validate_json(b'{"value":{"x":1,"y":2}}')
         assert out.value == Point(1, 2)
 
-    def test_validate_errors_wrap(self):
-        def validate(obj):
+    def test_load_errors_wrap(self):
+        def load(obj):
             raise ValueError("bad")
 
         class Msg(Struct):
-            value: Annotated[complex, Field(validate=validate)]
+            value: Annotated[complex, Serializer(load=load)]
 
         with pytest.raises(structtype.ValidationError):
             Msg.struct_validate_json(b'{"value":[1.0,2.0]}')
 
     def test_validate_self_preserved(self):
-        def validate(obj):
+        def load(obj):
             return complex(obj[0], obj[1])
 
         class Msg(Struct):
-            value: Annotated[complex, Field(validate=validate)]
+            value: Annotated[complex, Serializer(load=load)]
 
         m = Msg(complex(1.0, 2.0))
-        m.struct_validate_self()  # must not call validate on the already-valid value
+        m.struct_validate_self()  # must not call load on the already-valid value
 
     def test_native_type_codec_errors(self):
         # Raised at class definition: the class-creation codec walker
@@ -2853,13 +2853,13 @@ class TestFieldCodecDecode:
         with pytest.raises(TypeError):
 
             class Bad(Struct):
-                value: Annotated[int, Field(dump=str)]
+                value: Annotated[int, Serializer(dump=str)]
 
     def test_union_codec_errors(self):
         with pytest.raises(TypeError):
 
             class Bad(Struct):
-                value: Annotated[int | str, Field(dump=str)]
+                value: Annotated[int | str, Serializer(dump=str)]
 
 
 class TestFieldCodecClassCreation:
@@ -2867,13 +2867,13 @@ class TestFieldCodecClassCreation:
         with pytest.raises(TypeError):
 
             class Bad(Struct):
-                value: Annotated[int, Field(dump=str)]
+                value: Annotated[int, Serializer(dump=str)]
 
     def test_union_errors_at_definition(self):
         with pytest.raises(TypeError):
 
             class Bad(Struct):
-                value: Annotated[int | str, Field(dump=str)]
+                value: Annotated[int | str, Serializer(dump=str)]
 
     def test_conflicting_dump_same_field_errors(self):
         def dump_a(c):
@@ -2887,8 +2887,8 @@ class TestFieldCodecClassCreation:
             class Bad(Struct):
                 value: Annotated[
                     tuple[
-                        Annotated[complex, Field(dump=dump_a)],
-                        Annotated[complex, Field(dump=dump_b)],
+                        Annotated[complex, Serializer(dump=dump_a)],
+                        Annotated[complex, Serializer(dump=dump_b)],
                     ],
                     None,
                 ]
@@ -2898,8 +2898,8 @@ class TestFieldCodecClassCreation:
             return (c.real, c.imag)
 
         class Msg(Struct):
-            a: Annotated[complex, Field(dump=dump)]
-            b: Annotated[complex, Field(dump=dump)]
+            a: Annotated[complex, Serializer(dump=dump)]
+            b: Annotated[complex, Serializer(dump=dump)]
 
         assert Msg(complex(1, 2), complex(3, 4)) is not None
 
@@ -2908,7 +2908,7 @@ class TestFieldCodecClassCreation:
             return (c.real, c.imag)
 
         class Base(Struct):
-            value: Annotated[complex, Field(dump=dump)]
+            value: Annotated[complex, Serializer(dump=dump)]
 
         class Sub(Base):
             other: int
@@ -2924,14 +2924,14 @@ class TestFieldCodecClassCreation:
         with pytest.raises(TypeError):
 
             class Bad(Struct):
-                value: Annotated[complex | None, Field(dump=dump)]
+                value: Annotated[complex | None, Serializer(dump=dump)]
 
     def test_codec_union_outside_works(self):
         def dump(c):
             return (c.real, c.imag)
 
         class Msg(Struct):
-            value: Annotated[complex, Field(dump=dump)] | None
+            value: Annotated[complex, Serializer(dump=dump)] | None
 
         assert Msg(complex(1, 2)).struct_dump_json() == b'{"value":[1.0,2.0]}'
         assert Msg(None).struct_dump_json() == b'{"value":null}'
@@ -2943,7 +2943,7 @@ class TestFieldCodecEncode:
             return (c.real, c.imag)
 
         class Msg(Struct):
-            value: Annotated[complex, Field(dump=dump)]
+            value: Annotated[complex, Serializer(dump=dump)]
 
         assert Msg(complex(1.0, 2.0)).struct_dump_json() == b'{"value":[1.0,2.0]}'
 
@@ -2952,7 +2952,7 @@ class TestFieldCodecEncode:
             return (c.real, c.imag)
 
         class Msg(Struct):
-            value: Annotated[complex, Field(dump=dump)]
+            value: Annotated[complex, Serializer(dump=dump)]
 
         assert Msg(complex(1.0, 2.0)).struct_dump() == {"value": (1.0, 2.0)}
 
@@ -2961,7 +2961,7 @@ class TestFieldCodecEncode:
             return (c.real, c.imag)
 
         class Msg(Struct):
-            values: list[Annotated[complex, Field(dump=dump)]]
+            values: list[Annotated[complex, Serializer(dump=dump)]]
 
         assert Msg([complex(1.0, 2.0)]).struct_dump_json() == b'{"values":[[1.0,2.0]]}'
 
@@ -2970,7 +2970,7 @@ class TestFieldCodecEncode:
             return (c.real, c.imag)
 
         class Msg(Struct):
-            mapping: dict[str, Annotated[complex, Field(dump=dump)]]
+            mapping: dict[str, Annotated[complex, Serializer(dump=dump)]]
 
         assert Msg({"a": complex(1.0, 2.0)}).struct_dump_json() == b'{"mapping":{"a":[1.0,2.0]}}'
 
@@ -2986,7 +2986,7 @@ class TestFieldCodecEncode:
             return b.v
 
         class Msg(Struct):
-            value: Annotated[Base, Field(dump=dump)]
+            value: Annotated[Base, Serializer(dump=dump)]
 
         assert Msg(Sub(5)).struct_dump_json() == b'{"value":5}'
 
@@ -2995,7 +2995,7 @@ class TestFieldCodecEncode:
             return (c.real, c.imag)
 
         class Msg(Struct, array_like=True):
-            value: Annotated[complex, Field(dump=dump)]
+            value: Annotated[complex, Serializer(dump=dump)]
 
         assert Msg(complex(1.0, 2.0)).struct_dump_json() == b'[[1.0,2.0]]'
 
@@ -3007,8 +3007,8 @@ class TestFieldCodecEncode:
             return c.real
 
         class Msg(Struct):
-            a: Annotated[complex, Field(dump=dump_a)]
-            b: Annotated[complex, Field(dump=dump_b)]
+            a: Annotated[complex, Serializer(dump=dump_a)]
+            b: Annotated[complex, Serializer(dump=dump_b)]
 
         assert Msg(complex(1.0, 2.0), complex(3.0, 4.0)).struct_dump_json() == \
             b'{"a":[1.0,2.0],"b":3.0}'
@@ -3029,7 +3029,7 @@ class TestFieldCodecEncode:
             return (c.real, c.imag)
 
         class Msg(Struct):
-            value: Annotated[tuple[Annotated[complex, Field(dump=dump)], Point], None]
+            value: Annotated[tuple[Annotated[complex, Serializer(dump=dump)], Point], None]
 
         assert (
             Msg((complex(1, 2), Point(3, 4))).struct_dump_json()

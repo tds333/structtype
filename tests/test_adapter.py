@@ -7,7 +7,14 @@ import uuid
 import pytest
 
 import structtype
-from structtype import ALL_BUILTIN_TYPES, Field, Struct, StructAdapter
+from structtype import (
+    ALL_BUILTIN_TYPES,
+    Field,
+    NumericValidator,
+    Serializer,
+    Struct,
+    StructAdapter,
+)
 from typing import Annotated, Final, NewType
 
 
@@ -22,7 +29,7 @@ def test_validate_json_generic():
 
 
 def test_validate_json_constrained():
-    ta = StructAdapter(Annotated[int, Field(ge=0)])
+    ta = StructAdapter(Annotated[int, NumericValidator(ge=0)])
     assert ta.struct_validate_json(b"42") == 42
 
 
@@ -74,7 +81,7 @@ def test_validate_python_generic():
 
 
 def test_validate_python_constrained():
-    ta = StructAdapter(Annotated[int, Field(ge=0)])
+    ta = StructAdapter(Annotated[int, NumericValidator(ge=0)])
     assert ta.struct_validate(5) == 5
 
 
@@ -155,7 +162,7 @@ def test_json_schema():
 
 
 def test_json_schema_constrained():
-    assert structtype.json_schema(Annotated[int, Field(ge=0)]) == {
+    assert structtype.json_schema(Annotated[int, NumericValidator(ge=0)]) == {
         "type": "integer",
         "minimum": 0,
     }
@@ -268,18 +275,18 @@ def test_adapter_rejects_codec_annotation():
         return complex(obj[0], obj[1])
 
     with pytest.raises(TypeError, match="not supported on StructAdapter"):
-        StructAdapter(Annotated[complex, Field(dump=dump)])
+        StructAdapter(Annotated[complex, Serializer(dump=dump)])
     with pytest.raises(TypeError, match="not supported on StructAdapter"):
-        StructAdapter(Annotated[complex, Field(validate=validate)])
+        StructAdapter(Annotated[complex, Serializer(load=validate)])
     with pytest.raises(TypeError, match="not supported on StructAdapter"):
-        StructAdapter(list[Annotated[complex, Field(dump=dump, validate=validate)]])
+        StructAdapter(list[Annotated[complex, Serializer(load=validate, dump=dump)]])
 
 
 def test_adapter_rejects_newtype_wrapped_codec():
     def dump(c):
         return (c.real, c.imag)
 
-    T = NewType("T", Annotated[complex, Field(dump=dump)])
+    T = NewType("T", Annotated[complex, Serializer(dump=dump)])
     with pytest.raises(TypeError, match="not supported on StructAdapter"):
         StructAdapter(T)
 
@@ -289,7 +296,7 @@ def test_adapter_rejects_final_wrapped_codec():
         return (c.real, c.imag)
 
     with pytest.raises(TypeError, match="not supported on StructAdapter"):
-        StructAdapter(Final[Annotated[complex, Field(dump=dump)]])
+        StructAdapter(Final[Annotated[complex, Serializer(dump=dump)]])
 
 
 def test_adapter_rejects_type_alias_wrapped_codec():
@@ -303,13 +310,13 @@ def test_adapter_rejects_type_alias_wrapped_codec():
     def validate(obj):
         return complex(obj[0], obj[1])
 
-    C = TypeAliasType("C", Annotated[complex, Field(dump=dump, validate=validate)])
+    C = TypeAliasType("C", Annotated[complex, Serializer(load=validate, dump=dump)])
     with pytest.raises(TypeError, match="not supported on StructAdapter"):
         StructAdapter(C)
 
 
 def test_adapter_newtype_constraint_only_accepted():
-    NT = NewType("NT", Annotated[int, Field(gt=0)])
+    NT = NewType("NT", Annotated[int, NumericValidator(gt=0)])
     ta = StructAdapter(NT)
     assert ta.struct_validate_json(b"42") == 42
 
