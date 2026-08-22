@@ -2203,7 +2203,9 @@ Field_richcompare(Field *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
-    if (Py_TYPE(py_other) != &Field_Type) {
+    if (Py_TYPE(py_other) != Py_TYPE(self)) {
+        if (op == Py_EQ) Py_RETURN_FALSE;
+        if (op == Py_NE) Py_RETURN_TRUE;
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (!(op == Py_EQ || op == Py_NE)) {
@@ -2241,6 +2243,12 @@ static Py_hash_t
 Field_hash(Field *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+    /* Fold exact type into hash for consistency with richcompare. */
+    Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
+    acc += type_lane * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
 
 #define DO_HASH(field) \
     if (self->field != NULL) { \
@@ -2445,7 +2453,9 @@ Serializer_richcompare(Serializer *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
-    if (Py_TYPE(py_other) != &Serializer_Type) {
+    if (Py_TYPE(py_other) != Py_TYPE(self)) {
+        if (op == Py_EQ) Py_RETURN_FALSE;
+        if (op == Py_NE) Py_RETURN_TRUE;
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (!(op == Py_EQ || op == Py_NE)) {
@@ -2479,6 +2489,12 @@ static Py_hash_t
 Serializer_hash(Serializer *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+    /* Fold exact type into hash for consistency with richcompare. */
+    Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
+    acc += type_lane * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
 
 #define DO_HASH(field) \
     if (self->field != NULL) { \
@@ -2672,7 +2688,9 @@ Validator_richcompare(Validator *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
-    if (Py_TYPE(py_other) != &Validator_Type) {
+    if (Py_TYPE(py_other) != Py_TYPE(self)) {
+        if (op == Py_EQ) Py_RETURN_FALSE;
+        if (op == Py_NE) Py_RETURN_TRUE;
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (!(op == Py_EQ || op == Py_NE)) {
@@ -2705,6 +2723,14 @@ static Py_hash_t
 Validator_hash(Validator *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+    /* Fold the exact type into the hash so different validator types hash
+     * differently — prevents Python 3.10's typing.Annotated cache from
+     * collapsing Annotated[int, Validator()] and Annotated[int, Subclass()]. */
+    Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
+    acc += type_lane * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
 
 #define DO_HASH(field) \
     if (self->field != NULL) { \
@@ -3120,7 +3146,9 @@ NumericValidator_richcompare(NumericValidator *self, PyObject *py_other, int op)
     int equal = 1;
     PyObject *out;
 
-    if (Py_TYPE(py_other) != &NumericValidator_Type) {
+    if (Py_TYPE(py_other) != Py_TYPE(self)) {
+        if (op == Py_EQ) Py_RETURN_FALSE;
+        if (op == Py_NE) Py_RETURN_TRUE;
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (!(op == Py_EQ || op == Py_NE)) {
@@ -3157,6 +3185,12 @@ static Py_hash_t
 NumericValidator_hash(NumericValidator *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+    /* Fold exact type into hash for consistency with richcompare. */
+    Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
+    acc += type_lane * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
 
 #define DO_HASH(field) \
     if (self->field != NULL) { \
@@ -3424,7 +3458,9 @@ StrValidator_richcompare(StrValidator *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
-    if (Py_TYPE(py_other) != &StrValidator_Type) {
+    if (Py_TYPE(py_other) != Py_TYPE(self)) {
+        if (op == Py_EQ) Py_RETURN_FALSE;
+        if (op == Py_NE) Py_RETURN_TRUE;
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (!(op == Py_EQ || op == Py_NE)) {
@@ -3459,6 +3495,12 @@ static Py_hash_t
 StrValidator_hash(StrValidator *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+    /* Fold exact type into hash for consistency with richcompare. */
+    Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
+    acc += type_lane * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
 
 #define DO_HASH(field) \
     if (self->field != NULL) { \
@@ -3706,7 +3748,9 @@ BytesValidator_richcompare(BytesValidator *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
-    if (Py_TYPE(py_other) != &BytesValidator_Type) {
+    if (Py_TYPE(py_other) != Py_TYPE(self)) {
+        if (op == Py_EQ) Py_RETURN_FALSE;
+        if (op == Py_NE) Py_RETURN_TRUE;
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (!(op == Py_EQ || op == Py_NE)) {
@@ -3740,6 +3784,12 @@ static Py_hash_t
 BytesValidator_hash(BytesValidator *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+    /* Fold exact type into hash for consistency with richcompare. */
+    Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
+    acc += type_lane * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
 
 #define DO_HASH(field) \
     if (self->field != NULL) { \
@@ -3954,7 +4004,9 @@ CollectionValidator_richcompare(CollectionValidator *self, PyObject *py_other, i
     int equal = 1;
     PyObject *out;
 
-    if (Py_TYPE(py_other) != &CollectionValidator_Type) {
+    if (Py_TYPE(py_other) != Py_TYPE(self)) {
+        if (op == Py_EQ) Py_RETURN_FALSE;
+        if (op == Py_NE) Py_RETURN_TRUE;
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (!(op == Py_EQ || op == Py_NE)) {
@@ -3988,6 +4040,12 @@ static Py_hash_t
 CollectionValidator_hash(CollectionValidator *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+    /* Fold exact type into hash for consistency with richcompare. */
+    Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
+    acc += type_lane * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
 
 #define DO_HASH(field) \
     if (self->field != NULL) { \
@@ -4198,7 +4256,9 @@ TimezoneValidator_richcompare(TimezoneValidator *self, PyObject *py_other, int o
     int equal = 1;
     PyObject *out;
 
-    if (Py_TYPE(py_other) != &TimezoneValidator_Type) {
+    if (Py_TYPE(py_other) != Py_TYPE(self)) {
+        if (op == Py_EQ) Py_RETURN_FALSE;
+        if (op == Py_NE) Py_RETURN_TRUE;
         Py_RETURN_NOTIMPLEMENTED;
     }
     if (!(op == Py_EQ || op == Py_NE)) {
@@ -4231,6 +4291,12 @@ static Py_hash_t
 TimezoneValidator_hash(TimezoneValidator *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
+
+    /* Fold exact type into hash for consistency with richcompare. */
+    Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
+    acc += type_lane * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
 
 #define DO_HASH(field) \
     if (self->field != NULL) { \
@@ -5633,7 +5699,7 @@ typenode_collect_constraints(
              * instance itself for the decode path */
             state->types |= MS_CONSTR_USER_VALIDATOR;
             Py_INCREF(validator);
-            state->validator_obj = validator;
+            state->validator_obj = (PyObject *)validator;
         }
     }
 
@@ -6576,7 +6642,7 @@ typenode_origin_args_metadata(
                             Py_DECREF(metadata);
                             goto error;
                         }
-                        constraints->serializer = ser;
+                         constraints->serializer = (PyObject *)ser;
                     }
                     else if (PyObject_TypeCheck(annot, (PyTypeObject *)&Validator_Type)) {
                         if (constraints->validator != NULL) {

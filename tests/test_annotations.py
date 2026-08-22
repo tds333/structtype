@@ -1155,6 +1155,24 @@ class TestUserValidatorInvocation:
         with pytest.raises(ValidationError, match="not even"):
             Ex.struct_validate({"x": 3})
 
+    def test_subclass_validator_not_shared_across_structs(self):
+        class Even(Validator):
+            def __call__(self, v):
+                if v % 2:
+                    raise ValueError("not even")
+
+        class First(Struct):
+            x: Annotated[int, Even()]
+
+        class Other(Struct):
+            x: Annotated[int, Validator()]
+
+        # Regression: on Python 3.10, bare Validator() == Even() due to
+        # inherited richcompare, causing typing.Annotated to cache them as
+        # the same object. Verify the two struct types are independent.
+        assert Other.struct_validate_json(b'{"x": -5}') == Other(x=-5)
+        assert First.struct_validate_json(b'{"x": 4}') == First(x=4)
+
     @pytest.mark.parametrize(
         "annotation,payload",
         [

@@ -143,13 +143,13 @@ class TestMetaObject:
             Field(**{field: "bad"})
 
     def test_rejects_constraint_kwargs(self):
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
+        with pytest.raises(TypeError, match=r"(unexpected|invalid) keyword argument"):
             Field(ge=0)
 
     def test_rejects_dump_validate_kwargs(self):
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
+        with pytest.raises(TypeError, match=r"(unexpected|invalid) keyword argument"):
             Field(dump=repr)
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
+        with pytest.raises(TypeError, match=r"(unexpected|invalid) keyword argument"):
             Field(validate=repr)
 
 
