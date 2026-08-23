@@ -1,4 +1,5 @@
 from ._adapter import StructAdapter
+from ._config import StructConfig
 from ._core import (  # type: ignore
     ALL_BUILTIN_TYPES,
     NODEFAULT,
@@ -13,7 +14,6 @@ from ._core import (  # type: ignore
     Raw,
     Serializer,
     Struct,
-    StructConfig,
     StructMeta,
     StrValidator,
     TimezoneValidator,

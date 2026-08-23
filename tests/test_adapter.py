@@ -14,6 +14,7 @@ from structtype import (
     Serializer,
     Struct,
     StructAdapter,
+    StructConfig,
 )
 from typing import Annotated, Final, NewType
 
@@ -34,10 +35,12 @@ def test_validate_json_constrained():
 
 
 def test_validate_json_tagged_union():
-    class Cat(Struct, tag="cat", tag_field="type"):
+    class Cat(Struct):
+        struct_config = StructConfig(tag="cat", tag_field="type")
         meow: str
 
-    class Dog(Struct, tag="dog", tag_field="type"):
+    class Dog(Struct):
+        struct_config = StructConfig(tag="dog", tag_field="type")
         bark: str
 
     ta = StructAdapter(Cat | Dog)
@@ -56,7 +59,8 @@ def test_dump_json():
 
 
 def test_dump_json_tagged():
-    class Cat(Struct, tag="cat", tag_field="type"):
+    class Cat(Struct):
+        struct_config = StructConfig(tag="cat", tag_field="type")
         meow: str
 
     ta = StructAdapter(Cat)
@@ -174,9 +178,11 @@ def test_json_schema_ref_template():
 
 
 def test_roundtrip_json():
-    class Cat(Struct, tag="cat", tag_field="type"):
+    class Cat(Struct):
+        struct_config = StructConfig(tag="cat", tag_field="type")
         meow: str
-    class Dog(Struct, tag="dog", tag_field="type"):
+    class Dog(Struct):
+        struct_config = StructConfig(tag="dog", tag_field="type")
         bark: str
 
     ta = StructAdapter(Cat | Dog)

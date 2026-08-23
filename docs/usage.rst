@@ -173,9 +173,10 @@ arguments before the instance becomes immutable, use `object.__setattr__`:
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Struct, StructConfig
 
-    >>> class Circle(Struct, frozen=True):
+    >>> class Circle(Struct):
+    ...     struct_config = StructConfig(frozen=True)
     ...     radius: float
     ...     area: float = 0.0
     ...
@@ -283,7 +284,10 @@ parameters can be mixed in any order.
 
 .. code-block:: python
 
-   >>> class Example(Struct, kw_only=True):
+   >>> from structtype import StructConfig
+
+   >>> class Example(Struct):
+   ...     struct_config = StructConfig(kw_only=True)
    ...     a: str = ""
    ...     b: int  # this is fine with kw_only=True
 
@@ -298,7 +302,10 @@ fields.
 
 .. code-block:: python
 
-   >>> class Base(Struct, kw_only=True):
+   >>> from structtype import Struct, StructConfig
+
+   >>> class Base(Struct):
+   ...     struct_config = StructConfig(kw_only=True)
    ...     a: str = ""
    ...     b: int
 
@@ -453,7 +460,10 @@ tuples of their field values (in definition order).
 
 .. code-block:: python
 
-    >>> class Point(Struct, order=True):
+    >>> from structtype import Struct, StructConfig
+
+    >>> class Point(Struct):
+    ...     struct_config = StructConfig(order=True)
     ...     x: float
     ...     y: float
 
@@ -471,7 +481,10 @@ equal to is itself.
 
 .. code-block:: python
 
-    >>> class Point(Struct, eq=False):
+    >>> from structtype import Struct, StructConfig
+
+    >>> class Point(Struct):
+    ...     struct_config = StructConfig(eq=False)
     ...     x: float
     ...     y: float
 
@@ -497,7 +510,10 @@ adds a ``__hash__`` method to the class definition. Note that for the
 
 .. code-block:: python
 
-    >>> class Point(Struct, frozen=True):
+    >>> from structtype import Struct, StructConfig
+
+    >>> class Point(Struct):
+    ...     struct_config = StructConfig(frozen=True)
     ...     """This struct is immutable & hashable"""
     ...     x: float
     ...     y: float
@@ -560,15 +576,17 @@ every struct type in the union. In this case ``tag_field`` defaults to
 
 .. code-block:: python
 
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, StructConfig, Field
 
     >>> from typing import Union
 
     >>> # Pass in ``tag=True`` to tag the structs using the default configuration
-    ... class Get(Struct, tag=True):
+    ... class Get(Struct):
+    ...     struct_config = StructConfig(tag=True)
     ...     key: str
 
-    >>> class Put(Struct, tag=True):
+    >>> class Put(Struct):
+    ...     struct_config = StructConfig(tag=True)
     ...     key: str
     ...     val: str
 
@@ -628,14 +646,15 @@ for all struct types you wish to tag.
 
 .. code-block:: python
 
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, StructConfig, Field
 
     >>> from typing import Union
 
     >>> # Create a base class for tagged structs, where:
     ... # - the tag field is "op"
     ... # - the tag is the class name lowercased
-    ... class TaggedBase(Struct, tag_field="op", tag=str.lower):
+    ... class TaggedBase(Struct):
+    ...     struct_config = StructConfig(tag_field="op", tag=str.lower)
     ...     pass
 
     >>> # Use the base class to pass on the configuration
@@ -695,9 +714,10 @@ of the Struct definition:
 
 .. code-block:: python
 
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, StructConfig, Field
 
-    >>> class User(Struct, omit_defaults=True):
+    >>> class User(Struct):
+    ...     struct_config = StructConfig(omit_defaults=True)
     ...     name : str
     ...     email : str | None = None
     ...     groups : set[str] = set()
@@ -746,8 +766,9 @@ collection default, configure the builtin constructor directly:
 
 .. code-block:: python
 
-    >>> from structtype import Struct, Factory
-    >>> class Basket(Struct, omit_defaults=True):
+    >>> from structtype import Struct, StructConfig, Factory
+    >>> class Basket(Struct):
+    ...     struct_config = StructConfig(omit_defaults=True)
     ...     items: list[int] = Factory(list)
 
 The field annotation supplies the element type, so ``Factory(list)`` still type
@@ -788,7 +809,10 @@ encountered will result in an error.
 
 .. code-block:: python
 
-    >>> class Example(Struct, forbid_unknown_fields=True):
+    >>> from structtype import Struct, StructConfig
+
+    >>> class Example(Struct):
+    ...     struct_config = StructConfig(forbid_unknown_fields=True)
     ...     field_one: int
     ...     field_two: bool = False
 
@@ -865,9 +889,10 @@ code will still refer to them using their original names.
 
 .. code-block:: python
 
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, StructConfig, Field
 
-    >>> class Example(Struct, rename="camel"):
+    >>> class Example(Struct):
+    ...     struct_config = StructConfig(rename="camel")
     ...     """A struct with fields renamed using camelCase"""
     ...     field_one: int
     ...     field_two: str
@@ -908,7 +933,8 @@ generating `Struct` types to match an existing API.
     }
 
     # Pass the mapping to `rename` to explicitly rename all fields
-    class V1PodSpec(Struct, rename=v1podspec_names):
+    class V1PodSpec(Struct):
+        struct_config = StructConfig(rename=v1podspec_names)
         ...
         service_account_name: str = ""
         set_hostname_as_fqdn: bool = False
@@ -922,9 +948,10 @@ precedence.
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, StructConfig, Field
 
-    >>> class Example(Struct, rename="camel"):
+    >>> class Example(Struct):
+    ...     struct_config = StructConfig(rename="camel")
     ...     field_x: int
     ...     field_y: Annotated[int, Field(alias="y")]  # set explicitly
 
@@ -957,7 +984,10 @@ for decoding (and ~1.5x speedup for encoding).
 
 .. code-block:: python
 
-    >>> class Point2(Struct, array_like=True):
+    >>> from structtype import Struct, StructConfig
+
+    >>> class Point2(Struct):
+    ...     struct_config = StructConfig(array_like=True)
     ...     x: int
     ...     y: int
 
@@ -973,14 +1003,16 @@ array, and is used to determine which type in the union to use when decoding.
 
 .. code-block:: python
 
-    >>> from structtype import Struct, Field
+    >>> from structtype import Struct, StructConfig, Field
 
     >>> from typing import Union
 
-    >>> class Get(Struct, tag=True, array_like=True):
+    >>> class Get(Struct):
+    ...     struct_config = StructConfig(tag=True, array_like=True)
     ...     key: str
 
-    >>> class Put(Struct, tag=True, array_like=True):
+    >>> class Put(Struct):
+    ...     struct_config = StructConfig(tag=True, array_like=True)
     ...     key: str
     ...     val: str
 
@@ -1120,9 +1152,10 @@ representation.
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Struct, StructConfig
 
-    >>> class User(Struct, omit_defaults=True):
+    >>> class User(Struct):
+    ...     struct_config = StructConfig(omit_defaults=True)
     ...     name: str
     ...     groups: set[str] = set()
     ...     email: str | None = None

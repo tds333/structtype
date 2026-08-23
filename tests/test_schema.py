@@ -34,6 +34,7 @@ from structtype import (
     Field,
     NumericValidator,
     StrValidator,
+    StructConfig,
     TimezoneValidator,
 )
 from structtype._json_schema import json_schema as make_schema, json_schema_components, json_schema_dump
@@ -326,7 +327,8 @@ def test_mixed_literal():
 
 
 def test_struct_object():
-    class Point(structtype.Struct, forbid_unknown_fields=True):
+    class Point(structtype.Struct):
+        struct_config = StructConfig(forbid_unknown_fields=True)
         x: int
         y: int
 
@@ -377,10 +379,10 @@ def test_struct_object():
 
 @pytest.mark.parametrize("forbid_unknown_fields", [False, True])
 def test_struct_array_like(forbid_unknown_fields):
-    class Example(
-        structtype.Struct, array_like=True, forbid_unknown_fields=forbid_unknown_fields
-    ):
+    class Example(structtype.Struct):
         """An example docstring"""
+
+        struct_config = StructConfig(array_like=True, forbid_unknown_fields=forbid_unknown_fields)
 
         a: int
         b: str
@@ -431,7 +433,8 @@ def test_struct_no_fields():
 
 
 def test_struct_object_tagged():
-    class Point(structtype.Struct, tag=True):
+    class Point(structtype.Struct):
+        struct_config = StructConfig(tag=True)
         x: int
         y: int
 
@@ -453,7 +456,8 @@ def test_struct_object_tagged():
 
 
 def test_struct_array_tagged():
-    class Point(structtype.Struct, tag=True, array_like=True):
+    class Point(structtype.Struct):
+        struct_config = StructConfig(tag=True, array_like=True)
         x: int
         y: int
 
@@ -475,7 +479,8 @@ def test_struct_array_tagged():
 
 
 def test_struct_keyword_only():
-    class Base(structtype.Struct, kw_only=True):
+    class Base(structtype.Struct):
+        struct_config = StructConfig(kw_only=True)
         x: int = 1
         y: int
         z: int = 2
@@ -491,20 +496,21 @@ def test_struct_keyword_only():
                 "title": "Test",
                 "type": "object",
                 "properties": {
-                    "a": {"type": "integer"},
-                    "b": {"type": "integer", "default": 0},
                     "x": {"type": "integer", "default": 1},
                     "y": {"type": "integer"},
                     "z": {"type": "integer", "default": 2},
+                    "a": {"type": "integer"},
+                    "b": {"type": "integer", "default": 0},
                 },
-                "required": ["a", "y"],
+                "required": ["y", "a"],
             }
         },
     }
 
 
 def test_struct_array_keyword_only():
-    class Base(structtype.Struct, kw_only=True, array_like=True):
+    class Base(structtype.Struct):
+        struct_config = StructConfig(kw_only=True, array_like=True)
         x: int = 1
         y: int
         z: int = 2
@@ -520,11 +526,11 @@ def test_struct_array_keyword_only():
                 "title": "Test",
                 "type": "array",
                 "prefixItems": [
-                    {"type": "integer"},
-                    {"type": "integer", "default": 0},
                     {"type": "integer", "default": 1},
                     {"type": "integer"},
                     {"type": "integer", "default": 2},
+                    {"type": "integer"},
+                    {"type": "integer", "default": 0},
                 ],
                 "minItems": 4,
             }
@@ -883,7 +889,8 @@ def test_union(use_union_operator):
 
 
 def test_struct_tagged_union():
-    class Point(structtype.Struct, tag=True):
+    class Point(structtype.Struct):
+        struct_config = StructConfig(tag=True)
         x: int
         y: int
 
@@ -924,7 +931,8 @@ def test_struct_tagged_union():
 
 
 def test_struct_tagged_union_with_none():
-    class Point(structtype.Struct, tag=True):
+    class Point(structtype.Struct):
+        struct_config = StructConfig(tag=True)
         x: int
         y: int
 
@@ -946,7 +954,8 @@ def test_struct_tagged_union_with_none():
 
 
 def test_struct_tagged_union_mixed_types():
-    class Point(structtype.Struct, tag=True):
+    class Point(structtype.Struct):
+        struct_config = StructConfig(tag=True)
         x: int
         y: int
 
@@ -992,7 +1001,8 @@ def test_struct_tagged_union_mixed_types():
 
 
 def test_struct_tagged_union_with_none_and_other():
-    class Point(structtype.Struct, tag=True):
+    class Point(structtype.Struct):
+        struct_config = StructConfig(tag=True)
         x: int
         y: int
 
@@ -1026,7 +1036,8 @@ def test_optional_union_null_member_metadata_preserved():
 
 
 def test_struct_array_union():
-    class Point(structtype.Struct, array_like=True, tag=True):
+    class Point(structtype.Struct):
+        struct_config = StructConfig(array_like=True, tag=True)
         x: int
         y: int
 
@@ -1119,7 +1130,8 @@ def test_generic_struct():
 
 
 def test_generic_struct_tagged_union():
-    class Point(structtype.Struct, Generic[T], tag=True):
+    class Point(structtype.Struct, Generic[T]):
+        struct_config = StructConfig(tag=True)
         x: T
         y: T
 

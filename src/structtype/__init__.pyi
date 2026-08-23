@@ -8,72 +8,12 @@ from typing import (
     Final,
     Literal,
     TypeAlias,
-    TypeVar,
+    TypedDict,
     final,
     overload,
 )
 
 from typing_extensions import Buffer, Self, dataclass_transform
-
-class StructConfig:
-    frozen: bool
-    eq: bool
-    order: bool
-    array_like: bool
-    repr_omit_defaults: bool
-    omit_defaults: bool
-    forbid_unknown_fields: bool
-    validate_on_init: bool
-    weakref: bool
-    dict: bool
-    cache_hash: bool
-    tag: str | int | None
-    tag_field: str | None
-
-# PEP 673 explicitly rejects using Self in metaclass definitions:
-# https://peps.python.org/pep-0673/#valid-locations-for-self
-#
-# Typeshed works around this by using a type variable as well:
-# https://github.com/python/typeshed/blob/17bde1bd5e556de001adde3c2f340ba1c3581bd2/stdlib/abc.pyi#L14-L19
-_SM = TypeVar("_SM", bound="StructMeta")
-
-class StructMeta(type):
-    __struct_fields__: ClassVar[tuple[str, ...]]
-    __struct_defaults__: ClassVar[tuple[Any, ...]]
-    __struct_alias_fields__: ClassVar[tuple[str, ...]]
-    __match_args__: ClassVar[tuple[str, ...]] = ...
-    @property
-    def __signature__(self) -> Signature: ...
-    @property
-    def __struct_config__(self) -> StructConfig: ...
-    def __new__(
-        mcls: type[_SM],
-        name: str,
-        bases: tuple[type, ...],
-        namespace: dict[str, Any],
-        /,
-        *,
-        tag: bool | str | int | Callable[[str], str | int] | None = None,
-        tag_field: str | None = None,
-        rename: (
-            None
-            | Literal["lower", "upper", "camel", "pascal", "kebab"]
-            | Callable[[str], str | None]
-            | Mapping[str, str]
-        ) = None,
-        omit_defaults: bool = False,
-        forbid_unknown_fields: bool = False,
-        frozen: bool = False,
-        eq: bool = True,
-        order: bool = False,
-        kw_only: bool = False,
-        repr_omit_defaults: bool = False,
-        array_like: bool = False,
-        weakref: bool = False,
-        dict: bool = False,
-        cache_hash: bool = False,
-        validate_on_init: bool = False,
-    ) -> _SM: ...
 
 @final
 class UnsetType(enum.Enum):
@@ -88,39 +28,51 @@ class _NoDefault(enum.Enum):
 
 NODEFAULT: Final = _NoDefault.NODEFAULT
 
+class StructConfig(TypedDict, total=False):
+    frozen: bool
+    eq: bool
+    order: bool
+    kw_only: bool
+    array_like: bool
+    repr_omit_defaults: bool
+    omit_defaults: bool
+    forbid_unknown_fields: bool
+    validate_on_init: bool
+    weakref: bool
+    dict: bool
+    cache_hash: bool
+    tag: bool | str | int | Callable[[str], str | int] | None
+    tag_field: str | None
+    rename: (
+        None
+        | Literal["lower", "upper", "camel", "pascal", "kebab"]
+        | Callable[[str], str | None]
+        | Mapping[str, str]
+    )
+
+class StructMeta(type):
+    __struct_fields__: ClassVar[tuple[str, ...]]
+    __struct_defaults__: ClassVar[tuple[Any, ...]]
+    __struct_alias_fields__: ClassVar[tuple[str, ...]]
+    __match_args__: ClassVar[tuple[str, ...]] = ...
+    @property
+    def __signature__(self) -> Signature: ...
+    @property
+    def __struct_config__(self) -> StructConfig: ...
+    @property
+    def struct_config(self) -> StructConfig: ...
+
 @dataclass_transform(field_specifiers=("Field",))  # type: ignore
 class Struct(metaclass=StructMeta):
     __struct_fields__: ClassVar[tuple[str, ...]]
     __struct_config__: ClassVar[StructConfig]
+    struct_config: ClassVar[StructConfig]
     __struct_alias_fields__: ClassVar[tuple[str, ...]]
     __struct_defaults__: ClassVar[tuple[Any, ...]]
     __match_args__: ClassVar[tuple[str, ...]] = ...
     # A default __init__ so that Structs with unknown field types
     # won't error on every call to `__init__`
     def __init__(self, *args: Any, **kwargs: Any) -> None: ...
-    def __init_subclass__(
-        cls,
-        tag: bool | str | int | Callable[[str], str | int] | None = None,
-        tag_field: str | None = None,
-        rename: (
-            None
-            | Literal["lower", "upper", "camel", "pascal", "kebab"]
-            | Callable[[str], str | None]
-            | Mapping[str, str]
-        ) = None,
-        omit_defaults: bool = False,
-        forbid_unknown_fields: bool = False,
-        frozen: bool = False,
-        eq: bool = True,
-        order: bool = False,
-        kw_only: bool = False,
-        repr_omit_defaults: bool = False,
-        array_like: bool = False,
-        weakref: bool = False,
-        dict: bool = False,
-        cache_hash: bool = False,
-        validate_on_init: bool = False,
-    ) -> None: ...
     def __rich_repr__(self) -> list[tuple[str, Any]]: ...
     def __copy__(self) -> Self: ...
     def __reduce__(self) -> tuple: ...

@@ -13,6 +13,113 @@ from structtype._core import _json_decode, _json_encode
 from structtype import StructConfig
 
 
+def test_class_body_struct_config():
+    """Test that struct_config in class body is applied."""
+    class S(Struct):
+        struct_config = StructConfig(frozen=True)
+        x: int
+
+    s = S(x=1)
+    assert s.x == 1
+    with pytest.raises(AttributeError):
+        s.x = 2
+
+
+def test_struct_config_merge_inheritance():
+    """Test that child inherits parent config and can override specific options."""
+    class Base(Struct):
+        struct_config = StructConfig(frozen=True, tag="base")
+        x: int
+
+    class Child(Base):
+        struct_config = StructConfig(eq=False)
+
+    assert Child.struct_config["frozen"] is True
+    assert Child.struct_config["tag"] == "base"
+    assert Child.struct_config["eq"] is False
+
+
+def test_kw_only_inherits_to_new_fields():
+    """Test that kw_only from parent applies to child's new fields."""
+    class Base(Struct):
+        struct_config = StructConfig(kw_only=True)
+        x: int
+
+    class Child(Base):
+        y: int
+
+    c = Child(x=1, y=2)
+    assert c.x == 1
+    assert c.y == 2
+    with pytest.raises(TypeError):
+        Child(1, 2)
+
+
+def test_empty_struct_config_is_noop():
+    """Test that child with StructConfig() inherits all from parent."""
+    class Base(Struct):
+        struct_config = StructConfig(frozen=True)
+        x: int
+
+    class Child(Base):
+        struct_config = StructConfig()
+
+    assert Child.struct_config["frozen"] is True
+
+
+def test_class_kwargs_silently_ignored():
+    """Class-statement kwargs are silently ignored (no TypeError)."""
+    class Bad(Struct, frozen=True, tag="nope"):
+        x: int
+
+    assert Bad.__struct_config__["frozen"] is False
+    assert Bad.__struct_config__["tag"] is None
+    assert Bad(1).x == 1
+
+
+def test_custom_metaclass_can_intercept_kwargs():
+    """A custom metaclass can intercept class-statement kwargs."""
+    intercepted = []
+
+    class InterceptMeta(StructMeta):
+        def __new__(mcls, name, bases, namespace, **kwargs):
+            intercepted.extend(kwargs.items())
+            return super().__new__(mcls, name, bases, namespace)
+
+    class Base(Struct, metaclass=InterceptMeta):
+        x: int = 1
+
+    class Child(Base, my_option=42):
+        pass
+
+    assert ("my_option", 42) in intercepted
+
+
+def test_struct_config_must_be_dict():
+    """Test that passing a non-dict as struct_config raises TypeError."""
+    with pytest.raises(TypeError, match="struct_config must be a dict"):
+        class Bad(Struct):
+            struct_config = "not a dict"
+
+
+def test_custom_meta_injects_struct_config():
+    """Test that a custom metaclass can use dict merge to modify struct_config."""
+    class KwOnlyMeta(StructMeta):
+        def __new__(mcls, name, bases, namespace, **kwargs):
+            cfg = namespace.get("struct_config", StructConfig())
+            namespace["struct_config"] = {**cfg, "kw_only": True}
+            return super().__new__(mcls, name, bases, namespace)
+
+    class KwOnlyBase(Struct, metaclass=KwOnlyMeta):
+        struct_config = StructConfig()
+
+    class Child(KwOnlyBase):
+        x: int
+
+    with pytest.raises(TypeError):
+        Child(1)
+
+
 def test_struct_meta_exists():
     """Test that StructMeta is properly exposed."""
     assert hasattr(structtype, "StructMeta")
@@ -38,7 +145,8 @@ def test_struct_meta_direct_usage():
 def test_struct_meta_options():
     """Test that StructMeta properly handles struct options."""
 
-    class CustomStruct(metaclass=StructMeta, frozen=True):
+    class CustomStruct(metaclass=StructMeta):
+        struct_config = StructConfig(frozen=True)
         x: int
 
     # Verify options were applied
@@ -92,7 +200,8 @@ def test_struct_meta_validation():
 def test_struct_meta_with_options():
     """Test StructMeta with various options."""
 
-    class Point(metaclass=StructMeta, frozen=True, eq=True, order=True):
+    class Point(metaclass=StructMeta):
+        struct_config = StructConfig(frozen=True, eq=True, order=True)
         x: int
         y: int
 
@@ -119,45 +228,30 @@ def test_struct_meta_inheritance():
     class CustomMeta(StructMeta):
         """A custom metaclass that inherits from StructMeta.
 
-        This metaclass adds a kw_only_default parameter that can be used to
-        set the default kw_only value for all subclasses.
-
-        When a class is created with this metaclass:
-        1. If kw_only is explicitly specified, use that value
-        2. If kw_only is not specified but kw_only_default is, use kw_only_default
-        3. If neither is specified but a parent class has kw_only_default defined,
-           use the parent's kw_only_default
-        4. Otherwise, default to False
+        This metaclass demonstrates injecting struct_config via namespace.
         """
 
-        # Class attribute to store kw_only_default settings for each class
         _kw_only_default_settings = {}
 
         def __new__(mcls, name, bases, namespace, **kwargs):
-            # Check if kw_only is explicitly specified
-            kw_only_specified = "kw_only" in kwargs
-
-            # Process kw_only_default parameter
+            # Check for kw_only_default in kwargs (custom kwarg)
             kw_only_default = kwargs.pop("kw_only_default", None)
 
-            # If kw_only_default is specified, store it
             if kw_only_default is not None:
-                # Remember this setting for future subclasses
                 mcls._kw_only_default_settings[name] = kw_only_default
             else:
-                # Check if any parent class has kw_only_default defined
                 for base in bases:
                     base_name = base.__name__
                     if base_name in mcls._kw_only_default_settings:
-                        # Use parent's kw_only_default
                         kw_only_default = mcls._kw_only_default_settings[base_name]
                         break
 
-            # If kw_only is not specified but kw_only_default is available, use it
-            if not kw_only_specified and kw_only_default is not None:
-                kwargs["kw_only"] = kw_only_default
+                # Inject kw_only into struct_config via namespace
+                if kw_only_default is not None:
+                    cfg = namespace.get("struct_config", StructConfig())
+                    if "kw_only" not in cfg:
+                        namespace["struct_config"] = {**cfg, "kw_only": kw_only_default}
 
-            # Create the class
             return super().__new__(mcls, name, bases, namespace, **kwargs)
 
     # Test basic functionality - without kw_only_default
@@ -174,8 +268,9 @@ def test_struct_meta_inheritance():
     assert instance.x == 1
     assert instance.y == "test"
 
-    # Test setting kw_only_default=True
+    # Test setting kw_only_default=True via custom kwarg
     class KwOnlyBase(metaclass=CustomMeta, kw_only_default=True):
+        struct_config = StructConfig()
         """Base class that sets kw_only_default=True"""
 
     # Test a simple child class, should inherit kw_only_default
@@ -196,8 +291,9 @@ def test_struct_meta_inheritance():
     child = SimpleChild(x=1)
     assert child.x == 1
 
-    # Test overriding inherited kw_only_default
-    class NonKwOnlyChild(KwOnlyBase, kw_only=False):
+    # Test overriding inherited kw_only_default with explicit struct_config
+    class NonKwOnlyChild(KwOnlyBase):
+        struct_config = StructConfig(kw_only=False)
         x: int
 
     # Should allow positional arguments
@@ -213,17 +309,6 @@ def test_struct_meta_inheritance():
     independent = IndependentModel(1, "test")
     assert independent.x == 1
     assert independent.y == "test"
-
-    # Print debug information
-    print(
-        f"KwOnlyBase in _kw_only_default_settings: {'KwOnlyBase' in CustomMeta._kw_only_default_settings}"
-    )
-    print(
-        f"KwOnlyBase default: {CustomMeta._kw_only_default_settings.get('KwOnlyBase')}"
-    )
-    print(
-        f"SimpleChild in _kw_only_default_settings: {'SimpleChild' in CustomMeta._kw_only_default_settings}"
-    )
 
     # Test that kw_only_default values are correctly passed
     assert "KwOnlyBase" in CustomMeta._kw_only_default_settings
@@ -599,3 +684,54 @@ def test_struct_meta_pattern_ref_leak():
         for o in gc.get_objects()
         if isinstance(o, re.Pattern) and o.pattern == pattern_string
     )
+
+
+def test_struct_config_spec_constructor_and_unsets():
+    cfg = StructConfig(frozen=True, order=True, tag="x", kw_only=True, rename="camel")
+    assert cfg["frozen"] is True
+    assert cfg["order"] is True
+    assert cfg["tag"] == "x"
+    assert cfg["kw_only"] is True
+    assert cfg["rename"] == "camel"
+    assert "eq" not in cfg
+    assert "validate_on_init" not in cfg
+    assert "forbid_unknown_fields" not in cfg
+    assert "omit_defaults" not in cfg
+    assert "repr_omit_defaults" not in cfg
+    assert "array_like" not in cfg
+    assert "weakref" not in cfg
+    assert "dict" not in cfg
+    assert "cache_hash" not in cfg
+    assert "tag_field" not in cfg
+
+
+def test_struct_config_dict_merge():
+    cfg = {**StructConfig(frozen=True), "order": True}
+    assert cfg["frozen"] is True
+    assert cfg["order"] is True
+    assert "eq" not in cfg
+
+    cfg2 = {**StructConfig(frozen=True, tag="a"), "tag": "b", "order": True}
+    assert cfg2["frozen"] is True
+    assert cfg2["tag"] == "b"
+    assert cfg2["order"] is True
+
+
+def test_struct_config_class_attribute_matches_view():
+    class S(Struct):
+        struct_config = StructConfig(frozen=True)
+        x: int
+
+    assert isinstance(S.struct_config, dict)
+    assert S.struct_config["frozen"] is True
+    assert S(1).struct_config["frozen"] is True
+    assert isinstance(S(1).struct_config, dict)
+
+
+def test_struct_config_view_exposes_rename():
+    class S(Struct):
+        struct_config = StructConfig(rename="camel")
+        my_field: int
+
+    cfg = S.__struct_config__
+    assert cfg["rename"] == "camel"

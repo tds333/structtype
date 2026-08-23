@@ -1065,10 +1065,10 @@ class _Translator:
             self.cache[cls] = out = StructType(
                 cls,
                 (),
-                tag_field=config.tag_field,
-                tag=config.tag,
-                array_like=config.array_like,
-                forbid_unknown_fields=config.forbid_unknown_fields,
+                tag_field=config["tag_field"],
+                tag=config["tag"],
+                array_like=config["array_like"],
+                forbid_unknown_fields=config["forbid_unknown_fields"],
             )
 
             hints = self._get_class_annotations(cls)

@@ -85,7 +85,7 @@ Structs
         Return a list of ``(name, value)`` pairs used by IPython and Jupyter
         for a structured display of the struct.
 
-.. autoclass:: StructMeta(name, bases, namespace, /, *, **struct_config)
+.. autoclass:: StructMeta(name, bases, namespace, /)
 
 .. autofunction:: structtype.fields
 
@@ -99,6 +99,17 @@ Structs
     :members:
 
 .. autoclass:: structtype.StructConfig
+
+    A :class:`typing.TypedDict` with ``total=False`` containing 15 optional
+    keys. ``StructConfig(frozen=True)`` returns a plain ``dict`` at runtime.
+
+    .. important::
+
+        ``isinstance(x, StructConfig)`` raises ``TypeError`` on all Python
+        versions. Use ``isinstance(x, dict)`` instead, or access individual
+        keys directly.
+
+    Keys:
 
     .. attribute:: frozen
 
@@ -152,12 +163,13 @@ Structs
 
         :type: str | None
 
-    .. note::
+    .. attribute:: kw_only
 
-        The ``kw_only`` and ``rename`` struct configuration options are
-        consumed at class creation time and are not exposed as attributes on
-        :class:`StructConfig`. See the :class:`Struct` docstring's
-        "Configuration" section for details.
+        :type: bool
+
+    .. attribute:: rename
+
+        :type: str | dict | callable | None
 
 .. autodata:: NODEFAULT
    :no-value:

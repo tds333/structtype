@@ -4,10 +4,12 @@ import sys
 import pytest
 
 import structtype
+from structtype import StructConfig
 
 
 def test_array_like_dump_doesnt_leak_field_refs():
-    class P(structtype.Struct, array_like=True):
+    class P(structtype.Struct):
+        struct_config = StructConfig(array_like=True)
         x: int
         y: int
 

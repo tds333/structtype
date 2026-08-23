@@ -22,7 +22,7 @@ from structtype._core import (
 )
 
 import structtype
-from structtype import Serializer, Struct
+from structtype import Serializer, Struct, StructConfig
 
 from .utils import emscripten_stack_limited
 
@@ -46,7 +46,8 @@ class Person(structtype.Struct):
     prefect: bool = False
 
 
-class PersonArray(structtype.Struct, array_like=True):
+class PersonArray(structtype.Struct):
+    struct_config = StructConfig(array_like=True)
     first: str
     last: str
     age: int
@@ -195,7 +196,8 @@ class TestDecodeFunction:
 
     @pytest.mark.parametrize("array_like", [False, True])
     def test_decode_type_struct(self, array_like):
-        class Point(structtype.Struct, array_like=array_like):
+        class Point(structtype.Struct):
+            struct_config = StructConfig(array_like=array_like)
             x: int
             y: int
 
@@ -1959,8 +1961,8 @@ class TestDataclass:
 class TestStruct:
     @pytest.mark.parametrize("tag", [False, "Test", 123])
     def test_encode_empty_struct(self, tag):
-        class Test(structtype.Struct, tag=tag):
-            pass
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=tag)
 
         s = _json_encode(Test())
         if tag:
@@ -1971,7 +1973,8 @@ class TestStruct:
 
     @pytest.mark.parametrize("tag", [False, "Test", 123])
     def test_encode_one_field_struct(self, tag):
-        class Test(structtype.Struct, tag=tag):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=tag)
             a: int
 
         s = _json_encode(Test(a=1))
@@ -1983,7 +1986,8 @@ class TestStruct:
 
     @pytest.mark.parametrize("tag", [False, "Test", 123])
     def test_encode_two_field_struct(self, tag):
-        class Test(structtype.Struct, tag=tag):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=tag)
             a: int
             b: str
 
@@ -2111,7 +2115,8 @@ class TestStruct:
 
     @pytest.mark.parametrize("array_like", [False, True])
     def test_struct_gc_maybe_untracked_on_decode(self, array_like):
-        class Test(structtype.Struct, array_like=array_like):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(array_like=array_like)
             x: Any
             y: Any
             z: tuple = ()
@@ -2144,7 +2149,8 @@ class TestStruct:
 
     @pytest.mark.parametrize("tag", ["Test", 0, 2**63 - 1, -(2**63)])
     def test_decode_tagged_struct(self, tag):
-        class Test(structtype.Struct, tag=tag):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=tag)
             a: int
             b: int
 
@@ -2175,8 +2181,8 @@ class TestStruct:
 
     @pytest.mark.parametrize("tag", ["Test", 123, -123])
     def test_decode_tagged_empty_struct(self, tag):
-        class Test(structtype.Struct, tag=tag):
-            pass
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=tag)
 
         dec = JSONDecoder(Test)
 
@@ -2207,7 +2213,8 @@ class TestStruct:
         ],
     )
     def test_decode_struct_tag_malformed(self, s, error):
-        class Test1(structtype.Struct, tag=True):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=True)
             a: int
             b: int
 
@@ -2228,7 +2235,8 @@ class TestStruct:
         if negative:
             tag = -tag
 
-        class Test(structtype.Struct, tag=tag):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=tag)
             x: int
 
         t = Test(1)
@@ -2239,8 +2247,8 @@ class TestStruct:
         """Uint64 values aren't currently valid tag values, but we still want
         to raise a good error message."""
 
-        class Test(structtype.Struct, tag=123):
-            pass
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=123)
 
         with pytest.raises(structtype.ValidationError) as rec:
             _json_decode(_json_encode({"type": 2**64 - 1}), type=Test)
@@ -2266,7 +2274,8 @@ class TestStruct:
         ],
     )
     def test_decode_struct_int_tag_malformed(self, s, error):
-        class Test1(structtype.Struct, tag=123):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=123)
             a: int
             b: int
 
@@ -2296,12 +2305,13 @@ class TestStructUnion:
         ],
     )
     def test_decode_struct_union_malformed(self, s, error):
-        class Test1(structtype.Struct, tag=True):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=True)
             a: int
             b: int
 
-        class Test2(structtype.Struct, tag=True):
-            pass
+        class Test2(structtype.Struct):
+            struct_config = StructConfig(tag=True)
 
         with pytest.raises(structtype.DecodeError, match=error):
             _json_decode(s, type=Test1 | Test2)
@@ -2325,12 +2335,13 @@ class TestStructUnion:
         ],
     )
     def test_decode_struct_union_int_tag_malformed(self, s, error):
-        class Test1(structtype.Struct, tag=-123):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=-123)
             a: int
             b: int
 
-        class Test2(structtype.Struct, tag=123):
-            pass
+        class Test2(structtype.Struct):
+            struct_config = StructConfig(tag=123)
 
         with pytest.raises(structtype.DecodeError, match=error):
             _json_decode(s, type=Test1 | Test2)
@@ -2344,12 +2355,13 @@ class TestStructUnion:
         ],
     )
     def test_decode_struct_union_ignores_whitespace(self, s):
-        class Test1(structtype.Struct, tag=True):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=True)
             a: int
             b: int
 
-        class Test2(structtype.Struct, tag=True):
-            pass
+        class Test2(structtype.Struct):
+            struct_config = StructConfig(tag=True)
 
         res = _json_decode(s, type=Test1 | Test2)
         assert res == Test1(1, 2)
@@ -2363,12 +2375,13 @@ class TestStructUnion:
         ],
     )
     def test_decode_struct_union_int_tag_ignores_whitespace(self, s):
-        class Test1(structtype.Struct, tag=-123):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=-123)
             a: int
             b: int
 
-        class Test2(structtype.Struct, tag=123):
-            pass
+        class Test2(structtype.Struct):
+            struct_config = StructConfig(tag=123)
 
         res = _json_decode(s, type=Test1 | Test2)
         assert res == Test1(1, 2)
@@ -2377,8 +2390,8 @@ class TestStructUnion:
 class TestStructArray:
     @pytest.mark.parametrize("tag", [False, True])
     def test_encode_empty_struct(self, tag):
-        class Test(structtype.Struct, array_like=True, tag=tag):
-            pass
+        class Test(structtype.Struct):
+            struct_config = StructConfig(array_like=True, tag=tag)
 
         s = _json_encode(Test())
         if tag:
@@ -2388,7 +2401,8 @@ class TestStructArray:
 
     @pytest.mark.parametrize("tag", [False, True])
     def test_encode_one_field_struct(self, tag):
-        class Test(structtype.Struct, array_like=True, tag=tag):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(array_like=True, tag=tag)
             a: int
 
         s = _json_encode(Test(a=1))
@@ -2399,7 +2413,8 @@ class TestStructArray:
 
     @pytest.mark.parametrize("tag", [False, True])
     def test_encode_two_field_struct(self, tag):
-        class Test(structtype.Struct, array_like=True, tag=tag):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(array_like=True, tag=tag)
             a: int
             b: str
 
@@ -2496,7 +2511,8 @@ class TestStructArray:
         ],
     )
     def test_decode_struct_array_like_malformed(self, s, error):
-        class Point(structtype.Struct, array_like=True):
+        class Point(structtype.Struct):
+            struct_config = StructConfig(array_like=True)
             x: int
             y: int
             z: int
@@ -2506,7 +2522,8 @@ class TestStructArray:
 
     @pytest.mark.parametrize("tag", ["Test", 123])
     def test_decode_tagged_struct(self, tag):
-        class Test(structtype.Struct, tag=tag, array_like=True):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=tag, array_like=True)
             a: int
             b: int
             c: int = 0
@@ -2554,8 +2571,8 @@ class TestStructArray:
 
     @pytest.mark.parametrize("tag", ["Test", 123])
     def test_decode_tagged_empty_struct(self, tag):
-        class Test(structtype.Struct, tag=tag, array_like=True):
-            pass
+        class Test(structtype.Struct):
+            struct_config = StructConfig(tag=tag, array_like=True)
 
         dec = JSONDecoder(Test)
 
@@ -2592,13 +2609,14 @@ class TestStructArrayUnion:
         ],
     )
     def test_decode_struct_array_like_union_malformed(self, s, error):
-        class Test1(structtype.Struct, tag=True, array_like=True):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=True, array_like=True)
             x: int
             y: int
             z: int
 
-        class Test2(structtype.Struct, tag=True, array_like=True):
-            pass
+        class Test2(structtype.Struct):
+            struct_config = StructConfig(tag=True, array_like=True)
 
         with pytest.raises(structtype.DecodeError, match=error):
             _json_decode(s, type=Test1 | Test2)
@@ -2621,13 +2639,14 @@ class TestStructArrayUnion:
         ],
     )
     def test_decode_struct_array_like_union_int_tag_malformed(self, s, error):
-        class Test1(structtype.Struct, tag=123, array_like=True):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=123, array_like=True)
             x: int
             y: int
             z: int
 
-        class Test2(structtype.Struct, tag=-123, array_like=True):
-            pass
+        class Test2(structtype.Struct):
+            struct_config = StructConfig(tag=-123, array_like=True)
 
         with pytest.raises(structtype.DecodeError, match=error):
             _json_decode(s, type=Test1 | Test2)
@@ -2635,12 +2654,13 @@ class TestStructArrayUnion:
     def test_decode_struct_array_union_ignores_whitespace(self):
         s = b'  [  "Test1"  ,  1  ,  2  ]  '
 
-        class Test1(structtype.Struct, tag=True, array_like=True):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=True, array_like=True)
             a: int
             b: int
 
-        class Test2(structtype.Struct, tag=True, array_like=True):
-            pass
+        class Test2(structtype.Struct):
+            struct_config = StructConfig(tag=True, array_like=True)
 
         res = _json_decode(s, type=Test1 | Test2)
         assert res == Test1(1, 2)
@@ -2648,12 +2668,13 @@ class TestStructArrayUnion:
     def test_decode_struct_array_union_int_tag_ignores_whitespace(self):
         s = b"  [  123  ,  1  ,  2  ]  "
 
-        class Test1(structtype.Struct, tag=123, array_like=True):
+        class Test1(structtype.Struct):
+            struct_config = StructConfig(tag=123, array_like=True)
             a: int
             b: int
 
-        class Test2(structtype.Struct, tag=-123, array_like=True):
-            pass
+        class Test2(structtype.Struct):
+            struct_config = StructConfig(tag=-123, array_like=True)
 
         res = _json_decode(s, type=Test1 | Test2)
         assert res == Test1(1, 2)
@@ -2994,7 +3015,8 @@ class TestFieldCodecEncode:
         def dump(c):
             return (c.real, c.imag)
 
-        class Msg(Struct, array_like=True):
+        class Msg(Struct):
+            struct_config = StructConfig(array_like=True)
             value: Annotated[complex, Serializer(dump=dump)]
 
         assert Msg(complex(1.0, 2.0)).struct_dump_json() == b'[[1.0,2.0]]'

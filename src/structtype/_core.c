@@ -4816,6 +4816,7 @@ typedef struct {
     int8_t omit_defaults;
     int8_t forbid_unknown_fields;
     int8_t validate_on_init;
+    int8_t kw_only;
 } StructMetaObject;
 
 typedef struct StructInfo {
@@ -4826,11 +4827,6 @@ typedef struct StructInfo {
 #endif
     TypeNode *types[];
 } StructInfo;
-
-typedef struct {
-    PyObject_HEAD
-    StructMetaObject *st_type;
-} StructConfig;
 
 static PyTypeObject LiteralInfo_Type;
 static PyTypeObject TypedDictInfo_Type;
@@ -7492,6 +7488,7 @@ typedef struct {
     int eq;
     int order;
     int repr_omit_defaults;
+    int kw_only;
     int array_like;
     int weakref;
     bool already_has_weakref;
@@ -7594,6 +7591,7 @@ structmeta_collect_base(StructMetaInfo *info, StructspecState *mod, PyObject *ba
     info->forbid_unknown_fields = STRUCT_MERGE_OPTIONS(
         info->forbid_unknown_fields, st_type->forbid_unknown_fields
     );
+    info->kw_only = STRUCT_MERGE_OPTIONS(info->kw_only, st_type->kw_only);
 
     PyObject *fields = st_type->struct_fields;
     PyObject *alias_fields = st_type->struct_alias_fields;
@@ -8720,16 +8718,123 @@ structmeta_construct_offsets(
     return 0;
 }
 
+/* The 15 known config keys for validation */
+static const char *known_config_keys[] = {
+    "frozen", "eq", "order", "kw_only", "repr_omit_defaults", "array_like",
+    "omit_defaults", "forbid_unknown_fields", "validate_on_init",
+    "weakref", "dict", "cache_hash", "tag", "tag_field", "rename",
+    NULL
+};
+
+/* Apply spec-mode fields from a dict over the StructMetaInfo.
+ * Only keys present in the dict override the info. */
+static int
+structmeta_apply_spec(StructMetaInfo *info, PyObject *spec) {
+    PyObject *v;
+
+    /* Bool options — strict PyBool_Check */
+    v = PyDict_GetItemString(spec, "frozen");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`frozen` must be a bool"); return -1; }
+        info->frozen = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "eq");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`eq` must be a bool"); return -1; }
+        info->eq = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "order");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`order` must be a bool"); return -1; }
+        info->order = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "kw_only");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`kw_only` must be a bool"); return -1; }
+        info->kw_only = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "repr_omit_defaults");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`repr_omit_defaults` must be a bool"); return -1; }
+        info->repr_omit_defaults = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "array_like");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`array_like` must be a bool"); return -1; }
+        info->array_like = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "omit_defaults");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`omit_defaults` must be a bool"); return -1; }
+        info->omit_defaults = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "forbid_unknown_fields");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`forbid_unknown_fields` must be a bool"); return -1; }
+        info->forbid_unknown_fields = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "validate_on_init");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`validate_on_init` must be a bool"); return -1; }
+        info->validate_on_init = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "weakref");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`weakref` must be a bool"); return -1; }
+        info->weakref = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "dict");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`dict` must be a bool"); return -1; }
+        info->dict = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+    v = PyDict_GetItemString(spec, "cache_hash");
+    if (v != NULL) {
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`cache_hash` must be a bool"); return -1; }
+        info->cache_hash = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    }
+
+    /* tag: None or False => explicitly no tag */
+    v = PyDict_GetItemString(spec, "tag");
+    if (v != NULL) info->temp_tag = (v == Py_None) ? Py_False : v;
+
+    v = PyDict_GetItemString(spec, "tag_field");
+    if (v != NULL) info->temp_tag_field = (v == Py_None) ? NULL : v;
+
+    v = PyDict_GetItemString(spec, "rename");
+    if (v != NULL) info->rename = (v == Py_None) ? NULL : v;
+
+    /* Validate unknown keys */
+    PyObject *key, *iter = PyObject_GetIter(spec);
+    if (iter == NULL) return -1;
+    while ((key = PyIter_Next(iter)) != NULL) {
+        int found = 0;
+        for (const char **k = known_config_keys; *k != NULL; k++) {
+            PyObject *known = PyUnicode_FromString(*k);
+            if (known == NULL) { Py_DECREF(key); Py_DECREF(iter); return -1; }
+            int cmp = PyObject_RichCompareBool(key, known, Py_EQ);
+            Py_DECREF(known);
+            if (cmp < 0) { Py_DECREF(key); Py_DECREF(iter); return -1; }
+            if (cmp) { found = 1; break; }
+        }
+        if (!found) {
+            PyErr_Format(PyExc_TypeError, "Unknown struct_config key: %R", key);
+            Py_DECREF(key);
+            Py_DECREF(iter);
+            return -1;
+        }
+        Py_DECREF(key);
+    }
+    Py_DECREF(iter);
+    if (PyErr_Occurred()) return -1;
+    return 0;
+}
+
 
 static PyObject *
 StructMeta_new_inner(
     PyTypeObject *type, PyObject *name, PyObject *bases, PyObject *namespace,
-    PyObject *arg_tag_field, PyObject *arg_tag, PyObject *arg_rename,
-    int arg_omit_defaults, int arg_forbid_unknown_fields,
-    int arg_frozen, int arg_eq, int arg_order, bool arg_kw_only,
-    int arg_repr_omit_defaults, int arg_array_like,
-    int arg_weakref, int arg_dict, int arg_cache_hash,
-    int arg_validate_on_init
+    PyObject *struct_config_spec, PyObject *kwargs
 ) {
     StructMetaObject *cls = NULL;
     StructspecState *mod = structtype_get_global_state();
@@ -8758,19 +8863,20 @@ StructMeta_new_inner(
         .temp_tag_field = NULL,
         .temp_tag = NULL,
         .rename = NULL,
-        .omit_defaults = -1,
-        .forbid_unknown_fields = -1,
-        .validate_on_init = -1,
-        .frozen = -1,
-        .eq = -1,
-        .order = -1,
-        .repr_omit_defaults = -1,
-        .array_like = -1,
-        .weakref = arg_weakref,
+        .omit_defaults = OPT_UNSET,
+        .forbid_unknown_fields = OPT_UNSET,
+        .validate_on_init = OPT_UNSET,
+        .kw_only = OPT_UNSET,
+        .frozen = OPT_UNSET,
+        .eq = OPT_UNSET,
+        .order = OPT_UNSET,
+        .repr_omit_defaults = OPT_UNSET,
+        .array_like = OPT_UNSET,
+        .weakref = OPT_UNSET,
         .already_has_weakref = false,
-        .dict = arg_dict,
+        .dict = OPT_UNSET,
         .already_has_dict = false,
-        .cache_hash = arg_cache_hash,
+        .cache_hash = OPT_UNSET,
         .hash_offset = 0,
         .has_non_slots_bases = false,
         .resolved_annotations = NULL,
@@ -8784,6 +8890,12 @@ StructMeta_new_inner(
     if (info.kwonly_fields == NULL) goto cleanup;
     info.namespace = PyDict_Copy(namespace);
     if (info.namespace == NULL) goto cleanup;
+
+    /* Remove struct_config from namespace copy so it doesn't become a class attr */
+    if (PyDict_GetItemString(info.namespace, "struct_config") != NULL) {
+        if (PyDict_DelItemString(info.namespace, "struct_config") < 0) goto cleanup;
+    }
+
     info.renamed_fields = PyDict_New();
     if (info.renamed_fields == NULL) goto cleanup;
     info.slots = PyList_New(0);
@@ -8795,24 +8907,10 @@ StructMeta_new_inner(
         if (structmeta_collect_base(&info, mod, base) < 0) goto cleanup;
     }
 
-    /* Process configuration options */
-    if (arg_tag != NULL && arg_tag != Py_None) {
-        info.temp_tag = arg_tag;
+    /* Apply spec from class-body struct_config, if present */
+    if (struct_config_spec != NULL) {
+        if (structmeta_apply_spec(&info, struct_config_spec) < 0) goto cleanup;
     }
-    if (arg_tag_field != NULL && arg_tag_field != Py_None) {
-        info.temp_tag_field = arg_tag_field;
-    }
-    if (arg_rename != NULL) {
-        info.rename = arg_rename == Py_None ? NULL : arg_rename;
-    }
-    info.frozen = STRUCT_MERGE_OPTIONS(info.frozen, arg_frozen);
-    info.eq = STRUCT_MERGE_OPTIONS(info.eq, arg_eq);
-    info.order = STRUCT_MERGE_OPTIONS(info.order, arg_order);
-    info.repr_omit_defaults = STRUCT_MERGE_OPTIONS(info.repr_omit_defaults, arg_repr_omit_defaults);
-    info.array_like = STRUCT_MERGE_OPTIONS(info.array_like, arg_array_like);
-    info.omit_defaults = STRUCT_MERGE_OPTIONS(info.omit_defaults, arg_omit_defaults);
-    info.forbid_unknown_fields = STRUCT_MERGE_OPTIONS(info.forbid_unknown_fields, arg_forbid_unknown_fields);
-    info.validate_on_init = STRUCT_MERGE_OPTIONS(info.validate_on_init, arg_validate_on_init);
 
     if (info.eq == OPT_FALSE && info.order == OPT_TRUE) {
         PyErr_SetString(PyExc_ValueError, "Cannot set eq=False and order=True");
@@ -8825,7 +8923,7 @@ StructMeta_new_inner(
     }
 
     /* Collect new fields and defaults */
-    if (structmeta_collect_fields(&info, mod, arg_kw_only) < 0) goto cleanup;
+    if (structmeta_collect_fields(&info, mod, info.kw_only == OPT_TRUE) < 0) goto cleanup;
 
     /* Construct fields and defaults */
     if (structmeta_construct_fields(&info, mod) < 0) goto cleanup;
@@ -8927,8 +9025,7 @@ StructMeta_new_inner(
     cls->omit_defaults = info.omit_defaults;
     cls->forbid_unknown_fields = info.forbid_unknown_fields;
     cls->validate_on_init = info.validate_on_init;
-
-    
+    cls->kw_only = info.kw_only;
 
     ok = true;
 
@@ -8971,46 +9068,33 @@ static PyObject *
 StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
     PyObject *name = NULL, *bases = NULL, *namespace = NULL;
-    PyObject *arg_tag_field = NULL, *arg_tag = NULL, *arg_rename = NULL;
-    int arg_omit_defaults = -1, arg_forbid_unknown_fields = -1;
-    int arg_frozen = -1, arg_eq = -1, arg_order = -1, arg_repr_omit_defaults = -1;
-    int arg_array_like = -1, arg_weakref = -1, arg_dict = -1;
-    int arg_kw_only = 0, arg_cache_hash = -1, arg_validate_on_init = -1;
 
-    char *kwlist[] = {
-        "name", "bases", "dict",
-        "tag_field", "tag", "rename",
-        "omit_defaults", "forbid_unknown_fields",
-        "frozen", "eq", "order", "kw_only",
-        "repr_omit_defaults", "array_like",
-        "weakref", "dict", "cache_hash",
-        "validate_on_init",
-        NULL
-    };
-
-    /* Parse arguments: (name, bases, dict) */
-    if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "UO!O!|$OOOpppppppppppp:StructMeta.__new__", kwlist,
-            &name, &PyTuple_Type, &bases, &PyDict_Type, &namespace,
-            &arg_tag_field, &arg_tag, &arg_rename,
-            &arg_omit_defaults, &arg_forbid_unknown_fields,
-            &arg_frozen, &arg_eq, &arg_order, &arg_kw_only,
-            &arg_repr_omit_defaults, &arg_array_like,
-            &arg_weakref, &arg_dict, &arg_cache_hash,
-            &arg_validate_on_init
-        )
+    /* Parse only positional args — unknown kwargs pass through to __init_subclass__ */
+    if (!PyArg_ParseTuple(args, "UO!O!:StructMeta.__new__",
+            &name, &PyTuple_Type, &bases, &PyDict_Type, &namespace)
     )
         return NULL;
 
-    return StructMeta_new_inner(
-        type, name, bases, namespace,
-        arg_tag_field, arg_tag, arg_rename,
-        arg_omit_defaults, arg_forbid_unknown_fields,
-        arg_frozen, arg_eq, arg_order, arg_kw_only,
-        arg_repr_omit_defaults, arg_array_like,
-        arg_weakref, arg_dict, arg_cache_hash,
-        arg_validate_on_init
-    );
+    /* Look for struct_config in the class namespace */
+    PyObject *spec = PyDict_GetItemString(namespace, "struct_config");
+    if (spec != NULL && spec != Py_None) {
+        if (!PyDict_Check(spec)) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "struct_config must be a dict, got %.200s",
+                Py_TYPE(spec)->tp_name
+            );
+            return NULL;
+        }
+        Py_INCREF(spec);
+    }
+    else {
+        spec = NULL;
+    }
+
+    PyObject *result = StructMeta_new_inner(type, name, bases, namespace, spec, kwargs);
+    Py_XDECREF(spec);
+    return result;
 }
 
 
@@ -9329,206 +9413,56 @@ cleanup:
     return res;
 }
 
-static PyObject*
-StructConfig_frozen(StructConfig *self, void *closure)
-{
-    if (self->st_type->frozen == OPT_TRUE) { Py_RETURN_TRUE; }
-    else { Py_RETURN_FALSE; }
-}
+static PyObject *
+structmeta_build_config_dict(StructMetaObject *st_type) {
+    PyObject *d = PyDict_New();
+    if (d == NULL) return NULL;
 
-static PyObject*
-StructConfig_eq(StructConfig *self, void *closure)
-{
-    if (self->st_type->eq == OPT_FALSE) { Py_RETURN_FALSE; }
-    else { Py_RETURN_TRUE; }
-}
+    #define SET_BOOL(name, val) do { \
+        PyObject *b = (val) ? Py_True : Py_False; \
+        Py_INCREF(b); \
+        if (PyDict_SetItemString(d, name, b) < 0) { Py_DECREF(d); return NULL; } \
+    } while(0)
 
-static PyObject*
-StructConfig_order(StructConfig *self, void *closure)
-{
-    if (self->st_type->order == OPT_TRUE) { Py_RETURN_TRUE; }
-    else { Py_RETURN_FALSE; }
-}
+    SET_BOOL("frozen", st_type->frozen == OPT_TRUE);
+    SET_BOOL("eq", st_type->eq != OPT_FALSE);
+    SET_BOOL("order", st_type->order == OPT_TRUE);
+    SET_BOOL("kw_only", st_type->kw_only == OPT_TRUE);
+    SET_BOOL("repr_omit_defaults", st_type->repr_omit_defaults == OPT_TRUE);
+    SET_BOOL("array_like", st_type->array_like == OPT_TRUE);
+    SET_BOOL("omit_defaults", st_type->omit_defaults == OPT_TRUE);
+    SET_BOOL("forbid_unknown_fields", st_type->forbid_unknown_fields == OPT_TRUE);
+    SET_BOOL("validate_on_init", st_type->validate_on_init == OPT_TRUE);
+    SET_BOOL("weakref", ((PyTypeObject *)st_type)->tp_weaklistoffset != 0);
+    SET_BOOL("dict", ((PyTypeObject *)st_type)->tp_dictoffset != 0);
+    SET_BOOL("cache_hash", st_type->hash_offset != 0);
 
-static PyObject*
-StructConfig_array_like(StructConfig *self, void *closure)
-{
-    if (self->st_type->array_like == OPT_TRUE) { Py_RETURN_TRUE; }
-    else { Py_RETURN_FALSE; }
-}
+    #undef SET_BOOL
 
-static PyObject*
-StructConfig_weakref(StructConfig *self, void *closure)
-{
-    PyTypeObject *type = (PyTypeObject *)(self->st_type);
-    if (type->tp_weaklistoffset) {
-        Py_RETURN_TRUE;
-    }
-    Py_RETURN_FALSE;
-}
+    PyObject *tag_val = st_type->struct_tag_value;
+    if (tag_val == NULL) tag_val = Py_None;
+    Py_INCREF(tag_val);
+    if (PyDict_SetItemString(d, "tag", tag_val) < 0) { Py_DECREF(tag_val); Py_DECREF(d); return NULL; }
+    Py_DECREF(tag_val);
 
-static PyObject*
-StructConfig_dict(StructConfig *self, void *closure)
-{
-    PyTypeObject *type = (PyTypeObject *)(self->st_type);
-    if (type->tp_dictoffset) {
-        Py_RETURN_TRUE;
-    }
-    Py_RETURN_FALSE;
-}
+    PyObject *tag_field = st_type->struct_tag_field;
+    if (tag_field == NULL) tag_field = Py_None;
+    Py_INCREF(tag_field);
+    if (PyDict_SetItemString(d, "tag_field", tag_field) < 0) { Py_DECREF(tag_field); Py_DECREF(d); return NULL; }
+    Py_DECREF(tag_field);
 
-static PyObject*
-StructConfig_cache_hash(StructConfig *self, void *closure)
-{
-    StructMetaObject *type = (StructMetaObject *)(self->st_type);
-    if (type->hash_offset != 0) {
-        Py_RETURN_TRUE;
-    }
-    Py_RETURN_FALSE;
-}
+    PyObject *rename = st_type->rename;
+    if (rename == NULL) rename = Py_None;
+    Py_INCREF(rename);
+    if (PyDict_SetItemString(d, "rename", rename) < 0) { Py_DECREF(rename); Py_DECREF(d); return NULL; }
+    Py_DECREF(rename);
 
-static PyObject*
-StructConfig_repr_omit_defaults(StructConfig *self, void *closure)
-{
-    if (self->st_type->repr_omit_defaults == OPT_TRUE) { Py_RETURN_TRUE; }
-    else { Py_RETURN_FALSE; }
-}
-
-static PyObject*
-StructConfig_omit_defaults(StructConfig *self, void *closure)
-{
-    if (self->st_type->omit_defaults == OPT_TRUE) { Py_RETURN_TRUE; }
-    else { Py_RETURN_FALSE; }
-}
-
-static PyObject*
-StructConfig_forbid_unknown_fields(StructConfig *self, void *closure)
-{
-    if (self->st_type->forbid_unknown_fields == OPT_TRUE) { Py_RETURN_TRUE; }
-    else { Py_RETURN_FALSE; }
-}
-
-static PyObject*
-StructConfig_validate_on_init(StructConfig *self, void *closure)
-{
-    if (self->st_type->validate_on_init == OPT_TRUE) { Py_RETURN_TRUE; }
-    else { Py_RETURN_FALSE; }
-}
-
-static PyObject*
-StructConfig_tag_field(StructConfig *self, void *closure)
-{
-    PyObject *out = self->st_type->struct_tag_field;
-    if (out == NULL) Py_RETURN_NONE;
-    Py_INCREF(out);
-    return out;
-}
-
-static PyObject*
-StructConfig_tag(StructConfig *self, void *closure)
-{
-    PyObject *out = self->st_type->struct_tag_value;
-    if (out == NULL) Py_RETURN_NONE;
-    Py_INCREF(out);
-    return out;
-}
-
-static PyGetSetDef StructConfig_getset[] = {
-    {"frozen", (getter) StructConfig_frozen, NULL, NULL, NULL},
-    {"eq", (getter) StructConfig_eq, NULL, NULL, NULL},
-    {"order", (getter) StructConfig_order, NULL, NULL, NULL},
-    {"repr_omit_defaults", (getter) StructConfig_repr_omit_defaults, NULL, NULL, NULL},
-    {"array_like", (getter) StructConfig_array_like, NULL, NULL, NULL},
-    {"weakref", (getter) StructConfig_weakref, NULL, NULL, NULL},
-    {"dict", (getter) StructConfig_dict, NULL, NULL, NULL},
-    {"cache_hash", (getter) StructConfig_cache_hash, NULL, NULL, NULL},
-    {"omit_defaults", (getter) StructConfig_omit_defaults, NULL, NULL, NULL},
-    {"forbid_unknown_fields", (getter) StructConfig_forbid_unknown_fields, NULL, NULL, NULL},
-    {"validate_on_init", (getter) StructConfig_validate_on_init, NULL, NULL, NULL},
-    {"tag", (getter) StructConfig_tag, NULL, NULL, NULL},
-    {"tag_field", (getter) StructConfig_tag_field, NULL, NULL, NULL},
-    {NULL},
-};
-
-static int
-StructConfig_traverse(StructConfig *self, visitproc visit, void *arg) {
-    Py_VISIT(self->st_type);
-    return 0;
-}
-
-static int
-StructConfig_clear(StructConfig *self) {
-    Py_CLEAR(self->st_type);
-    return 0;
-}
-
-static void
-StructConfig_dealloc(StructConfig *self) {
-    PyObject_GC_UnTrack(self);
-    StructConfig_clear(self);
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-PyDoc_STRVAR(StructConfig__doc__,
-"StructConfig()\n"
-"--\n"
-"\n"
-"Configuration settings for a given Struct type.\n"
-"\n"
-"This object is accessible through the ``__struct_config__`` field on a struct\n"
-"type or instance. It exposes the following attributes, matching the Struct\n"
-"configuration parameters of the same name. See the `Struct` docstring for\n"
-"details.\n"
-"\n"
-"Note that the ``kw_only`` and ``rename`` struct configuration options are\n"
-"consumed at class creation time and are not exposed as attributes on this\n"
-"object.\n"
-"\n"
-"Configuration\n"
-"-------------\n"
-"frozen: bool\n"
-"eq: bool\n"
-"order: bool\n"
-"array_like: bool\n"
-"repr_omit_defaults: bool\n"
-"omit_defaults: bool\n"
-"forbid_unknown_fields: bool\n"
-"validate_on_init: bool\n"
-"weakref: bool\n"
-"dict: bool\n"
-"cache_hash: bool\n"
-"tag_field: str | None\n"
-"tag: str | int | None"
-);
-
-static PyTypeObject StructConfig_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype.StructConfig",
-    .tp_doc = StructConfig__doc__,
-    .tp_basicsize = sizeof(StructConfig),
-    .tp_itemsize = 0,
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-    .tp_new = NULL,
-    .tp_dealloc = (destructor) StructConfig_dealloc,
-    .tp_clear = (inquiry) StructConfig_clear,
-    .tp_traverse = (traverseproc) StructConfig_traverse,
-    .tp_getset = StructConfig_getset,
-};
-
-static PyObject*
-StructConfig_New(StructMetaObject *st_type)
-{
-    StructConfig *out = (StructConfig *)StructConfig_Type.tp_alloc(&StructConfig_Type, 0);
-    if (out == NULL) return NULL;
-
-    out->st_type = st_type;
-    Py_INCREF(st_type);
-    return (PyObject *)out;
+    return d;
 }
 
 static PyObject*
 StructMeta_config(StructMetaObject *self, void *closure) {
-    return StructConfig_New(self);
+    return structmeta_build_config_dict(self);
 }
 
 static PyMemberDef StructMeta_members[] = {
@@ -9542,42 +9476,43 @@ static PyMemberDef StructMeta_members[] = {
 static PyGetSetDef StructMeta_getset[] = {
     {"__signature__", (getter) StructMeta_signature, NULL, NULL, NULL},
     {"__struct_config__", (getter) StructMeta_config, NULL, "Struct configuration", NULL},
+    {"struct_config", (getter) StructMeta_config, NULL, "Struct configuration", NULL},
     {NULL},
 };
 
 PyDoc_STRVAR(StructMeta__doc__,
-"StructMeta(name, bases, namespace, /, *, **struct_config)\n"
+"StructMeta(name, bases, namespace, /, **kwargs)\n"
 "--\n"
 "\n"
-"The metaclass for creating `Struct` types. See its documentation for the\n"
+"The metaclass for creating ``Struct`` types. See its documentation for the\n"
 "available configuration options when subclassing.\n"
 "\n"
-"StructMeta can be subclassed, and may be combined with `abc.ABCMeta` to define\n"
+"Struct configuration is provided via a ``struct_config`` class attribute\n"
+"in the class body, using a ``StructConfig`` dict.\n"
+"\n"
+"For project-wide config defaults, prefer a base ``Struct`` class with a\n"
+"``struct_config`` attribute — no custom metaclass is needed.\n"
+"\n"
+"StructMeta can be subclassed, and may be combined with ``abc.ABCMeta`` to define\n"
 "abstract base Structs. Other metaclass combinations are not supported; they\n"
 "may work by accident but are not considered part of the public API.\n"
 "\n"
 "Examples\n"
 "--------\n"
-"Here we define a metaclass that modifies the default configuration and use\n"
-"it to create a new `Struct` base class.\n"
+"Set a project-wide config default by defining a base class:\n"
 "\n"
-">>> from structtype import Struct, StructMeta\n"
-">>> class KwOnlyStructMeta(StructMeta):\n"
-"...     def __new__(mcls, name, bases, namespace, **struct_config):\n"
-"...         struct_config.setdefault(\"kw_only\", True)\n"
-"...         return super().__new__(mcls, name, bases, namespace, **struct_config)\n"
+">>> from structtype import Struct, StructConfig\n"
+">>> class KwOnlyStruct(Struct):\n"
+"...     struct_config = StructConfig(kw_only=True)\n"
 "...\n"
-">>> class KwOnlyStruct(Struct, metaclass=KwOnlyStructMeta): ...\n"
-"\n"
-"Any subclass of ``KwOnlyStruct`` will have ``kw_only`` set to ``True`` by\n"
-"default.\n"
-"\n"
 ">>> class Example(KwOnlyStruct):\n"
-"...     a: str = ""\n"
+"...     a: str = \"\"\n"
 "...     b: int\n"
 "...\n"
 ">>> Example(b=123)\n"
 "Example(a='', b=123)\n"
+"\n"
+"Class-statement kwargs pass through to ``__init_subclass__``.\n"
 );
 
 static PyTypeObject StructMetaType = {
@@ -10304,7 +10239,7 @@ StructMixin_defaults(PyObject *self, void *closure) {
 
 static PyObject*
 StructMixin_config(StructMetaObject *self, void *closure) {
-    return StructConfig_New((StructMetaObject *)Py_TYPE(self));
+    return structmeta_build_config_dict((StructMetaObject *)Py_TYPE(self));
 }
 
 static PyObject *
@@ -10535,6 +10470,9 @@ static PyGetSetDef StructMixin_getset[] = {
     {"__struct_config__", (getter) StructMixin_config, NULL,
         "The StructConfig for this struct type",
         NULL},
+    {"struct_config", (getter) StructMixin_config, NULL,
+        "The StructConfig for this struct type",
+        NULL},
     {NULL},
 };
 
@@ -10565,9 +10503,10 @@ PyDoc_STRVAR(Struct__doc__,
 "methods can. A tuple of the field names is available on the class via the\n"
 "``__struct_fields__`` attribute if needed.\n"
 "\n"
-"Additional class options can be enabled by passing keywords to the class\n"
-"definition (see example below). These configuration options may also be\n"
-"inspected at runtime through the ``__struct_config__`` attribute.\n"
+"Additional class options can be set via a ``struct_config`` class attribute\n"
+"using a `StructConfig` dict (see example below). These configuration\n"
+"options may also be inspected at runtime through the ``__struct_config__``\n"
+"attribute.\n"
 "\n"
 "Configuration\n"
 "-------------\n"
@@ -10652,10 +10591,11 @@ PyDoc_STRVAR(Struct__doc__,
 ">>> Dog('snickers', breed='corgi')\n"
 "Dog(name='snickers', breed='corgi', is_good_boy=True)\n"
 "\n"
-"Additional struct options can be set as part of the class definition. Here\n"
-"we define a new `Struct` type for a frozen `Point` object.\n"
+"Additional struct options can be set via a ``struct_config`` class attribute.\n"
+"Here we define a new `Struct` type for a frozen `Point` object.\n"
 "\n"
-">>> class Point(Struct, frozen=True):\n"
+">>> class Point(Struct):\n"
+"...     struct_config = StructConfig(frozen=True)\n"
 "...     x: float\n"
 "...     y: float\n"
 "...\n"
@@ -21201,8 +21141,6 @@ PyInit__core(void)
         return NULL;
     if (PyType_Ready(&StructMixinType) < 0)
         return NULL;
-    if (PyType_Ready(&StructConfig_Type) < 0)
-        return NULL;
     if (PyType_Ready(&Raw_Type) < 0)
         return NULL;
     if (PyType_Ready(&JSONEncoder_Type) < 0)
@@ -21235,8 +21173,6 @@ PyInit__core(void)
     if (PyModule_AddObjectRef(m, "TimezoneValidator", (PyObject *)&TimezoneValidator_Type) < 0)
         return NULL;
 
-    if (PyModule_AddObjectRef(m, "StructConfig", (PyObject *)&StructConfig_Type) < 0)
-        return NULL;
     if (PyModule_AddObjectRef(m, "Raw", (PyObject *)&Raw_Type) < 0)
         return NULL;
     if (PyModule_AddObjectRef(m, "JSONEncoder", (PyObject *)&JSONEncoder_Type) < 0)

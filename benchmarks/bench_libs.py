@@ -33,6 +33,7 @@ except ImportError:
     pydantic = None
 
 import structtype
+from structtype import StructConfig
 
 
 def print_header():
@@ -54,7 +55,8 @@ class Item_st(structtype.Struct):
     metadata: dict[str, str] | None = None
 
 
-class Order_st(structtype.Struct, kw_only=True):
+class Order_st(structtype.Struct):
+    struct_config = StructConfig(kw_only=True)
     id: int
     customer: str
     items: list[Item_st]
@@ -98,12 +100,14 @@ if HAS_PYDANTIC:
 from typing import Annotated, Literal
 
 
-class File_st(structtype.Struct, tag="file", kw_only=True):
+class File_st(structtype.Struct):
+    struct_config = StructConfig(tag="file", kw_only=True)
     name: str
     size: int
 
 
-class Dir_st(structtype.Struct, tag="dir", kw_only=True):
+class Dir_st(structtype.Struct):
+    struct_config = StructConfig(tag="dir", kw_only=True)
     name: str
     contents: list[File_st | Dir_st]
 

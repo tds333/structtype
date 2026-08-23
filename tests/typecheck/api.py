@@ -58,5 +58,5 @@ def validate(buf: bytes) -> Item:
 
 
 cfg: StructConfig = Item.__struct_config__
-frozen: bool = cfg.frozen
+frozen: bool = cfg["frozen"]
 builtin_types: tuple[type, ...] = ALL_BUILTIN_TYPES

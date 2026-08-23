@@ -81,7 +81,10 @@ average another ~2x speedup for decoding (and ~1.5x speedup for encoding).
 
 .. code-block:: python
 
-    >>> class Example(Struct, array_like=True):
+    >>> from structtype import Struct, StructConfig
+
+    >>> class Example(Struct):
+    ...     struct_config = StructConfig(array_like=True)
     ...     my_first_field: str
     ...     my_second_field: int
 

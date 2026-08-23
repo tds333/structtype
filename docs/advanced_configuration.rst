@@ -1,25 +1,19 @@
-Configuration
-=============
+Configuration Inheritance
+=========================
 
-Metaclasses
------------
-
-You can define project-wide :class:`structtype.Struct` policies at class-creation
-time by extending the :class:`structtype.StructMeta` metaclass.
+You can define project-wide :class:`structtype.Struct` policies by setting
+a ``struct_config`` class attribute on a base class. Subclasses inherit
+the configuration automatically.
 
 In the following example, we flip the default value of ``kw_only`` to ``True``
 in all subclasses of ``KwOnlyStruct``.
 
 .. code-block:: python
 
-    >>> from structtype import Struct, StructMeta
+    >>> from structtype import Struct, StructConfig
 
-    >>> class KwOnlyStructMeta(StructMeta):
-    ...     def __new__(mcls, name, bases, namespace, **struct_config):
-    ...         struct_config.setdefault("kw_only", True)
-    ...         return super().__new__(mcls, name, bases, namespace, **struct_config)
-
-    >>> class KwOnlyStruct(Struct, metaclass=KwOnlyStructMeta): ...
+    >>> class KwOnlyStruct(Struct):
+    ...     struct_config = StructConfig(kw_only=True)
 
     >>> class Example(KwOnlyStruct):
     ...     a: str = ""
@@ -35,9 +29,9 @@ in all subclasses of ``KwOnlyStruct``.
     >>> Example(b=123)
     Example(a='', b=123)
 
-You can also mix :class:`structtype.StructMeta` with other metaclasses. One common
-use case is combining it with :class:`abc.ABCMeta` to define abstract base
-Structs.
+For more advanced use cases, you can mix :class:`structtype.StructMeta` with
+other metaclasses. One common pattern is combining it with
+:class:`abc.ABCMeta` to define abstract base Structs.
 
 .. code-block:: python
 
@@ -74,43 +68,44 @@ ABCs.
 
 .. important::
 
+    - For config defaults, prefer a base class with ``struct_config`` — no
+      metaclass is needed. Use ``StructMeta`` subclassing only for behavior
+      hooks or ``abc.ABCMeta`` mixing.
     - Classes with a :class:`structtype.StructMeta`-derived metaclass do not
       *technically* need to inherit from :class:`structtype.Struct`, but it is
       recommended to do so for static typing support in IDEs and other tools.
     - Mixing :class:`structtype.StructMeta` with arbitrary metaclasses
       is not supported. Only combinations involving :class:`abc.ABCMeta`
-      (or its subclasses) are guaranteed to work. Prefer using
-      :meth:`object.__init_subclass__` on a :class:`structtype.Struct` base class
-      instead of additional custom metaclasses.
+      (or its subclasses) are guaranteed to work.
 
 Inspecting Configuration
 ------------------------
 
 Every struct type and instance exposes its configuration through the read-only
 ``__struct_config__`` attribute, which returns a :class:`structtype.StructConfig`
-object:
+(a :class:`typing.TypedDict`, so a plain ``dict`` at runtime):
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Struct, StructConfig
 
-    >>> class User(Struct, frozen=True, tag="user"):
+    >>> class User(Struct):
+    ...     struct_config = StructConfig(frozen=True, tag="user")
     ...     name: str
     ...     groups: set[str] = set()
     ...
 
-    >>> User.__struct_config__.frozen
+    >>> User.__struct_config__["frozen"]
     True
-    >>> User.__struct_config__.tag
+    >>> User.__struct_config__["tag"]
     'user'
-    >>> User("alice").__struct_config__.tag
+    >>> User("alice").__struct_config__["tag"]
     'user'
 
-The exposed attributes mirror the struct configuration parameters of the same
-name described in the :class:`structtype.Struct` docstring, with the exception
-of ``kw_only`` and ``rename``, which are consumed at class creation time and
-are not available on the object. See the :doc:`api` reference for the full
-list of attributes.
+The exposed keys mirror the struct configuration parameters of the same
+name described in the :class:`structtype.Struct` docstring, including ``kw_only``
+and ``rename``. See the :doc:`api` reference for the full
+list of keys.
 
 
 .. _struct-replace:
@@ -148,9 +143,10 @@ definition enables type and constraint checking during ``__init__``:
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Struct, StructConfig
 
-    >>> class Point(Struct, validate_on_init=True):
+    >>> class Point(Struct):
+    ...     struct_config = StructConfig(validate_on_init=True)
     ...     x: float
     ...     y: float
 
@@ -182,9 +178,10 @@ whose values match their default:
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Struct, StructConfig
 
-    >>> class User(Struct, repr_omit_defaults=True):
+    >>> class User(Struct):
+    ...     struct_config = StructConfig(repr_omit_defaults=True)
     ...     name: str
     ...     groups: set[str] = set()
     ...     email: str | None = None
@@ -208,9 +205,10 @@ or set members. Enable with ``cache_hash=True``:
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Struct, StructConfig
 
-    >>> class Point(Struct, frozen=True, cache_hash=True):
+    >>> class Point(Struct):
+    ...     struct_config = StructConfig(frozen=True, cache_hash=True)
     ...     x: float
     ...     y: float
 
@@ -231,10 +229,11 @@ weak reference support, set ``weakref=True``:
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Struct, StructConfig
     >>> import weakref
 
-    >>> class Node(Struct, weakref=True):
+    >>> class Node(Struct):
+    ...     struct_config = StructConfig(weakref=True)
     ...     value: int
 
     >>> n = Node(42)
@@ -286,9 +285,10 @@ support, allowing arbitrary attributes to be set on instances at runtime:
 
 .. code-block:: python
 
-    >>> from structtype import Struct
+    >>> from structtype import Struct, StructConfig
 
-    >>> class Node(Struct, dict=True):
+    >>> class Node(Struct):
+    ...     struct_config = StructConfig(dict=True)
     ...     value: int
 
     >>> n = Node(42)

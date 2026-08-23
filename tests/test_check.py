@@ -5,6 +5,7 @@ import pytest
 
 from structtype import (
     Struct,
+    StructConfig,
     ValidationError,
     NumericValidator,
     StrValidator,
@@ -159,13 +160,16 @@ def test_bad_kwarg_raises():
 
 
 def test_struct_union_valid_member_passes():
-    class A(Struct, tag="a"):
+    class A(Struct):
+        struct_config = StructConfig(tag="a")
         a: int
 
-    class B(Struct, tag="b"):
+    class B(Struct):
+        struct_config = StructConfig(tag="b")
         b: str
 
-    class AB(Struct, validate_on_init=True):
+    class AB(Struct):
+        struct_config = StructConfig(validate_on_init=True)
         x: A | B
 
     ab = AB(A(1))
@@ -176,10 +180,12 @@ def test_struct_union_valid_member_passes():
 
 
 def test_struct_union_none_passes():
-    class A(Struct, tag="a"):
+    class A(Struct):
+        struct_config = StructConfig(tag="a")
         a: int
 
-    class AO(Struct, validate_on_init=True):
+    class AO(Struct):
+        struct_config = StructConfig(validate_on_init=True)
         x: A | None
 
     AO(None).struct_validate_self()
@@ -187,10 +193,12 @@ def test_struct_union_none_passes():
 
 
 def test_struct_union_non_member_rejected():
-    class A(Struct, tag="a"):
+    class A(Struct):
+        struct_config = StructConfig(tag="a")
         a: int
 
-    class B(Struct, tag="b"):
+    class B(Struct):
+        struct_config = StructConfig(tag="b")
         b: str
 
     class AB(Struct):
@@ -206,16 +214,19 @@ def test_struct_union_non_member_rejected():
 
 
 def test_struct_union_non_member_at_init():
-    class A(Struct, tag="a"):
+    class A(Struct):
+        struct_config = StructConfig(tag="a")
         a: int
 
-    class B(Struct, tag="b"):
+    class B(Struct):
+        struct_config = StructConfig(tag="b")
         b: str
 
     class C(Struct):
         c: float
 
-    class AB(Struct, validate_on_init=True):
+    class AB(Struct):
+        struct_config = StructConfig(validate_on_init=True)
         x: A | B
 
     with pytest.raises(ValidationError):
@@ -223,10 +234,12 @@ def test_struct_union_non_member_at_init():
 
 
 def test_struct_union_nested_field_mutation_caught():
-    class A(Struct, tag="a"):
+    class A(Struct):
+        struct_config = StructConfig(tag="a")
         a: int
 
-    class AB(Struct, validate_on_init=True):
+    class AB(Struct):
+        struct_config = StructConfig(validate_on_init=True)
         x: A | None
 
     ab = AB(A(1))
@@ -239,7 +252,8 @@ def test_struct_union_nested_field_mutation_caught():
 
 
 def test_frozen_with_bad_value_raises():
-    class Frozen(Struct, frozen=True):
+    class Frozen(Struct):
+        struct_config = StructConfig(frozen=True)
         x: int
 
     f = Frozen("bad")
@@ -248,7 +262,8 @@ def test_frozen_with_bad_value_raises():
 
 
 def test_frozen_valid():
-    class Frozen(Struct, frozen=True):
+    class Frozen(Struct):
+        struct_config = StructConfig(frozen=True)
         x: int
 
     f = Frozen(1)

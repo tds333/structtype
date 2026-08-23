@@ -33,13 +33,16 @@ across two common data shapes:
 
 .. code-block:: python
 
+    from structtype import Struct, StructConfig
+
     class Item(Struct):
         name: str
         price: float
         tags: list[str] = []
         metadata: dict[str, str] | None = None
 
-    class Order(Struct, kw_only=True):
+    class Order(Struct):
+        struct_config = StructConfig(kw_only=True)
         id: int
         customer: str
         items: list[Item]
@@ -57,11 +60,15 @@ A set of 500 randomized orders is used to measure:
 
 .. code-block:: python
 
-    class File(Struct, tag="file", kw_only=True):
+    from structtype import Struct, StructConfig
+
+    class File(Struct):
+        struct_config = StructConfig(tag="file", kw_only=True)
         name: str
         size: int
 
-    class Dir(Struct, tag="dir", kw_only=True):
+    class Dir(Struct):
+        struct_config = StructConfig(tag="dir", kw_only=True)
         name: str
         contents: list[File | Dir]
 

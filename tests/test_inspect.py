@@ -30,7 +30,7 @@ import pytest
 
 import structtype
 import structtype._inspect as mi
-from structtype import Factory, Field, NumericValidator, StrValidator, BytesValidator, CollectionValidator, TimezoneValidator, Struct
+from structtype import Factory, Field, NumericValidator, StrValidator, BytesValidator, CollectionValidator, TimezoneValidator, Struct, StructConfig
 
 from .utils import py315_or_later_only, temp_module
 
@@ -404,10 +404,10 @@ def test_struct(kw):
     def factory():
         return "foo"
 
-    class Example(structtype.Struct, **kw):
-        x: int
-        y: int = 0
-        z: int = structtype.Factory(factory)
+    ns = {"structtype": structtype, "StructConfig": StructConfig, "factory": factory}
+    kwargs_str = ", ".join(f"{k}={v!r}" for k, v in kw.items())
+    exec(f"class Example(structtype.Struct):\n    struct_config = StructConfig({kwargs_str})\n    x: int\n    y: int = 0\n    z: int = structtype.Factory(factory)", ns)
+    Example = ns["Example"]
 
     sol = mi.StructType(
         cls=Example,
@@ -438,7 +438,8 @@ def test_struct_no_fields():
 
 
 def test_struct_keyword_only():
-    class Example(structtype.Struct, kw_only=True):
+    class Example(structtype.Struct):
+        struct_config = StructConfig(kw_only=True)
         a: int
         b: int = 1
         c: int
@@ -457,7 +458,8 @@ def test_struct_keyword_only():
 
 
 def test_struct_alias():
-    class Example(structtype.Struct, rename="camel"):
+    class Example(structtype.Struct):
+        struct_config = StructConfig(rename="camel")
         field_one: int
         field_two: int
 

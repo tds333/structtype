@@ -12,7 +12,7 @@ import enum
 import uuid
 from typing import Any, Literal
 
-from structtype import Raw, Struct
+from structtype import Raw, Struct, StructConfig
 
 
 class Color(enum.Enum):
@@ -61,12 +61,14 @@ class Nested(Struct):
     scalar: Scalar
 
 
-class File(Struct, tag="file"):
+class File(Struct):
+    struct_config = StructConfig(tag="file")
     name: str
     size: int
 
 
-class Dir(Struct, tag="dir"):
+class Dir(Struct):
+    struct_config = StructConfig(tag="dir")
     contents: list[File | Dir]
 
 

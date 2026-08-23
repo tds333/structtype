@@ -112,7 +112,7 @@ def test_struct_class_attributes():
     assert Struct.__match_args__ == ()
     assert Struct.__slots__ == ()
     assert Struct.__module__ == "structtype"
-    assert isinstance(Struct.__struct_config__, StructConfig)
+    assert isinstance(Struct.__struct_config__, dict)
 
 
 def test_struct_class_and_instance_dir():
@@ -134,7 +134,7 @@ def test_struct_instance_attributes():
     assert x.__struct_fields__ is x.__struct_alias_fields__
     assert x.__struct_defaults__ == ("hello",)
     assert x.__slots__ == ("a", "b", "c")
-    assert isinstance(x.__struct_config__, StructConfig)
+    assert isinstance(x.__struct_config__, dict)
 
     assert x.c == 1
     assert x.b == 2.0
@@ -199,7 +199,8 @@ class TestMixins:
         assert Test1.__dictoffset__ != 0
         assert Test1.__weakrefoffset__ != 0
 
-        class Test2(Struct, Mixin, dict=True, weakref=True):
+        class Test2(Struct, Mixin):
+            struct_config = StructConfig(dict=True, weakref=True)
             pass
 
         assert Test2.__dictoffset__ != 0
@@ -219,7 +220,8 @@ class TestMixins:
         assert Test1.__dictoffset__ == 0
         assert Test1.__weakrefoffset__ == 0
 
-        class Test2(Struct, Mixin, dict=True, weakref=True):
+        class Test2(Struct, Mixin):
+            struct_config = StructConfig(dict=True, weakref=True)
             pass
 
         assert Test2.__dictoffset__ != 0
@@ -453,7 +455,8 @@ class TestStructParameterOrdering:
         assert "Required field 'c' cannot follow optional fields" in str(rec.value)
 
     def test_kw_only_positional(self):
-        class Test(Struct, kw_only=True):
+        class Test(Struct):
+            struct_config = StructConfig(kw_only=True)
             b: int
             a: int
 
@@ -463,7 +466,8 @@ class TestStructParameterOrdering:
         assert Test.__slots__ == ("a", "b")
 
     def test_kw_only_mixed(self):
-        class Test(Struct, kw_only=True):
+        class Test(Struct):
+            struct_config = StructConfig(kw_only=True)
             b: int
             a: int = 0
             c: int
@@ -475,7 +479,8 @@ class TestStructParameterOrdering:
         assert Test.__slots__ == ("a", "b", "c", "d")
 
     def test_kw_only_positional_base_class(self):
-        class Base(Struct, kw_only=True):
+        class Base(Struct):
+            struct_config = StructConfig(kw_only=True)
             b: int
             a: int
 
@@ -487,18 +492,19 @@ class TestStructParameterOrdering:
             d: int
             c: int = 1
 
-        assert S1.__struct_fields__ == ("d", "c", "b", "a")
+        assert S1.__struct_fields__ == ("b", "a", "d", "c")
         assert S1.__struct_defaults__ == ()
-        assert S1.__match_args__ == ("d", "c")
+        assert S1.__match_args__ == ()
         assert S1.__slots__ == ("c", "d")
 
-        assert S2.__struct_fields__ == ("d", "c", "b", "a")
-        assert S2.__struct_defaults__ == (1, NODEFAULT, NODEFAULT)
-        assert S2.__match_args__ == ("d", "c")
+        assert S2.__struct_fields__ == ("b", "a", "d", "c")
+        assert S2.__struct_defaults__ == (1,)
+        assert S2.__match_args__ == ()
         assert S2.__slots__ == ("c", "d")
 
     def test_kw_only_base_class(self):
-        class Base(Struct, kw_only=True):
+        class Base(Struct):
+            struct_config = StructConfig(kw_only=True)
             b: int = 1
             a: int
 
@@ -506,9 +512,9 @@ class TestStructParameterOrdering:
             d: int
             c: int = 2
 
-        assert S1.__struct_fields__ == ("d", "c", "b", "a")
-        assert S1.__struct_defaults__ == (2, 1, NODEFAULT)
-        assert S1.__match_args__ == ("d", "c")
+        assert S1.__struct_fields__ == ("b", "a", "d", "c")
+        assert S1.__struct_defaults__ == (1, NODEFAULT, NODEFAULT, 2)
+        assert S1.__match_args__ == ()
         assert S1.__slots__ == ("c", "d")
 
     def test_kw_only_subclass(self):
@@ -516,7 +522,8 @@ class TestStructParameterOrdering:
             b: int
             a: int
 
-        class S1(Base, kw_only=True):
+        class S1(Base):
+            struct_config = StructConfig(kw_only=True)
             d: int
             c: int
 
@@ -530,7 +537,8 @@ class TestStructParameterOrdering:
             b: int
             a: int = 0
 
-        class S1(Base, kw_only=True):
+        class S1(Base):
+            struct_config = StructConfig(kw_only=True)
             d: int
             c: int = 1
 
@@ -544,7 +552,8 @@ class TestStructParameterOrdering:
             b: int
             a: int = 2
 
-        class S1(Base, kw_only=True):
+        class S1(Base):
+            struct_config = StructConfig(kw_only=True)
             b: int
             c: int = 3
 
@@ -554,7 +563,8 @@ class TestStructParameterOrdering:
         assert S1.__slots__ == ("c",)
 
     def test_kw_only_overridden(self):
-        class Base(Struct, kw_only=True):
+        class Base(Struct):
+            struct_config = StructConfig(kw_only=True)
             b: int
             a: int = 2
 
@@ -562,9 +572,9 @@ class TestStructParameterOrdering:
             b: int
             c: int = 3
 
-        assert S1.__struct_fields__ == ("b", "c", "a")
-        assert S1.__struct_defaults__ == (3, 2)
-        assert S1.__match_args__ == ("b", "c")
+        assert S1.__struct_fields__ == ("b", "a", "c")
+        assert S1.__struct_defaults__ == (2, 3)
+        assert S1.__match_args__ == ()
         assert S1.__slots__ == ("c",)
 
 
@@ -600,7 +610,8 @@ class TestStructInit:
             Test(1, 2, e=5)
 
     def test_init_kw_only(self):
-        class Test(Struct, kw_only=True):
+        class Test(Struct):
+            struct_config = StructConfig(kw_only=True)
             a: int
             b: float = 2.0
             c: int = 3
@@ -620,7 +631,8 @@ class TestStructInit:
             Test(a=1, e=5)
 
     def test_init_kw_only_mixed(self):
-        class Base(Struct, kw_only=True):
+        class Base(Struct):
+            struct_config = StructConfig(kw_only=True)
             c: int = 3
             d: float = 4.0
 
@@ -628,23 +640,18 @@ class TestStructInit:
             a: int
             b: float = 2.0
 
-        assert as_tuple(Test(1)) == (1, 2.0, 3, 4.0)
-        assert as_tuple(Test(1, 5.0)) == (1, 5.0, 3, 4.0)
-        assert as_tuple(Test(a=1)) == (1, 2.0, 3, 4.0)
-        assert as_tuple(Test(a=1, b=5.0)) == (1, 5.0, 3, 4.0)
-        assert as_tuple(Test(1, c=5)) == (1, 2.0, 5, 4.0)
+        assert as_tuple(Test(a=1)) == (3, 4.0, 1, 2.0)
+        assert as_tuple(Test(a=1, b=5.0)) == (3, 4.0, 1, 5.0)
+        assert as_tuple(Test(a=1, c=5)) == (5, 4.0, 1, 2.0)
 
         with pytest.raises(TypeError, match="Missing required argument 'a'"):
             Test()
 
-        with pytest.raises(TypeError, match="Argument 'a' given by name and position"):
-            Test(1, b=3.0, c=4, a=3)
-
         with pytest.raises(TypeError, match="Extra positional arguments provided"):
-            Test(1, 5.0, 3)
+            Test(1)
 
         with pytest.raises(TypeError, match="Unexpected keyword argument 'e'"):
-            Test(1, e=5)
+            Test(a=1, e=5)
 
 
 class TestSignature:
@@ -674,7 +681,8 @@ class TestSignature:
         assert Test.__signature__ == sig
 
     def test_signature_kw_only(self):
-        class Base(Struct, kw_only=True):
+        class Base(Struct):
+            struct_config = StructConfig(kw_only=True)
             c: float
             d: int = 2
 
@@ -684,15 +692,15 @@ class TestSignature:
 
         sig = Signature(
             parameters=[
-                Parameter("b", Parameter.POSITIONAL_OR_KEYWORD, annotation=float),
+                Parameter("c", Parameter.KEYWORD_ONLY, annotation=float),
+                Parameter("d", Parameter.KEYWORD_ONLY, default=2, annotation=int),
+                Parameter("b", Parameter.KEYWORD_ONLY, annotation=float),
                 Parameter(
                     "a",
-                    Parameter.POSITIONAL_OR_KEYWORD,
+                    Parameter.KEYWORD_ONLY,
                     default=1,
                     annotation=int,
                 ),
-                Parameter("c", Parameter.KEYWORD_ONLY, annotation=float),
-                Parameter("d", Parameter.KEYWORD_ONLY, default=2, annotation=int),
             ]
         )
         assert Test.__signature__ == sig
@@ -730,7 +738,8 @@ class TestRepr:
         assert x.__rich_repr__() == [("a", 1), ("b", "y")]
 
     def test_repr_omit_defaults_empty(self):
-        class Test(Struct, repr_omit_defaults=True):
+        class Test(Struct):
+            struct_config = StructConfig(repr_omit_defaults=True)
             pass
 
         x = Test()
@@ -738,7 +747,8 @@ class TestRepr:
         assert x.__rich_repr__() == []
 
     def test_repr_omit_defaults_one_field(self):
-        class Test(Struct, repr_omit_defaults=True):
+        class Test(Struct):
+            struct_config = StructConfig(repr_omit_defaults=True)
             a: int = 0
 
         x = Test(0)
@@ -750,7 +760,8 @@ class TestRepr:
         assert x.__rich_repr__() == [("a", 1)]
 
     def test_repr_omit_defaults_multiple_fields(self):
-        class Test(Struct, repr_omit_defaults=True):
+        class Test(Struct):
+            struct_config = StructConfig(repr_omit_defaults=True)
             a: int
             b: int = 0
             c: str = ""
@@ -772,7 +783,8 @@ class TestRepr:
         assert x.__rich_repr__() == [("a", 0), ("b", 1), ("c", "two")]
 
     def test_omit_defaults_factory_collections(self):
-        class Test(Struct, omit_defaults=True):
+        class Test(Struct):
+            struct_config = StructConfig(omit_defaults=True)
             a: list = Factory(list)
             b: tuple = Factory(tuple)
             c: frozenset = Factory(frozenset)
@@ -785,7 +797,8 @@ class TestRepr:
         }
 
     def test_repr_omit_defaults_factory_collections(self):
-        class Test(Struct, repr_omit_defaults=True):
+        class Test(Struct):
+            struct_config = StructConfig(repr_omit_defaults=True)
             a: tuple = Factory(tuple)
             b: frozenset = Factory(frozenset)
 
@@ -846,7 +859,8 @@ def test_struct_copy():
     assert x.a == 2
 
 
-class FrozenPoint(Struct, frozen=True):
+class FrozenPoint(Struct):
+    struct_config = StructConfig(frozen=True)
     x: int
     y: int
 
@@ -896,7 +910,8 @@ class Point(Struct):
     y: int
 
 
-class PointKWOnly(Struct, kw_only=True):
+class PointKWOnly(Struct):
+    struct_config = StructConfig(kw_only=True)
     x: int
     y: int
 
@@ -962,9 +977,10 @@ def test_struct_defaults_from_field_annotated():
     # Test alias only (with kw_only to avoid ordering issue)
     source2 = """
     from typing import Annotated
-    from structtype import Struct, Field
+    from structtype import Struct, Field, StructConfig
 
-    class Test2(Struct, kw_only=True):
+    class Test2(Struct):
+        struct_config = StructConfig(kw_only=True)
         x: int
         y: Annotated[str, Field(alias="yyy")]
     """
@@ -1212,7 +1228,8 @@ class TestStructDealloc:
         assert sys.getrefcount(x) == count - 1
 
     def test_struct_dealloc_dict(self):
-        class Test(Struct, dict=True):
+        class Test(Struct):
+            struct_config = StructConfig(dict=True)
             x: int
 
         called = False
@@ -1228,7 +1245,8 @@ class TestStructDealloc:
         assert called
 
     def test_struct_dealloc_weakref(self):
-        class Test(Struct, weakref=True):
+        class Test(Struct):
+            struct_config = StructConfig(weakref=True)
             x: int
 
         t = Test(1)
@@ -1312,20 +1330,22 @@ def test_struct_handles_missing_attributes():
 )
 def test_struct_option_precedence(option, default):
     def get(cls):
-        return getattr(cls.__struct_config__, option)
+        return cls.__struct_config__[option]
 
     class Default(Struct):
         pass
 
     assert get(Default) is default
 
-    class Enabled(Struct, **{option: True}):
-        pass
+    ns = {}
+    exec(f"class Enabled(Struct):\n    struct_config = StructConfig({option}=True)", {"Struct": Struct, "StructConfig": StructConfig}, ns)
+    Enabled = ns["Enabled"]
 
     assert get(Enabled) is True
 
-    class Disabled(Struct, **{option: False}):
-        pass
+    ns = {}
+    exec(f"class Disabled(Struct):\n    struct_config = StructConfig({option}=False)", {"Struct": Struct, "StructConfig": StructConfig}, ns)
+    Disabled = ns["Disabled"]
 
     assert get(Disabled) is False
 
@@ -1334,8 +1354,9 @@ def test_struct_option_precedence(option, default):
 
     assert get(T) is True
 
-    class T(Enabled, **{option: False}):
-        pass
+    ns = {}
+    exec(f"class T(Enabled):\n    struct_config = StructConfig({option}=False)", {"Enabled": Enabled, "StructConfig": StructConfig}, ns)
+    T = ns["T"]
 
     assert get(T) is False
 
@@ -1361,39 +1382,42 @@ def test_weakref_option():
 
     assert Default.__weakrefoffset__ == 0
 
-    class Enabled(Struct, weakref=True):
+    class Enabled(Struct):
+        struct_config = StructConfig(weakref=True)
         pass
 
     assert Enabled.__weakrefoffset__ != 0
-    assert Enabled.__struct_config__.weakref
+    assert Enabled.__struct_config__["weakref"]
 
-    class Disabled(Struct, weakref=False):
+    class Disabled(Struct):
+        struct_config = StructConfig(weakref=False)
         pass
 
     assert Disabled.__weakrefoffset__ == 0
-    assert not Disabled.__struct_config__.weakref
+    assert not Disabled.__struct_config__["weakref"]
 
     class T(Enabled):
         pass
 
     assert T.__weakrefoffset__ != 0
-    assert T.__struct_config__.weakref
+    assert T.__struct_config__["weakref"]
 
     class T(Enabled, Default):
         pass
 
     assert T.__weakrefoffset__ != 0
-    assert T.__struct_config__.weakref
+    assert T.__struct_config__["weakref"]
 
     class T(Default, Disabled, Enabled):
         pass
 
     assert T.__weakrefoffset__ != 0
-    assert T.__struct_config__.weakref
+    assert T.__struct_config__["weakref"]
 
     with pytest.raises(ValueError, match="Cannot set `weakref=False`"):
 
-        class T(Enabled, weakref=False):
+        class T(Enabled):
+            struct_config = StructConfig(weakref=False)
             pass
 
 
@@ -1403,39 +1427,42 @@ def test_dict_option():
 
     assert Default.__dictoffset__ == 0
 
-    class Enabled(Struct, dict=True):
+    class Enabled(Struct):
+        struct_config = StructConfig(dict=True)
         pass
 
     assert Enabled.__dictoffset__ != 0
-    assert Enabled.__struct_config__.dict
+    assert Enabled.__struct_config__["dict"]
 
-    class Disabled(Struct, dict=False):
+    class Disabled(Struct):
+        struct_config = StructConfig(dict=False)
         pass
 
     assert Disabled.__dictoffset__ == 0
-    assert not Disabled.__struct_config__.dict
+    assert not Disabled.__struct_config__["dict"]
 
     class T(Enabled):
         pass
 
     assert T.__dictoffset__ != 0
-    assert T.__struct_config__.dict
+    assert T.__struct_config__["dict"]
 
     class T(Enabled, Default):
         pass
 
     assert T.__dictoffset__ != 0
-    assert T.__struct_config__.dict
+    assert T.__struct_config__["dict"]
 
     class T(Default, Disabled, Enabled):
         pass
 
     assert T.__dictoffset__ != 0
-    assert T.__struct_config__.dict
+    assert T.__struct_config__["dict"]
 
     with pytest.raises(ValueError, match="Cannot set `dict=False`"):
 
-        class T(Enabled, dict=False):
+        class T(Enabled):
+            struct_config = StructConfig(dict=False)
             pass
 
 
@@ -1444,59 +1471,66 @@ def test_cache_hash_option():
         ValueError, match="Cannot set cache_hash=True without frozen=True"
     ):
 
-        class Invalid(Struct, cache_hash=True):
+        class Invalid(Struct):
+            struct_config = StructConfig(cache_hash=True)
             pass
 
-    class Default(Struct, frozen=True):
+    class Default(Struct):
+        struct_config = StructConfig(frozen=True)
         pass
 
     assert "__structtype_cached_hash__" not in Default.__slots__
-    assert not Default.__struct_config__.cache_hash
+    assert not Default.__struct_config__["cache_hash"]
 
-    class Enabled(Struct, cache_hash=True, frozen=True):
+    class Enabled(Struct):
+        struct_config = StructConfig(cache_hash=True, frozen=True)
         pass
 
     assert "__structtype_cached_hash__" in Enabled.__slots__
-    assert Enabled.__struct_config__.cache_hash
+    assert Enabled.__struct_config__["cache_hash"]
 
-    class Disabled(Struct, cache_hash=False, frozen=True):
+    class Disabled(Struct):
+        struct_config = StructConfig(cache_hash=False, frozen=True)
         pass
 
     assert "__structtype_cached_hash__" not in Disabled.__slots__
-    assert not Disabled.__struct_config__.cache_hash
+    assert not Disabled.__struct_config__["cache_hash"]
 
     class T(Enabled):
         pass
 
     assert "__structtype_cached_hash__" not in T.__slots__
-    assert T.__struct_config__.cache_hash
+    assert T.__struct_config__["cache_hash"]
 
     class T(Enabled, Default):
         pass
 
     assert "__structtype_cached_hash__" not in T.__slots__
-    assert T.__struct_config__.cache_hash
+    assert T.__struct_config__["cache_hash"]
 
     class T(Default, Disabled, Enabled):
         pass
 
     assert "__structtype_cached_hash__" not in T.__slots__
-    assert T.__struct_config__.cache_hash
+    assert T.__struct_config__["cache_hash"]
 
     with pytest.raises(ValueError, match="Cannot set `cache_hash=False`"):
 
-        class T(Enabled, cache_hash=False):
+        class T(Enabled):
+            struct_config = StructConfig(cache_hash=False)
             pass
 
 
 def test_invalid_option_raises():
     with pytest.raises(TypeError):
 
-        class Foo(Struct, invalid=True):
+        class Foo(Struct):
+            struct_config = StructConfig(invalid=True)
             pass
 
 
-class FrozenPoint(Struct, frozen=True):
+class FrozenPoint(Struct):
+    struct_config = StructConfig(frozen=True)
     x: int
     y: int
 
@@ -1522,16 +1556,20 @@ class TestHash:
             hash(p)
 
     def test_hash_includes_type(self):
-        class Ex1(Struct, frozen=True):
+        class Ex1(Struct):
+            struct_config = StructConfig(frozen=True)
             x: int
 
-        class Ex2(Struct, frozen=True):
+        class Ex2(Struct):
+            struct_config = StructConfig(frozen=True)
             x: int
 
-        class Ex3(Struct, frozen=True):
+        class Ex3(Struct):
+            struct_config = StructConfig(frozen=True)
             pass
 
-        class Ex4(Struct, frozen=True):
+        class Ex4(Struct):
+            struct_config = StructConfig(frozen=True)
             pass
 
         assert hash(Ex1(1)) == hash(Ex1(1))
@@ -1548,7 +1586,8 @@ class TestHash:
                 self.hash_calls += 1
                 return 123
 
-        class Cached(Struct, frozen=True, cache_hash=True):
+        class Cached(Struct):
+            struct_config = StructConfig(frozen=True, cache_hash=True)
             x: int
             y: Inner
 
@@ -1570,10 +1609,12 @@ class TestSetAttr:
     def test_override_setattr(self, base_frozen):
         called = False
 
-        class Base(Struct, frozen=base_frozen):
+        class Base(Struct):
+            struct_config = StructConfig(frozen=base_frozen)
             pass
 
-        class Test(Struct, frozen=False):
+        class Test(Struct):
+            struct_config = StructConfig(frozen=False)
             x: Any
 
             def __setattr__(self, name, value):
@@ -1612,7 +1653,8 @@ class TestSetAttr:
         assert gc.is_tracked(t)
 
     def test_force_setattr_removed(self):
-        class Ex(Struct, frozen=True):
+        class Ex(Struct):
+            struct_config = StructConfig(frozen=True)
             x: Any
 
         obj = Ex(1)
@@ -1625,7 +1667,8 @@ class TestSetAttr:
             obj.x = 2
 
     def test_frozen_post_init_plain_setattr_blocked(self):
-        class Ex(Struct, frozen=True):
+        class Ex(Struct):
+            struct_config = StructConfig(frozen=True)
             x: int
             y: int = 0
 
@@ -1643,7 +1686,8 @@ class TestSetAttr:
         reason="object.__setattr__ on struct instances requires Python 3.13+",
     )
     def test_frozen_post_init_object_setattr(self):
-        class Ex(Struct, frozen=True):
+        class Ex(Struct):
+            struct_config = StructConfig(frozen=True)
             x: int
             y: int = 0
 
@@ -1674,11 +1718,13 @@ class TestOrderAndEq:
     def test_order_no_eq_errors(self):
         with pytest.raises(ValueError, match="Cannot set eq=False and order=True"):
 
-            class Test(Struct, order=True, eq=False):
+            class Test(Struct):
+                struct_config = StructConfig(order=True, eq=False)
                 pass
 
     def test_struct_eq_false(self):
-        class Point(Struct, eq=False):
+        class Point(Struct):
+            struct_config = StructConfig(eq=False)
             x: int
             y: int
 
@@ -1741,7 +1787,8 @@ class TestOrderAndEq:
     def test_struct_order(self, op):
         func = getattr(operator, op)
 
-        class Point(Struct, order=True):
+        class Point(Struct):
+            struct_config = StructConfig(order=True)
             x: int
             y: int
 
@@ -1756,7 +1803,8 @@ class TestOrderAndEq:
 
     @pytest.mark.parametrize("eq, order", [(False, False), (True, False), (True, True)])
     def test_struct_compare_returns_notimplemented(self, eq, order):
-        class Test(Struct, eq=eq, order=order):
+        class Test(Struct):
+            struct_config = StructConfig(eq=eq, order=order)
             x: int
 
         t1 = Test(1)
@@ -1774,7 +1822,8 @@ class TestOrderAndEq:
             def __eq__(self, other):
                 raise ValueError("Oh no!")
 
-        class Test(Struct, order=True):
+        class Test(Struct):
+            struct_config = StructConfig(order=True)
             a: object
             b: object
 
@@ -1814,12 +1863,14 @@ class TestTagAndTagField:
         ],
     )
     def test_config(self, opts, tag_field, tag):
-        class Test(Struct, **opts):
-            x: int
-            y: int
+        filtered_opts = {k: v for k, v in opts.items() if v is not None}
+        sc = StructConfig(**filtered_opts) if filtered_opts else StructConfig()
+        ns = {"Struct": Struct, "sc": sc}
+        exec("class Test(Struct):\n    struct_config = sc\n    x: int\n    y: int", ns)
+        Test = ns["Test"]
 
-        assert Test.__struct_config__.tag_field == tag_field
-        assert Test.__struct_config__.tag == tag
+        assert Test.__struct_config__["tag_field"] == tag_field
+        assert Test.__struct_config__["tag"] == tag
 
     @pytest.mark.parametrize(
         "opts1, opts2, tag_field, tag",
@@ -1847,60 +1898,76 @@ class TestTagAndTagField:
         ],
     )
     def test_inheritance(self, opts1, opts2, tag_field, tag):
-        class S1(Struct, **opts1):
-            pass
+        filtered_opts1 = {k: v for k, v in opts1.items() if v is not None}
+        sc1 = StructConfig(**filtered_opts1) if filtered_opts1 else StructConfig()
+        ns = {"Struct": Struct, "sc": sc1}
+        exec("class S1(Struct):\n    struct_config = sc\n    pass", ns)
+        S1 = ns["S1"]
 
-        class S2(S1, **opts2):
-            pass
+        filtered_opts2 = {k: v for k, v in opts2.items() if v is not None}
+        sc2 = StructConfig(**filtered_opts2) if filtered_opts2 else StructConfig()
+        ns["S1"] = S1
+        ns["sc"] = sc2
+        exec("class S2(S1):\n    struct_config = sc\n    pass", ns)
+        S2 = ns["S2"]
 
-        assert S2.__struct_config__.tag_field == tag_field
-        assert S2.__struct_config__.tag == tag
+        assert S2.__struct_config__["tag_field"] == tag_field
+        assert S2.__struct_config__["tag"] == tag
 
     def test_tag_uses_simple_qualname(self):
-        class S1(Struct, tag=True):
-            class S2(Struct, tag=True):
+        class S1(Struct):
+            struct_config = StructConfig(tag=True)
+            class S2(Struct):
+                struct_config = StructConfig(tag=True)
                 pass
 
-        assert S1.__struct_config__.tag == "S1"
-        assert S1.S2.__struct_config__.tag == "S1.S2"
+        assert S1.__struct_config__["tag"] == "S1"
+        assert S1.S2.__struct_config__["tag"] == "S1.S2"
 
-        class S1(Struct, tag=str.lower):
-            class S2(Struct, tag=str.lower):
+        class S1(Struct):
+            struct_config = StructConfig(tag=str.lower)
+            class S2(Struct):
+                struct_config = StructConfig(tag=str.lower)
                 pass
 
-        assert S1.__struct_config__.tag == "s1"
-        assert S1.S2.__struct_config__.tag == "s1.s2"
+        assert S1.__struct_config__["tag"] == "s1"
+        assert S1.S2.__struct_config__["tag"] == "s1.s2"
 
     @pytest.mark.parametrize("tag", [b"bad", lambda n: b"bad"])
     def test_tag_wrong_type(self, tag):
         with pytest.raises(TypeError, match="`tag` must be a `str` or an `int`"):
 
-            class Test(Struct, tag=tag):
+            class Test(Struct):
+                struct_config = StructConfig(tag=tag)
                 pass
 
     @pytest.mark.parametrize("tag", [-(2**63) - 1, 2**63])
     def test_tag_integer_out_of_range(self, tag):
         with pytest.raises(ValueError, match="Integer `tag` values must be"):
 
-            class Test(Struct, tag=tag):
+            class Test(Struct):
+                struct_config = StructConfig(tag=tag)
                 pass
 
     def test_tag_field_wrong_type(self):
         with pytest.raises(TypeError, match="`tag_field` must be a `str`"):
 
-            class Test(Struct, tag_field=b"bad"):
+            class Test(Struct):
+                struct_config = StructConfig(tag_field=b"bad")
                 pass
 
     def test_tag_field_collision(self):
         with pytest.raises(ValueError, match="tag_field='y'"):
 
-            class Test(Struct, tag_field="y"):
+            class Test(Struct):
+                struct_config = StructConfig(tag_field="y")
                 x: int
                 y: int
 
     def test_tag_field_inheritance_collision(self):
         # Inherit the tag field
-        class Base(Struct, tag_field="y"):
+        class Base(Struct):
+            struct_config = StructConfig(tag_field="y")
             pass
 
         with pytest.raises(ValueError, match="tag_field='y'"):
@@ -1916,7 +1983,8 @@ class TestTagAndTagField:
 
         with pytest.raises(ValueError, match="tag_field='y'"):
 
-            class Test(Base, tag_field="y"):  # noqa
+            class Test(Base):
+                struct_config = StructConfig(tag_field="y")
                 pass
 
 
@@ -1928,14 +1996,16 @@ class TestRename:
         assert Test.__struct_alias_fields__ == ("field_x",)
 
     def test_rename_mixed_with_field_name(self):
-        class Test(Struct, rename="upper"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="upper")
             x: Annotated[int, Field(alias="field_x")]
             y: int
 
         assert Test.__struct_alias_fields__ == ("field_x", "Y")
 
     def test_rename_no_change(self):
-        class Test(Struct, rename="lower"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="lower")
             x: int
 
         assert Test.__struct_fields__ is Test.__struct_alias_fields__
@@ -1952,13 +2022,15 @@ class TestRename:
 
         assert Test.__struct_fields__ is Test.__struct_alias_fields__
 
-        class Test(Struct, rename="upper"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="upper")
             x: Annotated[int, Field(alias=None)]
 
         assert Test.__struct_alias_fields__ == ("X",)
 
     def test_rename_explicit_none(self):
-        class Test(Struct, rename=None):
+        class Test(Struct):
+            struct_config = StructConfig(rename=None)
             field_one: int
             field_two: str
 
@@ -1966,21 +2038,24 @@ class TestRename:
         assert Test.__struct_fields__ is Test.__struct_alias_fields__
 
     def test_rename_lower(self):
-        class Test(Struct, rename="lower"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="lower")
             field_One: int
             field_Two: str
 
         assert Test.__struct_alias_fields__ == ("field_one", "field_two")
 
     def test_rename_upper(self):
-        class Test(Struct, rename="upper"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="upper")
             field_one: int
             field_two: str
 
         assert Test.__struct_alias_fields__ == ("FIELD_ONE", "FIELD_TWO")
 
     def test_rename_kebab(self):
-        class Test(Struct, rename="kebab"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="kebab")
             field_one: int
             field_two_with_suffix: str
             __field_three__: bool
@@ -1996,7 +2071,8 @@ class TestRename:
         )
 
     def test_rename_camel(self):
-        class Test(Struct, rename="camel"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="camel")
             field_one: int
             field_two_with_suffix: str
             __field__three__: bool
@@ -2012,7 +2088,8 @@ class TestRename:
         )
 
     def test_rename_pascal(self):
-        class Test(Struct, rename="pascal"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="pascal")
             field_one: int
             field_two_with_suffix: str
             __field__three__: bool
@@ -2028,14 +2105,16 @@ class TestRename:
         )
 
     def test_rename_callable(self):
-        class Test(Struct, rename=str.title):
+        class Test(Struct):
+            struct_config = StructConfig(rename=str.title)
             field_one: int
             field_two: str
 
         assert Test.__struct_alias_fields__ == ("Field_One", "Field_Two")
 
     def test_rename_callable_returns_none(self):
-        class Test(Struct, rename={"from_": "from"}.get):
+        class Test(Struct):
+            struct_config = StructConfig(rename={"from_": "from"}.get)
             from_: str
             to: str
 
@@ -2047,13 +2126,15 @@ class TestRename:
             match="Expected calling `rename` to return a `str` or `None`, got `int`",
         ):
 
-            class Test(Struct, rename=lambda x: 1):
+            class Test(Struct):
+                struct_config = StructConfig(rename=lambda x: 1)
                 aa1: int
                 aa2: int
                 ab1: int
 
     def test_rename_mapping(self):
-        class Test(Struct, rename={"from_": "from"}):
+        class Test(Struct):
+            struct_config = StructConfig(rename={"from_": "from"})
             from_: str
             to: str
 
@@ -2062,19 +2143,22 @@ class TestRename:
     def test_rename_bad_value(self):
         with pytest.raises(ValueError, match="rename='invalid' is unsupported"):
 
-            class Test(Struct, rename="invalid"):
+            class Test(Struct):
+                struct_config = StructConfig(rename="invalid")
                 x: int
 
     def test_rename_bad_type(self):
         with pytest.raises(TypeError, match="str, callable, or mapping"):
 
-            class Test(Struct, rename=1):
+            class Test(Struct):
+                struct_config = StructConfig(rename=1)
                 x: int
 
     def test_rename_fields_collide(self):
         with pytest.raises(ValueError, match="Multiple fields rename to the same name"):
 
-            class Test(Struct, rename=lambda x: x[:2]):
+            class Test(Struct):
+                struct_config = StructConfig(rename=lambda x: x[:2])
                 aa1: int
                 aa2: int
                 ab1: int
@@ -2083,14 +2167,16 @@ class TestRename:
     def test_rename_field_invalid_characters(self, field):
         with pytest.raises(ValueError) as rec:
 
-            class Test(Struct, rename=lambda x: field):
+            class Test(Struct):
+                struct_config = StructConfig(rename=lambda x: field)
                 x: int
 
         assert field in str(rec.value)
         assert "must not contain" in str(rec.value)
 
     def test_rename_inherit(self):
-        class Base(Struct, rename="upper"):
+        class Base(Struct):
+            struct_config = StructConfig(rename="upper")
             pass
 
         class Test1(Base):
@@ -2098,17 +2184,20 @@ class TestRename:
 
         assert Test1.__struct_alias_fields__ == ("X",)
 
-        class Test2(Base, rename="camel"):
+        class Test2(Base):
+            struct_config = StructConfig(rename="camel")
             my_field: int
 
         assert Test2.__struct_alias_fields__ == ("myField",)
 
-        class Test3(Test2, rename="kebab"):
+        class Test3(Test2):
+            struct_config = StructConfig(rename="kebab")
             my_other_field: int
 
         assert Test3.__struct_alias_fields__ == ("myField", "my-other-field")
 
-        class Test4(Base, rename=None):
+        class Test4(Base):
+            struct_config = StructConfig(rename=None)
             my_field: int
 
         assert Test4.__struct_alias_fields__ == ("my_field",)
@@ -2116,7 +2205,8 @@ class TestRename:
     def test_rename_fields_only_used_for_encode_and_decode(self):
         """Check that the renamed fields don't show up elsewhere"""
 
-        class Test(Struct, rename="upper"):
+        class Test(Struct):
+            struct_config = StructConfig(rename="upper")
             one: int
             two: str
 
@@ -2166,7 +2256,8 @@ class TestReplace:
         assert replace(p, x=3) == Point(3, 2)
 
     def test_replace_frozen(self, replace):
-        class Test(structtype.Struct, frozen=True):
+        class Test(structtype.Struct):
+            struct_config = StructConfig(frozen=True)
             x: int
             y: int
 
@@ -2296,7 +2387,8 @@ class TestInspectFields:
         assert z_field.default_factory is factory
 
     def test_fields_keyword_only(self):
-        class Example(structtype.Struct, kw_only=True):
+        class Example(structtype.Struct):
+            struct_config = StructConfig(kw_only=True)
             a: int
             b: int = 1
             c: int
@@ -2311,7 +2403,8 @@ class TestInspectFields:
         assert structtype.fields(Example) == sol
 
     def test_fields_alias(self):
-        class Example(structtype.Struct, rename="camel"):
+        class Example(structtype.Struct):
+            struct_config = StructConfig(rename="camel")
             field_one: int
             field_two: int
 

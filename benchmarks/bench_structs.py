@@ -105,9 +105,10 @@ class C{n}(BaseModel):
 """
 
 structtype_template = """
-from structtype import Struct
+from structtype import Struct, StructConfig
 
-class C{n}(Struct, order=True):
+class C{n}(Struct):
+    struct_config = StructConfig(order=True)
     a: int
     b: int
     c: int

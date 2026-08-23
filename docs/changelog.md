@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** replace the `StructMeta` keyword-argument config API with a
+  pydantic-style class-body `struct_config` attribute. `StructConfig` is now a
+  `TypedDict` (plain dict at runtime). The metaclass validates that
+  `struct_config` is a dict, rejects unknown keys (catches typos), and requires
+  strict `bool` values for the 12 boolean options.
+
+  `StructMeta.__new__` is now a catch-all: class-statement kwargs (e.g.
+  `frozen=True`) are silently ignored. Custom metaclasses that subclass
+  `StructMeta` can intercept and consume kwargs in their own `__new__` before
+  calling `super().__new__`.
+
+  Migration:
+
+  | Old | New |
+  |---|---|
+  | `class Point(Struct, frozen=True)` | `class Point(Struct):`<br>`    struct_config = StructConfig(frozen=True)` |
+  | `Point.__struct_config__.frozen` | `Point.__struct_config__["frozen"]` |
+
+  New public API:
+  - `StructConfig` is a `TypedDict(total=False)` with 15 optional keys
+    (`frozen`, `eq`, `order`, `kw_only`, `repr_omit_defaults`, `array_like`,
+    `omit_defaults`, `forbid_unknown_fields`, `validate_on_init`, `weakref`,
+    `dict`, `cache_hash`, `tag`, `tag_field`, `rename`).
+  - `struct_config` attribute on Struct types (resolved, fully-populated dict).
+  - `kw_only` and `rename` now exposed on `__struct_config__` (previously hidden).
+
+  Key-absence = inherit from base; `{"tag": None}` explicitly clears an
+  inherited tag; `StructConfig()` (empty dict) is a no-op override.
+
+  Removed:
+  - `StructConfig` C object type (~500 lines of C deleted).
+  - `StructConfig.replace()` method (use dict merge `{**cfg, ...}` instead).
+  - `UNSET` sentinel for config options (still used for field values).
+  - All class-definition keyword arguments on `StructMeta.__new__`.
+
+  Simplified: project-wide config defaults no longer require a custom
+  metaclass — a base class with `struct_config` suffices.
+
+  Note: `isinstance(x, StructConfig)` raises `TypeError` on all Python versions
+  (TypedDicts do not support instance checks). Use `isinstance(x, dict)` instead.
+
 ## 0.7.0 (2026-08-22)
 
 - **Breaking:** Split `Field` into three focused annotation types:

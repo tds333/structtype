@@ -21,7 +21,8 @@ px: int = p.x
 py: str = p.y
 
 
-class KwOnly(Struct, kw_only=True):
+class KwOnly(Struct):
+    struct_config = StructConfig(kw_only=True)
     a: int
     b: str
 
@@ -29,14 +30,16 @@ class KwOnly(Struct, kw_only=True):
 k = KwOnly(a=1, b="x")
 
 
-class Frozen(Struct, frozen=True):
+class Frozen(Struct):
+    struct_config = StructConfig(frozen=True)
     v: int
 
 
 f = Frozen(v=1)
 
 
-class Arr(Struct, array_like=True):
+class Arr(Struct):
+    struct_config = StructConfig(array_like=True)
     a: int
     b: int
 
@@ -44,7 +47,8 @@ class Arr(Struct, array_like=True):
 a = Arr(1, 2)
 
 
-class Ordered(Struct, order=True):
+class Ordered(Struct):
+    struct_config = StructConfig(order=True)
     v: int
 
 
@@ -61,3 +65,6 @@ r: Point = Point.struct_validate({"x": 1})
 field_names: tuple[str, ...] = Point.__struct_fields__
 defaults: tuple[Any, ...] = Point.__struct_defaults__
 cfg: StructConfig = Point.__struct_config__
+sc: StructConfig = Point.struct_config
+sc2: StructConfig = Point.__struct_config__
+frozen: bool = cfg["frozen"]

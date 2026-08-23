@@ -956,8 +956,9 @@ Type checking also still applies.
 
 .. code-block:: python
 
-    >>> from structtype import Struct
-    >>> class User(Struct, array_like=True):
+    >>> from structtype import Struct, StructConfig
+    >>> class User(Struct):
+    ...     struct_config = StructConfig(array_like=True)
     ...     name: str
     ...     groups: set[str] = set()
     ...     email: str | None = None

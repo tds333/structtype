@@ -15,6 +15,7 @@ from structtype import (
     StrValidator,
     Struct,
     StructAdapter,
+    StructConfig,
     TimezoneValidator,
     ValidationError,
     Validator,
@@ -1281,7 +1282,8 @@ class TestValidateSelfCheckTypesOnly:
 
         ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
 
-        class Ex(Struct, validate_on_init=True):
+        class Ex(Struct):
+            struct_config = StructConfig(validate_on_init=True)
             c: Annotated[Color, ser]
 
         # validate_on_init should raise because "blue" isn't a Color
@@ -1298,7 +1300,8 @@ class TestValidateSelfCheckTypesOnly:
 
         ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
 
-        class Ex(Struct, validate_on_init=True):
+        class Ex(Struct):
+            struct_config = StructConfig(validate_on_init=True)
             c: Annotated[Color, ser]
 
         # Already the right type — passes, load not called
@@ -1332,7 +1335,8 @@ class TestValidateSelfCheckTypesOnly:
                 calls.append("protocol")
                 return cls(d["v"])
 
-        class Ex(Struct, validate_on_init=True):
+        class Ex(Struct):
+            struct_config = StructConfig(validate_on_init=True)
             c: Color
 
         with pytest.raises(ValidationError, match="Expected `Color`, got `dict`"):
@@ -1344,7 +1348,8 @@ class TestValidateSelfCheckTypesOnly:
             def __init__(self, v):
                 self.v = v
 
-        class Ex(Struct, validate_on_init=True):
+        class Ex(Struct):
+            struct_config = StructConfig(validate_on_init=True)
             c: Optional[Annotated[Color, Serializer(load=Color)]]
 
         # None is valid for Optional[Color]
@@ -1357,7 +1362,8 @@ class TestValidateSelfCheckTypesOnly:
             def __init__(self, v):
                 self.v = v
 
-        class Ex(Struct, validate_on_init=True):
+        class Ex(Struct):
+            struct_config = StructConfig(validate_on_init=True)
             c: Annotated[Color, Serializer(load=Color), Validator(lambda v: seen.append(v.v))]
 
         Ex(Color("ok"))
@@ -1404,7 +1410,8 @@ class TestValidateSelfCheckTypesOnly:
 
         ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
 
-        class Ex(Struct, validate_on_init=True):
+        class Ex(Struct):
+            struct_config = StructConfig(validate_on_init=True)
             c: Annotated[Color, ser]
 
         with pytest.raises(ValidationError):
