@@ -8809,13 +8809,13 @@ structmeta_apply_spec(StructMetaInfo *info, PyObject *spec) {
     if (iter == NULL) return -1;
     while ((key = PyIter_Next(iter)) != NULL) {
         int found = 0;
-        for (const char **k = known_config_keys; *k != NULL; k++) {
-            PyObject *known = PyUnicode_FromString(*k);
-            if (known == NULL) { Py_DECREF(key); Py_DECREF(iter); return -1; }
-            int cmp = PyObject_RichCompareBool(key, known, Py_EQ);
-            Py_DECREF(known);
-            if (cmp < 0) { Py_DECREF(key); Py_DECREF(iter); return -1; }
-            if (cmp) { found = 1; break; }
+        if (PyUnicode_Check(key)) {
+            for (const char **k = known_config_keys; *k != NULL; k++) {
+                if (PyUnicode_CompareWithASCIIString(key, *k) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
         }
         if (!found) {
             PyErr_Format(PyExc_TypeError, "Unknown struct_config key: %R", key);
@@ -8833,9 +8833,9 @@ structmeta_apply_spec(StructMetaInfo *info, PyObject *spec) {
 
 static PyObject *
 StructMeta_new_inner(
-    PyTypeObject *type, PyObject *name, PyObject *bases, PyObject *namespace,
-    PyObject *struct_config_spec, PyObject *kwargs
-) {
+     PyTypeObject *type, PyObject *name, PyObject *bases, PyObject *namespace,
+     PyObject *struct_config_spec
+ ) {
     StructMetaObject *cls = NULL;
     StructspecState *mod = structtype_get_global_state();
     bool ok = false;
@@ -9092,7 +9092,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         spec = NULL;
     }
 
-    PyObject *result = StructMeta_new_inner(type, name, bases, namespace, spec, kwargs);
+    PyObject *result = StructMeta_new_inner(type, name, bases, namespace, spec);
     Py_XDECREF(spec);
     return result;
 }
@@ -9421,10 +9421,11 @@ structmeta_build_config_dict(StructMetaObject *st_type) {
     #define SET_BOOL(name, val) do { \
         PyObject *b = (val) ? Py_True : Py_False; \
         Py_INCREF(b); \
-        if (PyDict_SetItemString(d, name, b) < 0) { Py_DECREF(d); return NULL; } \
+        if (PyDict_SetItemString(d, name, b) < 0) { Py_DECREF(b); Py_DECREF(d); return NULL; } \
     } while(0)
 
     SET_BOOL("frozen", st_type->frozen == OPT_TRUE);
+    /* eq defaults to True; OPT_UNSET (unresolved base) means the default */
     SET_BOOL("eq", st_type->eq != OPT_FALSE);
     SET_BOOL("order", st_type->order == OPT_TRUE);
     SET_BOOL("kw_only", st_type->kw_only == OPT_TRUE);

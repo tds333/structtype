@@ -210,3 +210,33 @@ def test_concurrent_enum_cache_construction():
         t.start()
     for t in threads:
         t.join()
+
+
+def test_concurrent_class_creation_with_config():
+    """Stress concurrent Struct class creation with class-body struct_config.
+
+    Exercises the metaclass __new__ path (structmeta_apply_spec, namespace
+    handling, resolved-config dict building) under free-threading. Each thread
+    defines structs with distinct configs and validates the resolved config."""
+    from structtype import StructConfig
+
+    def worker(seed):
+        for i in range(200):
+            if (i + seed) % 3 == 0:
+                ns = {"struct_config": StructConfig(frozen=True, order=True)}
+                cls = type(f"Freeze{seed}_{i}", (Struct,), ns)
+                assert cls.__struct_config__["frozen"] is True
+                assert cls.__struct_config__["order"] is True
+            elif (i + seed) % 3 == 1:
+                ns = {"struct_config": StructConfig(kw_only=True)}
+                cls = type(f"KwOnly{seed}_{i}", (Struct,), ns)
+                assert cls.__struct_config__["kw_only"] is True
+            else:
+                cls = type(f"Plain{seed}_{i}", (Struct,), {})
+                assert cls.__struct_config__["frozen"] is False
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
