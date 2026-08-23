@@ -93,7 +93,11 @@ format: ## Format files using ruff format
 ##@ Benchmark
 .PHONY: bench
 bench: ## run benchmarks
-	uv run benchmarks/bench_libs.py
+	uv run -p 3.15 benchmarks/bench_libs.py
+
+.PHONY: bench-validators
+bench-validators: ## run Serializer/Validator benchmarks
+	uv run -p 3.15 benchmarks/bench_validators.py
 
 ##@ Utility
 .PHONY: clean

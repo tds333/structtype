@@ -168,6 +168,77 @@ still slower than pure C. Pydantic also has more features, at the cost of
 performance.
 
 
+Validators & Serializers
+------------------------
+
+Here we benchmark `structtype.Struct` types that make heavy use of
+:doc:`Validator <annotation>` and :doc:`Serializer <extending>` annotations
+on every field, comparing against an equivalent ``pydantic`` schema using
+``Field(gt=, le=, min_length=, max_length=, pattern=)`` plus
+``@field_validator`` / ``@field_serializer``.
+
+Each field carries either a constraint check or a custom-type codec:
+
+- numeric constraints (``NumericValidator`` ↔ ``Field(gt=, le=)``)
+- string constraints (``StrValidator`` ↔ ``Field(min_length=, pattern=)``)
+- collection constraints (``CollectionValidator`` ↔ ``Field(min_length=)``)
+- a custom ``PostalCode`` type converted via ``Serializer(dump=, load=)``
+  (↔ pydantic ``@field_serializer`` / ``@field_validator``)
+
+Operations measured, all over 500 orders:
+
+- ``Load`` — ``struct_validate`` vs ``model_validate`` (validators on input)
+- ``Dump`` — ``struct_dump`` vs ``model_dump`` (dump serializers)
+- ``Load JSON`` / ``Dump JSON`` — the same via the JSON codecs
+- ``Init (no validation)`` — constructor only. structtype does **not**
+  validate on ``__init__`` by default; pydantic always does.
+- ``Init (with validation)`` — the same with ``validate_on_init=True`` on the
+  structtype side, so both libraries validate on construction.
+
+The full benchmark source can be found `here
+<https://github.com/tds333/structtype/blob/main/benchmarks/bench_validators.py>`__.
+Run it with ``make bench-validators``.
+
+.. code-block:: text
+    :caption: Python 3.15.0rc1, structtype 0.7.1.dev3, pydantic 2.13.4
+
+    Load (dict -> object)
+    -------------------------------------------------------
+      structtype            475.2 μs   (1.00x)
+      pydantic              925.6 μs   (1.95x)
+
+    Dump (object -> dict)
+    -------------------------------------------------------
+      structtype            211.8 μs   (1.00x)
+      pydantic              735.6 μs   (3.47x)
+
+    Load JSON (bytes -> object)
+    -------------------------------------------------------
+      structtype            575.7 μs   (1.00x)
+      pydantic             1087.8 μs   (1.89x)
+
+    Dump JSON (object -> bytes)
+    -------------------------------------------------------
+      structtype            136.0 μs   (1.00x)
+      pydantic              835.2 μs   (6.14x)
+
+    Init (no validation)
+    -------------------------------------------------------
+      structtype             97.1 μs   (1.00x)
+      pydantic              840.0 μs   (8.65x)
+
+    Init (with validation)
+    -------------------------------------------------------
+      structtype            474.1 μs   (1.00x)
+      pydantic              897.9 μs   (1.89x)
+
+With every field doing validation or codec conversion work, structtype is
+~1.9–6x faster than pydantic on load/dump operations. The largest gap is
+construction: structtype's default (no init validation) is ~8.7x faster, and
+even with ``validate_on_init=True`` it is still ~1.9x faster than pydantic's
+always-on construction-time validation.
+
+
 .. _struct-benchmark:
 
 Dataclass like libs
