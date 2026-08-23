@@ -6,41 +6,39 @@ from structtype import StructConfig
 Position = tuple[float, float]
 
 
-# Define the 7 standard Geometry types.
-# All types set `tag=True`, meaning that they'll make use of a `type` field to
-# disambiguate between types when decoding.
-class Point(structtype.Struct):
+# All 9 GeoJSON types share the same configuration: they make use of a `type`
+# field to disambiguate between types when decoding. Define it once on a base
+# class — subclasses inherit the configuration automatically.
+class TaggedBase(structtype.Struct):
     struct_config = StructConfig(tag=True)
+
+
+# Define the 7 standard Geometry types.
+class Point(TaggedBase):
     coordinates: Position
 
 
-class MultiPoint(structtype.Struct):
-    struct_config = StructConfig(tag=True)
+class MultiPoint(TaggedBase):
     coordinates: list[Position]
 
 
-class LineString(structtype.Struct):
-    struct_config = StructConfig(tag=True)
+class LineString(TaggedBase):
     coordinates: list[Position]
 
 
-class MultiLineString(structtype.Struct):
-    struct_config = StructConfig(tag=True)
+class MultiLineString(TaggedBase):
     coordinates: list[list[Position]]
 
 
-class Polygon(structtype.Struct):
-    struct_config = StructConfig(tag=True)
+class Polygon(TaggedBase):
     coordinates: list[list[Position]]
 
 
-class MultiPolygon(structtype.Struct):
-    struct_config = StructConfig(tag=True)
+class MultiPolygon(TaggedBase):
     coordinates: list[list[list[Position]]]
 
 
-class GeometryCollection(structtype.Struct):
-    struct_config = StructConfig(tag=True)
+class GeometryCollection(TaggedBase):
     geometries: list[Geometry]
 
 
@@ -56,15 +54,13 @@ Geometry = (
 
 
 # Define the two Feature types
-class Feature(structtype.Struct):
-    struct_config = StructConfig(tag=True)
+class Feature(TaggedBase):
     geometry: Geometry | None = None
     properties: dict | None = None
     id: str | int | None = None
 
 
-class FeatureCollection(structtype.Struct):
-    struct_config = StructConfig(tag=True)
+class FeatureCollection(TaggedBase):
     features: list[Feature]
 
 
