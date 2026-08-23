@@ -499,6 +499,7 @@ typedef struct {
     PyObject *concrete_types;
     PyObject *get_type_hints;
     PyObject *get_class_annotations;
+    PyObject *resolve_annotations_dict;
     PyObject *get_typeddict_info;
     PyObject *get_dataclass_info;
     PyObject *convert_generic_alias;
@@ -8305,10 +8306,32 @@ structmeta_collect_fields(StructMetaInfo *info, StructspecState *mod, bool kwonl
         return -1;
     }
 
-    /* Copy annotations for Field extraction */
-    info->resolved_annotations = PyDict_Copy(annotations);
+    /* Resolve annotations for Field/Serializer/Validator extraction.
+     * `annotations` may hold lazy strings (from `from __future__ import
+     * annotations`); resolve them against the class namespace + module
+     * namespace so codecs and Field metadata are visible at class creation,
+     * matching the decode-time resolution in get_class_annotations. */
+    PyObject *module_ns = structmeta_get_module_ns(mod, info);
+    if (module_ns != NULL) {
+        PyObject *resolved = PyObject_CallFunctionObjArgs(
+            mod->resolve_annotations_dict, annotations, info->namespace, module_ns, NULL
+        );
+        if (resolved == NULL) {
+            Py_DECREF(module_ns);
+            Py_DECREF(annotations);
+            return -1;
+        }
+        Py_XSETREF(info->resolved_annotations, resolved);
+    }
+    else {
+        PyErr_Clear();
+        info->resolved_annotations = PyDict_Copy(annotations);
+        if (info->resolved_annotations == NULL) {
+            Py_DECREF(annotations);
+            return -1;
+        }
+    }
 
-    PyObject *module_ns = NULL;
     PyObject *field, *value;
     Py_ssize_t i = 0;
     while (PyDict_Next(annotations, &i, &field, &value)) {
@@ -8352,6 +8375,7 @@ structmeta_collect_fields(StructMetaInfo *info, StructspecState *mod, bool kwonl
         if (structmeta_process_default(info, mod, field) < 0) goto error;
     }
     Py_DECREF(annotations);
+    Py_XDECREF(module_ns);
     return 0;
 error:
     Py_DECREF(annotations);
@@ -21015,6 +21039,7 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->concrete_types);
     Py_CLEAR(st->get_type_hints);
     Py_CLEAR(st->get_class_annotations);
+    Py_CLEAR(st->resolve_annotations_dict);
     Py_CLEAR(st->get_typeddict_info);
     Py_CLEAR(st->get_dataclass_info);
     Py_CLEAR(st->rebuild);
@@ -21059,6 +21084,7 @@ structtype_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->concrete_types);
     Py_VISIT(st->get_type_hints);
     Py_VISIT(st->get_class_annotations);
+    Py_VISIT(st->resolve_annotations_dict);
     Py_VISIT(st->get_typeddict_info);
     Py_VISIT(st->get_dataclass_info);
     Py_VISIT(st->rebuild);
@@ -21257,6 +21283,7 @@ PyInit__core(void)
     SET_REF(concrete_types, "_CONCRETE_TYPES");
     SET_REF(get_type_hints, "get_type_hints");
     SET_REF(get_class_annotations, "get_class_annotations");
+    SET_REF(resolve_annotations_dict, "resolve_annotations_dict");
     SET_REF(get_typeddict_info, "get_typeddict_info");
     SET_REF(get_dataclass_info, "get_dataclass_info");
     SET_REF(typing_annotated_alias, "_AnnotatedAlias");

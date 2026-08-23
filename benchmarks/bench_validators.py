@@ -23,10 +23,6 @@ codec. Operations:
   ``validate_on_init=True``; pydantic always validates on construction.
 
 pydantic is optional — benchmarks that use it are skipped when not installed.
-
-Note: this module must NOT use ``from __future__ import annotations`` —
-lazy string annotations currently prevent ``Serializer(dump=...)`` codecs
-from being wired up on ``Struct`` fields.
 """
 
 import random

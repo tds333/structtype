@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (2026-08-23)
 
 - **Breaking:** replace the `StructMeta` keyword-argument config API with a
   pydantic-style class-body `struct_config` attribute. `StructConfig` is now a
@@ -42,6 +42,12 @@
 
   Note: `isinstance(x, StructConfig)` raises `TypeError` on all Python versions
   (TypedDicts do not support instance checks). Use `isinstance(x, dict)` instead.
+
+- Fix: `from __future__ import annotations` is now fully supported. Lazy string
+  annotations are resolved at class creation, so `Serializer(dump=...)` codecs,
+  `Field(alias=...)` metadata, and `Validator` constraints work exactly as with
+  eager annotations. Previously `Serializer(dump=...)` codecs and `Field(alias=...)`
+  were silently dropped under lazy annotations.
 
 ## 0.7.0 (2026-08-22)
 

@@ -183,6 +183,32 @@ def get_class_annotations(obj):
     return hints
 
 
+def resolve_annotations_dict(raw_annotations, locals_ns, globals_ns):
+    """Resolve lazy string annotations (e.g. ``from __future__ import annotations``)
+    into real type objects.
+
+    ``locals_ns``/``globals_ns`` mirror the ``(cls_locals, cls_globals)`` pair
+    used by ``get_class_annotations``: for a class these are its ``__dict__``
+    and the containing module's ``__dict__``.
+
+    Non-string values pass through unchanged; ``None`` becomes ``type(None)``.
+    Strings that fail to resolve (e.g. forward references to the class being
+    defined) are kept as-is so the decode-time resolver can handle them later.
+    """
+    out = {}
+    for name, value in raw_annotations.items():
+        if isinstance(value, str):
+            try:
+                value = _eval_type(_forward_ref(value), locals_ns, globals_ns)
+            except (NameError, TypeError):
+                out[name] = value
+                continue
+        if value is None:
+            value = type(None)
+        out[name] = value
+    return out
+
+
 # A mapping from a type annotation (or annotation __origin__) to the concrete
 # python type that structtype will use when decoding. THIS IS PRIVATE FOR A
 # REASON. DON'T MUCK WITH THIS.

@@ -822,6 +822,142 @@ class TestSerializerCodecWiring:
         assert msg.struct_dump_json() == b'{"by_name":{"a":"red","b":"blue"}}'
 
 
+class TestFutureAnnotations:
+    """Annotations under ``from __future__ import annotations`` are stored as
+    lazy strings. They must be resolved at class-creation time so Serializer
+    codecs, Field metadata, and Validator constraints work exactly as with
+    eager annotations."""
+
+    def test_serializer_dump_and_load(self):
+        from tests.utils import temp_module
+
+        source = """
+        from __future__ import annotations
+        from typing import Annotated
+        from structtype import Struct, Serializer
+
+        class Color:
+            def __init__(self, rgb):
+                self.rgb = rgb
+            def __eq__(self, other):
+                return isinstance(other, Color) and self.rgb == other.rgb
+            def __repr__(self):
+                return f"Color({self.rgb!r})"
+
+        def dump(c):
+            return list(c.rgb)
+
+        def load(v):
+            return Color(tuple(v))
+
+        class Msg(Struct):
+            color: Annotated[Color, Serializer(dump=dump, load=load)]
+        """
+        with temp_module(source) as mod:
+            out = mod.Msg.struct_validate({"color": [1, 2, 3]})
+            assert out.color == mod.Color((1, 2, 3))
+            assert mod.Msg.struct_validate_json(out.struct_dump_json()) == out
+
+    def test_field_alias(self):
+        from tests.utils import temp_module
+
+        source = """
+        from __future__ import annotations
+        from typing import Annotated
+        from structtype import Struct, Field
+
+        class Msg(Struct):
+            color: Annotated[int, Field(alias="colour")]
+        """
+        with temp_module(source) as mod:
+            assert mod.Msg.__struct_alias_fields__ == ("colour",)
+            out = mod.Msg.struct_validate({"colour": 5})
+            assert out.color == 5
+            assert out.struct_dump() == {"colour": 5}
+
+    def test_validator_constraint(self):
+        from tests.utils import temp_module
+
+        source = """
+        from __future__ import annotations
+        from typing import Annotated
+        from structtype import Struct, NumericValidator
+
+        class Msg(Struct):
+            n: Annotated[int, NumericValidator(gt=0)]
+        """
+        with temp_module(source) as mod:
+            assert mod.Msg.struct_validate({"n": 5}).n == 5
+            with pytest.raises(ValidationError):
+                mod.Msg.struct_validate({"n": -1})
+
+    @pytest.mark.skipif(sys.version_info < (3, 14), reason="PEP 649 __annotate__ is 3.14+")
+    def test_pep649_annotate_in_class_body(self):
+        """A 3.14+ class body may define ``__annotate__`` (PEP 649). It is
+        resolved through the ``annotationlib`` path and must produce the same
+        fields/types as an ``__annotations__`` dict."""
+        from tests.utils import temp_module
+
+        source = """
+        from __future__ import annotations
+        from structtype import Struct
+
+        def annotate(fmt):
+            return {"x": "int", "s": "str | None"}
+
+        class Msg(Struct):
+            __annotate__ = annotate
+            x: int
+            s: str | None = None
+        """
+        with temp_module(source) as mod:
+            assert mod.Msg.__struct_fields__ == ("x", "s")
+            assert mod.Msg.struct_validate({"x": 5}).x == 5
+            assert mod.Msg.struct_validate({"x": 5}).s is None
+            with pytest.raises(ValidationError):
+                mod.Msg.struct_validate({"x": "bad"})
+
+    @pytest.mark.skipif(sys.version_info < (3, 14), reason="3.14+ quotes string annotations differently")
+    def test_quoted_string_annotation(self):
+        """3.14+ stores a quoted annotation like ``\"list[dict[str, int]]\"``
+        with extra inner quotes; it must still resolve to the real generic."""
+        from tests.utils import temp_module
+
+        source = """
+        from __future__ import annotations
+        from structtype import Struct
+
+        class Box(Struct):
+            items: "list[dict[str, int]]" = []
+        """
+        with temp_module(source) as mod:
+            b = mod.Box.struct_validate({"items": [{"a": 1}]})
+            assert b.items == [{"a": 1}]
+
+    @pytest.mark.skipif(sys.version_info < (3, 14), reason="PEP 649 __annotate__ is 3.14+")
+    def test_pep649_nested(self):
+        """Forward references and nested generics under ``__annotate__`` resolve
+        at class creation or fall back to the decode-time resolver."""
+        from tests.utils import temp_module
+
+        source = """
+        from __future__ import annotations
+        from structtype import Struct
+
+        def annotate(fmt):
+            return {"child": "Node | None", "items": "list[int]"}
+
+        class Node(Struct):
+            __annotate__ = annotate
+            child: "Node | None" = None
+            items: list[int] = []
+        """
+        with temp_module(source) as mod:
+            n = mod.Node(mod.Node())
+            assert n.child is not None
+            assert n.items == []
+
+
 class TestStructAdapterSerializerRejection:
     def test_rejects_load(self):
         def f(x):
