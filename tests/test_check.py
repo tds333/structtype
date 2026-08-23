@@ -7,6 +7,7 @@ from structtype import (
     Struct,
     StructConfig,
     ValidationError,
+    Validator,
     NumericValidator,
     StrValidator,
     TimezoneValidator,
@@ -36,6 +37,45 @@ class Timed(Struct):
 
 class Nested(Struct):
     inner: Point
+
+
+class ListNested(Struct):
+    items: list[Point]
+
+
+class DictNested(Struct):
+    mapping: dict[str, Point]
+
+
+class TupleNested(Struct):
+    items: tuple[Point, ...]
+
+
+class SetNested(Struct):
+    items: set[Point]
+
+
+class FrozenPoint(Struct):
+    struct_config = StructConfig(frozen=True)
+    x: int
+    y: int
+
+
+class FrozenSetNested(Struct):
+    items: set[FrozenPoint]
+
+
+class FrozenFrozensetNested(Struct):
+    items: frozenset[FrozenPoint]
+
+
+class OptListNested(Struct):
+    items: list[Point | None]
+
+
+class ListNestedInit(Struct):
+    struct_config = StructConfig(validate_on_init=True)
+    items: list[Point]
 
 
 # ── basic type validation ──
@@ -114,6 +154,85 @@ def test_invalid_nested():
     p.inner.x = "bad"
     with pytest.raises(ValidationError, match="Expected `int`, got `str`"):
         p.struct_validate_self()
+
+
+# ── nested structs inside containers ──
+
+
+def test_valid_nested_in_list():
+    p = ListNested(items=[Point(1, 2), Point(3, 4)])
+    assert p.struct_validate_self() is None
+
+
+def test_invalid_nested_in_list():
+    p = ListNested(items=[Point(1, 2), Point("bad", 3)])
+    with pytest.raises(ValidationError, match=r"\$\.items\[1\]\.x"):
+        p.struct_validate_self()
+
+
+def test_valid_nested_in_dict():
+    p = DictNested(mapping={"a": Point(1, 2)})
+    assert p.struct_validate_self() is None
+
+
+def test_invalid_nested_in_dict():
+    p = DictNested(mapping={"a": Point("bad", 2)})
+    with pytest.raises(ValidationError, match=r"\$\.mapping\[.a.\]\.x"):
+        p.struct_validate_self()
+
+
+def test_valid_nested_in_tuple():
+    p = TupleNested(items=(Point(1, 2),))
+    assert p.struct_validate_self() is None
+
+
+def test_invalid_nested_in_tuple():
+    p = TupleNested(items=(Point("bad", 2),))
+    with pytest.raises(ValidationError, match=r"\$\.items\[0\]\.x"):
+        p.struct_validate_self()
+
+
+def test_invalid_nested_in_set():
+    p = FrozenSetNested(items={FrozenPoint("bad", 2)})
+    with pytest.raises(ValidationError, match=r"\$\.items\[0\]\.x"):
+        p.struct_validate_self()
+
+
+def test_invalid_nested_in_frozenset():
+    p = FrozenFrozensetNested(items=frozenset({FrozenPoint("bad", 2)}))
+    with pytest.raises(ValidationError, match=r"\$\.items\[0\]\.x"):
+        p.struct_validate_self()
+
+
+def test_none_in_optional_list_passes():
+    p = OptListNested(items=[None, Point(1, 2)])
+    assert p.struct_validate_self() is None
+
+
+def test_invalid_nested_in_optional_list():
+    p = OptListNested(items=[None, Point("bad", 2)])
+    with pytest.raises(ValidationError, match=r"\$\.items\[1\]\.x"):
+        p.struct_validate_self()
+
+
+def test_invalid_nested_validate_on_init_list():
+    with pytest.raises(ValidationError, match=r"\$\.items\[0\]\.x"):
+        ListNestedInit(items=[Point("bad", 2)])
+
+
+def test_nested_item_user_validator_called_once():
+    calls = []
+
+    def check(p):
+        calls.append(p.x)
+        return p
+
+    class VList(Struct):
+        items: list[Annotated[Point, Validator(check)]]
+
+    v = VList(items=[Point(1, 2), Point(3, 4)])
+    v.struct_validate_self()
+    assert calls == [1, 3]
 
 
 # ── no mutation ──

@@ -20858,6 +20858,100 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
     return out;
 }
 
+/* If `val` is a struct instance matching `field_type` (a direct struct or a
+ * struct union member), recurse into it. Returns 1 if recursed, 0 if the value
+ * isn't a matching struct, and -1 on error. When `apply_validator` is true, a
+ * user validator attached to `field_type` is applied after a successful
+ * recursion. */
+static int
+struct_check_maybe_recurse(
+    PyObject *val, TypeNode *field_type, StructspecState *mod, PathNode *field_path,
+    bool apply_validator
+) {
+    bool matches = false;
+    if (field_type->types & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
+        StructInfo *nested_info = TypeNode_get_struct_info(field_type);
+        if (Py_TYPE(val) == (PyTypeObject *)nested_info->class) {
+            matches = true;
+        }
+    }
+    else if (field_type->types & (MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION)) {
+        Lookup *lookup = TypeNode_get_struct_union(field_type);
+        if (ms_is_struct_inst(val) &&
+            Lookup_union_contains_type(lookup, Py_TYPE(val)))
+        {
+            matches = true;
+        }
+    }
+    if (!matches) return 0;
+
+    if (struct_check_recursive(val, mod, field_path) < 0) return -1;
+    if (apply_validator && field_type->types & MS_CONSTR_USER_VALIDATOR) {
+        /* `ms_call_user_validator` steals the reference */
+        Py_INCREF(val);
+        PyObject *checked = ms_call_user_validator(val, field_type, field_path);
+        Py_XDECREF(checked);
+        if (checked == NULL) return -1;
+    }
+    return 1;
+}
+
+/* Recurse into struct instances nested inside a sequence/set/tuple container.
+ * Items that aren't matching structs are left to the normal validate_obj path
+ * (handled by the caller). Returns 1 if any item was recursed, 0 if none were,
+ * -1 on error. */
+static int
+struct_check_recurse_seq_items(
+    PyObject **items, Py_ssize_t size, TypeNode *item_type,
+    StructspecState *mod, PathNode *field_path
+) {
+    int any = 0;
+    for (Py_ssize_t i = 0; i < size; i++) {
+        PyObject *item = items[i];
+        if (!ms_is_struct_inst(item)) continue;
+        PathNode item_path = {field_path, i, NULL};
+        int r = struct_check_maybe_recurse(item, item_type, mod, &item_path, false);
+        if (r < 0) return -1;
+        if (r) any = 1;
+    }
+    return any;
+}
+
+static int
+struct_check_recurse_seq(
+    PyObject *container, TypeNode *item_type,
+    StructspecState *mod, PathNode *field_path
+) {
+    PyObject *seq = PySequence_Fast(container, "expected a sequence");
+    if (seq == NULL) return -1;
+    Py_ssize_t size = PySequence_Fast_GET_SIZE(seq);
+    PyObject **items = PySequence_Fast_ITEMS(seq);
+    int ret = struct_check_recurse_seq_items(items, size, item_type, mod, field_path);
+    Py_DECREF(seq);
+    return ret;
+}
+
+/* Recurse into struct instances nested as dict values. Values that aren't
+ * matching structs are left to the normal validate_obj path (handled by the
+ * caller). Returns 1 if any value was recursed, 0 if none were, -1 on error. */
+static int
+struct_check_recurse_dict(
+    PyObject *dict, TypeNode *val_type,
+    StructspecState *mod, PathNode *field_path
+) {
+    PyObject *key_obj = NULL, *val_obj = NULL;
+    Py_ssize_t pos = 0;
+    int any = 0;
+    while (PyDict_Next(dict, &pos, &key_obj, &val_obj)) {
+        if (!ms_is_struct_inst(val_obj)) continue;
+        PathNode val_path = {field_path, PATH_STR_BRACKET, key_obj};
+        int r = struct_check_maybe_recurse(val_obj, val_type, mod, &val_path, false);
+        if (r < 0) return -1;
+        if (r) any = 1;
+    }
+    return any;
+}
+
 /* Recursive helper for struct_validate_self — validates each field against its type
  * annotation, recursing into nested struct fields without creating intermediate
  * objects (no dump roundtrip). */
@@ -20885,43 +20979,37 @@ struct_check_recursive(
 
         PathNode field_path = {path, i, (PyObject *)st_type};
 
-        /* Direct struct fields: recurse into them */
-        if (field_type->types & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
-            StructInfo *nested_info = TypeNode_get_struct_info(field_type);
-            if (Py_TYPE(val) == (PyTypeObject *)nested_info->class) {
-                ret = struct_check_recursive(val, mod, &field_path);
-                if (ret == 0 && field_type->types & MS_CONSTR_USER_VALIDATOR) {
-                    /* `ms_call_user_validator` steals the reference */
-                    Py_INCREF(val);
-                    PyObject *checked = ms_call_user_validator(
-                        val, field_type, &field_path
-                    );
-                    Py_XDECREF(checked);
-                    if (checked == NULL) ret = -1;
-                }
-                continue;
+        /* Direct struct fields and struct unions: recurse into matching
+         * struct instances, applying the field's user validator. */
+        int r = struct_check_maybe_recurse(val, field_type, mod, &field_path, true);
+        if (r < 0) { ret = -1; break; }
+        if (r == 1) continue;
+
+        /* Structs nested inside containers: recurse into contained struct
+         * instances (e.g. list[Inner], dict[str, Inner], tuple[Inner, ...]).
+         * Items that aren't matching structs fall through to validate_obj. */
+        if (field_type->types & MS_ANY_DICT) {
+            TypeNode *key_type, *val_type;
+            TypeNode_get_dict(field_type, &key_type, &val_type);
+            if (val_type->types &
+                (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY |
+                 MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION))
+            {
+                r = struct_check_recurse_dict(val, val_type, mod, &field_path);
+                if (r < 0) { ret = -1; break; }
             }
         }
-        /* Struct union fields (e.g. Point | None, A | B): recurse if value
-         * is a struct AND is actually a member of the union (not just any
-         * struct instance). */
-        else if (
-            field_type->types & (MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION)
-        ) {
-            Lookup *lookup = TypeNode_get_struct_union(field_type);
-            if (ms_is_struct_inst(val) &&
-                Lookup_union_contains_type(lookup, Py_TYPE(val)))
+        else if (field_type->types &
+            (MS_TYPE_LIST | MS_TYPE_SET | MS_TYPE_FROZENSET |
+             MS_TYPE_VARTUPLE | MS_TYPE_FIXTUPLE))
+        {
+            TypeNode *item_type = TypeNode_get_array(field_type);
+            if (item_type->types &
+                (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY |
+                 MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION))
             {
-                ret = struct_check_recursive(val, mod, &field_path);
-                if (ret == 0 && field_type->types & MS_CONSTR_USER_VALIDATOR) {
-                    Py_INCREF(val);
-                    PyObject *checked = ms_call_user_validator(
-                        val, field_type, &field_path
-                    );
-                    Py_XDECREF(checked);
-                    if (checked == NULL) ret = -1;
-                }
-                continue;
+                r = struct_check_recurse_seq(val, item_type, mod, &field_path);
+                if (r < 0) { ret = -1; break; }
             }
         }
 

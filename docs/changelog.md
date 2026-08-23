@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fix: `struct_validate_self()` and `validate_on_init=True` now recursively
+  validate nested `Struct` instances inside containers (`list`, `dict`,
+  `tuple`, `set`, `frozenset`). Previously only direct nested Struct fields
+  were checked; Structs nested inside containers were trusted as-is.
+
 ## 0.8.1 (2026-08-23)
 
 - `StructMeta.__new__` now forwards class-statement kwargs (e.g. `frozen=True`)
