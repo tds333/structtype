@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.1 (2026-08-23)
+
+- `StructMeta.__new__` now forwards class-statement kwargs (e.g. `frozen=True`)
+  to `__init_subclass__`. A user-defined
+  `__init_subclass__(cls, **kwargs)` on a Struct base receives them unmodified,
+  but they do **not** configure the struct: configuration comes only from the
+  class-body `struct_config` attribute. A plain Struct subclass with unknown
+  class-statement kwargs now raises `TypeError` (previously silently ignored).
+
+  Custom metaclasses that subclass `StructMeta` can still intercept and consume
+  kwargs in their own `__new__` before calling `super().__new__`.
+
 ## 0.8.0 (2026-08-23)
 
 - **Breaking:** replace the `StructMeta` keyword-argument config API with a

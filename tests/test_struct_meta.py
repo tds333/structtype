@@ -67,14 +67,32 @@ def test_empty_struct_config_is_noop():
     assert Child.struct_config["frozen"] is True
 
 
-def test_class_kwargs_silently_ignored():
-    """Class-statement kwargs are silently ignored (no TypeError)."""
-    class Bad(Struct, frozen=True, tag="nope"):
-        x: int
+def test_class_kwargs_pass_to_init_subclass():
+    """Class-statement kwargs are forwarded to a user-defined __init_subclass__.
 
-    assert Bad.__struct_config__["frozen"] is False
-    assert Bad.__struct_config__["tag"] is None
-    assert Bad(1).x == 1
+    This matches pydantic: a user hook receives the unmodified kwargs, but they
+    do NOT configure the struct (config only comes from the class-body
+    `struct_config` attribute)."""
+    received = []
+
+    class HookBase(Struct):
+        def __init_subclass__(cls, **kwargs):
+            received.append(kwargs)
+            super().__init_subclass__()
+
+    class Child(HookBase, frozen=True, tag="nope"):
+        x: int = 1
+
+    assert received == [{"frozen": True, "tag": "nope"}]
+    assert Child.__struct_config__["frozen"] is False
+    assert Child.__struct_config__["tag"] is None
+
+
+def test_plain_struct_rejects_class_kwargs():
+    """A plain Struct subclass rejects class-statement kwargs (like pydantic)."""
+    with pytest.raises(TypeError, match="__init_subclass__"):
+        class Bad(Struct, frozen=True):
+            x: int = 1
 
 
 def test_custom_metaclass_can_intercept_kwargs():

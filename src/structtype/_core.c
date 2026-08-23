@@ -8858,7 +8858,7 @@ structmeta_apply_spec(StructMetaInfo *info, PyObject *spec) {
 static PyObject *
 StructMeta_new_inner(
      PyTypeObject *type, PyObject *name, PyObject *bases, PyObject *namespace,
-     PyObject *struct_config_spec
+     PyObject *struct_config_spec, PyObject *kwargs
  ) {
     StructMetaObject *cls = NULL;
     StructspecState *mod = structtype_get_global_state();
@@ -8958,10 +8958,13 @@ StructMeta_new_inner(
     /* Construct alias_fields */
     if (structmeta_construct_alias_fields(&info) < 0) goto cleanup;
 
-    /* Construct type */
+    /* Construct type. Forward class-statement kwargs to type.__new__ so CPython
+     * routes them to __init_subclass__ (matching pydantic). */
     PyObject *args = Py_BuildValue("(OOO)", name, bases, info.namespace);
     if (args == NULL) goto cleanup;
-    cls = (StructMetaObject *) PyType_Type.tp_new(type, args, NULL);
+    Py_XINCREF(kwargs);
+    cls = (StructMetaObject *) PyType_Type.tp_new(type, args, kwargs);
+    Py_XDECREF(kwargs);
     Py_CLEAR(args);
     if (cls == NULL) goto cleanup;
 
@@ -9093,7 +9096,9 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
     PyObject *name = NULL, *bases = NULL, *namespace = NULL;
 
-    /* Parse only positional args — unknown kwargs pass through to __init_subclass__ */
+    /* Parse only positional args — class-statement kwargs are forwarded to
+     * __init_subclass__ via type.__new__ (config only comes from the
+     * class-body `struct_config` attribute). */
     if (!PyArg_ParseTuple(args, "UO!O!:StructMeta.__new__",
             &name, &PyTuple_Type, &bases, &PyDict_Type, &namespace)
     )
@@ -9116,7 +9121,7 @@ StructMeta_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
         spec = NULL;
     }
 
-    PyObject *result = StructMeta_new_inner(type, name, bases, namespace, spec);
+    PyObject *result = StructMeta_new_inner(type, name, bases, namespace, spec, kwargs);
     Py_XDECREF(spec);
     return result;
 }
@@ -9537,7 +9542,9 @@ PyDoc_STRVAR(StructMeta__doc__,
 ">>> Example(b=123)\n"
 "Example(a='', b=123)\n"
 "\n"
-"Class-statement kwargs pass through to ``__init_subclass__``.\n"
+"Class-statement kwargs pass through to ``__init_subclass__``, but do not\n"
+"affect struct configuration — set config only via the ``struct_config``\n"
+"class attribute.\n"
 );
 
 static PyTypeObject StructMetaType = {
