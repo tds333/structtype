@@ -96,6 +96,36 @@ complete example enforcing the following constraints on a ``User`` struct:
 As shown above, ``Annotated`` types can applied inline, or used to create type
 aliases and then reused elsewhere (as done with ``UnixName``).
 
+``Annotated`` metadata can also be layered. A type alias may carry one kind of
+annotation (e.g. a ``Validator``), and the alias can then be wrapped again with
+another kind (e.g. a ``Field``) where it's used:
+
+.. code-block:: python
+
+    >>> from typing import Annotated
+    >>> from structtype import Struct, Field, Validator
+
+    >>> def non_negative(value):
+    ...     if value < 0:
+    ...         raise ValueError("must be non-negative")
+    ...     return value
+
+    >>> NonNegativeInt = Annotated[int, Validator(non_negative)]
+
+    >>> class S(Struct):
+    ...     xyz: Annotated[NonNegativeInt, Field(alias="z")]
+
+    >>> S.struct_validate({"z": 5}).xyz
+    5
+    >>> S.struct_validate({"z": -1})
+    Traceback (most recent call last):
+      ...
+    structtype.ValidationError: must be non-negative - at `$.z`
+
+At most one ``Field``, one ``Serializer``, and one ``Validator`` may apply to a
+single field, across all nesting levels. Using two of the same kind (e.g. two
+``Field`` wrappers) raises a ``TypeError``.
+
 The following constraints are supported:
 
 Numeric Constraints
