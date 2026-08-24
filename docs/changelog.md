@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 (2026-08-24)
 
 - **Breaking:** rename the `Validator` annotation family to `Constraint`:
   `Validator` → `Constraint`, `NumericValidator` → `NumericConstraint`,
