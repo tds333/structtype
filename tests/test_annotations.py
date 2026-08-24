@@ -7,18 +7,18 @@ from typing import Annotated, Optional, Union
 import pytest
 
 from structtype import (
-    BytesValidator,
-    CollectionValidator,
+    BytesConstraint,
+    CollectionConstraint,
     Field,
-    NumericValidator,
+    NumericConstraint,
     Serializer,
-    StrValidator,
+    StrConstraint,
     Struct,
     StructAdapter,
     StructConfig,
-    TimezoneValidator,
+    TimezoneConstraint,
     ValidationError,
-    Validator,
+    Constraint,
 )
 from structtype._core import JSONDecoder
 
@@ -71,34 +71,34 @@ class TestSerializer:
             Serializer(load=f, bad=1)
 
 
-class TestValidator:
+class TestConstraint:
     def test_construction(self):
-        v = Validator(f)
+        v = Constraint(f)
         assert v.fn is f
 
     def test_keyword_construction(self):
-        v = Validator(fn=g)
+        v = Constraint(fn=g)
         assert v.fn is g
 
     def test_fn_optional(self):
-        v = Validator()
+        v = Constraint()
         assert v.fn is None
-        assert repr(v) == "structtype.Validator()"
+        assert repr(v) == "structtype.Constraint()"
 
     def test_explicit_none_fn(self):
-        v = Validator(None)
+        v = Constraint(None)
         assert v.fn is None
 
     @pytest.mark.parametrize("fn", [1, "x", [f]])
     def test_not_callable(self, fn):
         with pytest.raises(TypeError, match="fn must be callable"):
-            Validator(fn)
+            Constraint(fn)
 
 
-class TestValidatorCall:
+class TestConstraintCall:
     def test_bare_validator_call_is_noop(self):
-        assert Validator()(1) is None
-        assert Validator()("anything") is None
+        assert Constraint()(1) is None
+        assert Constraint()("anything") is None
 
     def test_fn_invoked_with_value(self):
         seen = []
@@ -107,7 +107,7 @@ class TestValidatorCall:
             seen.append(v)
             return "return value ignored"
 
-        v = Validator(record)
+        v = Constraint(record)
         assert v(42) is None
         assert seen == [42]
 
@@ -116,30 +116,30 @@ class TestValidatorCall:
             raise RuntimeError("boom")
 
         with pytest.raises(RuntimeError, match="boom"):
-            Validator(boom)(1)
+            Constraint(boom)(1)
 
     def test_requires_exactly_one_arg(self):
-        v = Validator(f)
+        v = Constraint(f)
         with pytest.raises(TypeError):
             v()
         with pytest.raises(TypeError):
             v(1, 2)
 
     def test_user_subclass_overrides_call(self):
-        class Even(Validator):
+        class Even(Constraint):
             def __call__(self, value):
                 if value % 2:
                     raise ValueError("not even")
 
         e = Even()
-        assert isinstance(e, Validator)
+        assert isinstance(e, Constraint)
         assert e.fn is None
         assert e(4) is None
         with pytest.raises(ValueError, match="not even"):
             e(3)
 
     def test_user_subclass_custom_init(self):
-        class Positive(Validator):
+        class Positive(Constraint):
             def __init__(self):
                 self.floor = 0
 
@@ -158,35 +158,35 @@ class TestIsinstance:
     @pytest.mark.parametrize(
         "v",
         [
-            NumericValidator(gt=0),
-            StrValidator(pattern="a"),
-            BytesValidator(min_length=1),
-            CollectionValidator(max_length=2),
-            TimezoneValidator(tz=True),
+            NumericConstraint(gt=0),
+            StrConstraint(pattern="a"),
+            BytesConstraint(min_length=1),
+            CollectionConstraint(max_length=2),
+            TimezoneConstraint(tz=True),
         ],
     )
     def test_subclass_instances_are_validators(self, v):
-        assert isinstance(v, Validator)
-        assert issubclass(type(v), Validator)
+        assert isinstance(v, Constraint)
+        assert issubclass(type(v), Constraint)
 
     @pytest.mark.parametrize(
         "cls",
         [
-            NumericValidator,
-            StrValidator,
-            BytesValidator,
-            CollectionValidator,
-            TimezoneValidator,
+            NumericConstraint,
+            StrConstraint,
+            BytesConstraint,
+            CollectionConstraint,
+            TimezoneConstraint,
         ],
     )
     def test_subclasses_of_validator(self, cls):
-        assert issubclass(cls, Validator)
+        assert issubclass(cls, Constraint)
         # fast validators are leaf types
         with pytest.raises(TypeError):
             type("Sub", (cls,), {})
 
 
-class TestNumericValidator:
+class TestNumericConstraint:
     @pytest.mark.parametrize(
         "kwargs",
         [
@@ -206,53 +206,53 @@ class TestNumericValidator:
         ],
     )
     def test_valid_construction(self, kwargs):
-        v = NumericValidator(**kwargs)
+        v = NumericConstraint(**kwargs)
         for k, expected in kwargs.items():
             assert getattr(v, k) == expected
         for unset in set(kwargs) ^ {"gt", "ge", "lt", "le", "multiple_of"}:
             assert getattr(v, unset) is None
 
     def test_none_is_equivalent_to_unset(self):
-        v = NumericValidator(gt=None, multiple_of=None)
+        v = NumericConstraint(gt=None, multiple_of=None)
         assert v.gt is None
         assert v.multiple_of is None
-        assert v == NumericValidator()
+        assert v == NumericConstraint()
 
     def test_gt_ge_mutual_exclusion(self):
         with pytest.raises(ValueError, match="both `gt` and `ge`"):
-            NumericValidator(gt=0, ge=1)
+            NumericConstraint(gt=0, ge=1)
 
     def test_lt_le_mutual_exclusion(self):
         with pytest.raises(ValueError, match="both `lt` and `le`"):
-            NumericValidator(lt=0, le=1)
+            NumericConstraint(lt=0, le=1)
 
     @pytest.mark.parametrize("name", ["gt", "ge", "lt", "le", "multiple_of"])
     @pytest.mark.parametrize("val", [float("nan"), float("inf"), float("-inf")])
     def test_non_finite_rejected(self, name, val):
         with pytest.raises(ValueError, match="must be finite"):
-            NumericValidator(**{name: val})
+            NumericConstraint(**{name: val})
 
     @pytest.mark.parametrize("name", ["gt", "ge", "lt", "le", "multiple_of"])
     @pytest.mark.parametrize("val", ["1", True, [1]])
     def test_non_numeric_rejected(self, name, val):
         with pytest.raises(TypeError, match="must be an int or float"):
-            NumericValidator(**{name: val})
+            NumericConstraint(**{name: val})
 
     @pytest.mark.parametrize("val", [0, -1, -1.5])
     def test_multiple_of_must_be_positive(self, val):
         with pytest.raises(ValueError, match="`multiple_of` must be > 0"):
-            NumericValidator(multiple_of=val)
+            NumericConstraint(multiple_of=val)
 
     def test_huge_int_bound_rejected_cleanly(self):
         with pytest.raises(OverflowError):
-            NumericValidator(gt=10**400)
+            NumericConstraint(gt=10**400)
 
     def test_base_fn_slot_not_aliased(self):
-        v = NumericValidator(gt=5)
+        v = NumericConstraint(gt=5)
         assert v.fn is None
 
 
-class TestNumericValidatorCall:
+class TestNumericConstraintCall:
     @pytest.mark.parametrize(
         "kwargs,value",
         [
@@ -276,7 +276,7 @@ class TestNumericValidatorCall:
         ],
     )
     def test_passes(self, kwargs, value):
-        assert NumericValidator(**kwargs)(value) is None
+        assert NumericConstraint(**kwargs)(value) is None
 
     @pytest.mark.parametrize(
         "kwargs,value",
@@ -293,7 +293,7 @@ class TestNumericValidatorCall:
         ],
     )
     def test_violation_raises_value_error(self, kwargs, value):
-        v = NumericValidator(**kwargs)
+        v = NumericConstraint(**kwargs)
         with pytest.raises(ValueError):
             v(value)
 
@@ -311,22 +311,22 @@ class TestNumericValidatorCall:
     )
     def test_error_message_style(self, kwargs, value, match):
         with pytest.raises(ValueError, match=match):
-            NumericValidator(**kwargs)(value)
+            NumericConstraint(**kwargs)(value)
 
     def test_mixed_int_float_bounds(self):
         # int value vs float bound and vice versa go through float comparison
-        assert NumericValidator(ge=0.5)(1) is None
+        assert NumericConstraint(ge=0.5)(1) is None
         with pytest.raises(ValueError, match="Expected `int` >= 0\\.5"):
-            NumericValidator(ge=0.5)(0)
+            NumericConstraint(ge=0.5)(0)
 
     def test_wrong_type_raises_type_error(self):
-        v = NumericValidator(ge=0)
+        v = NumericConstraint(ge=0)
         for value in ["1", None, [1], True]:
             with pytest.raises(TypeError, match="Expected `int` or `float`"):
                 v(value)
 
 
-class TestStrValidator:
+class TestStrConstraint:
     @pytest.mark.parametrize(
         "kwargs",
         [
@@ -338,7 +338,7 @@ class TestStrValidator:
         ],
     )
     def test_valid_construction(self, kwargs):
-        v = StrValidator(**kwargs)
+        v = StrConstraint(**kwargs)
         for k, expected in kwargs.items():
             assert getattr(v, k) == expected
         for unset in set(kwargs) ^ {"pattern", "min_length", "max_length"}:
@@ -346,31 +346,31 @@ class TestStrValidator:
 
     def test_pattern_must_be_str(self):
         with pytest.raises(TypeError, match="`pattern` must be a str"):
-            StrValidator(pattern=1)
+            StrConstraint(pattern=1)
 
     def test_invalid_regex_raises(self):
         with pytest.raises(re.error):
-            StrValidator(pattern="(")
+            StrConstraint(pattern="(")
 
     @pytest.mark.parametrize("name", ["min_length", "max_length"])
     def test_negative_length_rejected(self, name):
         with pytest.raises(ValueError, match=f"`{name}` must be >= 0"):
-            StrValidator(**{name: -1})
+            StrConstraint(**{name: -1})
 
     @pytest.mark.parametrize("name", ["min_length", "max_length"])
     @pytest.mark.parametrize("val", ["1", 1.5, True])
     def test_non_int_length_rejected(self, name, val):
         with pytest.raises(TypeError, match=f"`{name}` must be an int"):
-            StrValidator(**{name: val})
+            StrConstraint(**{name: val})
 
     def test_none_is_equivalent_to_unset(self):
-        v = StrValidator(pattern=None, max_length=None)
+        v = StrConstraint(pattern=None, max_length=None)
         assert v.pattern is None
         assert v.max_length is None
-        assert v == StrValidator()
+        assert v == StrConstraint()
 
 
-class TestStrValidatorCall:
+class TestStrConstraintCall:
     @pytest.mark.parametrize(
         "kwargs,value",
         [
@@ -384,7 +384,7 @@ class TestStrValidatorCall:
         ],
     )
     def test_passes(self, kwargs, value):
-        assert StrValidator(**kwargs)(value) is None
+        assert StrConstraint(**kwargs)(value) is None
 
     @pytest.mark.parametrize(
         "kwargs,value,match",
@@ -397,21 +397,21 @@ class TestStrValidatorCall:
     )
     def test_violation_raises_value_error(self, kwargs, value, match):
         with pytest.raises(ValueError, match=match):
-            StrValidator(**kwargs)(value)
+            StrConstraint(**kwargs)(value)
 
     @pytest.mark.parametrize("value", [1, b"abc", None, ["a"]])
     def test_wrong_type_raises_type_error(self, value):
         with pytest.raises(TypeError, match="Expected `str`"):
-            StrValidator(pattern="a")(value)
+            StrConstraint(pattern="a")(value)
 
 
-class TestBytesValidator:
+class TestBytesConstraint:
     @pytest.mark.parametrize(
         "kwargs",
         [{}, {"min_length": 0}, {"max_length": 4}, {"min_length": 1, "max_length": 9}],
     )
     def test_valid_construction(self, kwargs):
-        v = BytesValidator(**kwargs)
+        v = BytesConstraint(**kwargs)
         for k, expected in kwargs.items():
             assert getattr(v, k) == expected
         for unset in set(kwargs) ^ {"min_length", "max_length"}:
@@ -420,18 +420,18 @@ class TestBytesValidator:
     @pytest.mark.parametrize("name", ["min_length", "max_length"])
     def test_negative_length_rejected(self, name):
         with pytest.raises(ValueError, match=f"`{name}` must be >= 0"):
-            BytesValidator(**{name: -1})
+            BytesConstraint(**{name: -1})
 
     @pytest.mark.parametrize("name", ["min_length", "max_length"])
     def test_non_int_length_rejected(self, name):
         with pytest.raises(TypeError, match=f"`{name}` must be an int"):
-            BytesValidator(**{name: "x"})
+            BytesConstraint(**{name: "x"})
 
 
-class TestBytesValidatorCall:
+class TestBytesConstraintCall:
     @pytest.mark.parametrize("value", [b"ab", bytearray(b"abc"), memoryview(b"abcd")])
     def test_passes(self, value):
-        assert BytesValidator(min_length=2)(value) is None
+        assert BytesConstraint(min_length=2)(value) is None
 
     @pytest.mark.parametrize(
         "kwargs,value",
@@ -444,21 +444,21 @@ class TestBytesValidatorCall:
     )
     def test_violation_raises_value_error(self, kwargs, value):
         with pytest.raises(ValueError, match="of length"):
-            BytesValidator(**kwargs)(value)
+            BytesConstraint(**kwargs)(value)
 
     @pytest.mark.parametrize("value", ["abc", 123, None])
     def test_wrong_type_raises_type_error(self, value):
         with pytest.raises(TypeError, match="Expected `bytes`"):
-            BytesValidator(min_length=1)(value)
+            BytesConstraint(min_length=1)(value)
 
 
-class TestCollectionValidator:
+class TestCollectionConstraint:
     @pytest.mark.parametrize(
         "kwargs",
         [{}, {"min_length": 2}, {"max_length": 7}, {"min_length": 1, "max_length": 3}],
     )
     def test_valid_construction(self, kwargs):
-        v = CollectionValidator(**kwargs)
+        v = CollectionConstraint(**kwargs)
         for k, expected in kwargs.items():
             assert getattr(v, k) == expected
         for unset in set(kwargs) ^ {"min_length", "max_length"}:
@@ -467,15 +467,15 @@ class TestCollectionValidator:
     @pytest.mark.parametrize("name", ["min_length", "max_length"])
     def test_negative_length_rejected(self, name):
         with pytest.raises(ValueError, match=f"`{name}` must be >= 0"):
-            CollectionValidator(**{name: -1})
+            CollectionConstraint(**{name: -1})
 
     @pytest.mark.parametrize("name", ["min_length", "max_length"])
     def test_non_int_length_rejected(self, name):
         with pytest.raises(TypeError, match=f"`{name}` must be an int"):
-            CollectionValidator(**{name: object()})
+            CollectionConstraint(**{name: object()})
 
 
-class TestCollectionValidatorCall:
+class TestCollectionConstraintCall:
     @pytest.mark.parametrize(
         "value",
         [
@@ -487,7 +487,7 @@ class TestCollectionValidatorCall:
         ],
     )
     def test_passes(self, value):
-        assert CollectionValidator(min_length=2)(value) is None
+        assert CollectionConstraint(min_length=2)(value) is None
 
     @pytest.mark.parametrize(
         "kwargs,value",
@@ -500,67 +500,67 @@ class TestCollectionValidatorCall:
     )
     def test_violation_raises_value_error(self, kwargs, value):
         with pytest.raises(ValueError, match="of length"):
-            CollectionValidator(**kwargs)(value)
+            CollectionConstraint(**kwargs)(value)
 
     @pytest.mark.parametrize("value", ["abc", b"abc", 123])
     def test_wrong_type_raises_type_error(self, value):
         with pytest.raises(TypeError, match="Expected `list`"):
-            CollectionValidator(min_length=1)(value)
+            CollectionConstraint(min_length=1)(value)
 
 
-class TestTimezoneValidatorCall:
+class TestTimezoneConstraintCall:
     AWARE_DT = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
     NAIVE_DT = datetime.datetime(2020, 1, 1)
     AWARE_TIME = datetime.time(12, 0, tzinfo=datetime.timezone.utc)
     NAIVE_TIME = datetime.time(12, 0)
 
     def test_aware_required_passes(self):
-        v = TimezoneValidator(tz=True)
+        v = TimezoneConstraint(tz=True)
         assert v(self.AWARE_DT) is None
         assert v(self.AWARE_TIME) is None
 
     def test_naive_required_passes(self):
-        v = TimezoneValidator(tz=False)
+        v = TimezoneConstraint(tz=False)
         assert v(self.NAIVE_DT) is None
         assert v(self.NAIVE_TIME) is None
 
     @pytest.mark.parametrize("value_name", ["NAIVE_DT", "NAIVE_TIME"])
     def test_aware_required_fails(self, value_name):
         with pytest.raises(ValueError, match="with a timezone component"):
-            TimezoneValidator(tz=True)(getattr(self, value_name))
+            TimezoneConstraint(tz=True)(getattr(self, value_name))
 
     @pytest.mark.parametrize("value_name", ["AWARE_DT", "AWARE_TIME"])
     def test_naive_required_fails(self, value_name):
         with pytest.raises(ValueError, match="with no timezone component"):
-            TimezoneValidator(tz=False)(getattr(self, value_name))
+            TimezoneConstraint(tz=False)(getattr(self, value_name))
 
     @pytest.mark.parametrize(
         "value", ["2020-01-01", 0, None, datetime.date(2020, 1, 1)]
     )
     def test_wrong_type_raises_type_error(self, value):
         with pytest.raises(TypeError, match="Expected `datetime` or `time`"):
-            TimezoneValidator(tz=True)(value)
+            TimezoneConstraint(tz=True)(value)
 
 
-class TestTimezoneValidator:
+class TestTimezoneConstraint:
     @pytest.mark.parametrize("tz", [True, False])
     def test_keyword_construction(self, tz):
-        v = TimezoneValidator(tz=tz)
+        v = TimezoneConstraint(tz=tz)
         assert v.tz is tz
 
     @pytest.mark.parametrize("tz", [True, False])
     def test_positional_construction(self, tz):
-        v = TimezoneValidator(tz)
+        v = TimezoneConstraint(tz)
         assert v.tz is tz
 
     def test_required(self):
         with pytest.raises(TypeError):
-            TimezoneValidator()
+            TimezoneConstraint()
 
     @pytest.mark.parametrize("tz", ["yes", 1, None, []])
     def test_non_bool_rejected(self, tz):
         with pytest.raises(TypeError, match="`tz` must be a bool"):
-            TimezoneValidator(tz=tz)
+            TimezoneConstraint(tz=tz)
 
 
 class TestEqHashRepr:
@@ -574,40 +574,40 @@ class TestEqHashRepr:
         assert Serializer(load=f).__rich_repr__() == [("load", f)]
 
     def test_validator_eq_hash(self):
-        assert Validator(f) == Validator(f)
-        assert Validator(f) != Validator(g)
-        assert hash(Validator(f)) == hash(Validator(f))
-        assert repr(Validator(f)) == f"structtype.Validator(fn={f!r})"
-        assert Validator(f).__rich_repr__() == [("fn", f)]
+        assert Constraint(f) == Constraint(f)
+        assert Constraint(f) != Constraint(g)
+        assert hash(Constraint(f)) == hash(Constraint(f))
+        assert repr(Constraint(f)) == f"structtype.Constraint(fn={f!r})"
+        assert Constraint(f).__rich_repr__() == [("fn", f)]
 
     def test_numeric_eq_hash(self):
-        assert NumericValidator(gt=1) == NumericValidator(gt=1)
-        assert NumericValidator(gt=1) != NumericValidator(gt=2)
-        assert NumericValidator(gt=1) != NumericValidator(ge=1)
-        assert hash(NumericValidator(gt=1)) == hash(NumericValidator(gt=1))
-        assert repr(NumericValidator(gt=1)) == "structtype.NumericValidator(gt=1)"
-        assert repr(NumericValidator()) == "structtype.NumericValidator()"
+        assert NumericConstraint(gt=1) == NumericConstraint(gt=1)
+        assert NumericConstraint(gt=1) != NumericConstraint(gt=2)
+        assert NumericConstraint(gt=1) != NumericConstraint(ge=1)
+        assert hash(NumericConstraint(gt=1)) == hash(NumericConstraint(gt=1))
+        assert repr(NumericConstraint(gt=1)) == "structtype.NumericConstraint(gt=1)"
+        assert repr(NumericConstraint()) == "structtype.NumericConstraint()"
         expected = [("gt", 1), ("le", 2)]
-        assert NumericValidator(gt=1, le=2).__rich_repr__() == expected
+        assert NumericConstraint(gt=1, le=2).__rich_repr__() == expected
 
     def test_str_eq_hash(self):
-        assert StrValidator(pattern="a") == StrValidator(pattern="a")
-        assert StrValidator(pattern="a") != StrValidator(pattern="b")
-        assert hash(StrValidator(pattern="a")) == hash(StrValidator(pattern="a"))
+        assert StrConstraint(pattern="a") == StrConstraint(pattern="a")
+        assert StrConstraint(pattern="a") != StrConstraint(pattern="b")
+        assert hash(StrConstraint(pattern="a")) == hash(StrConstraint(pattern="a"))
         assert (
-            repr(StrValidator(pattern="a", max_length=3))
-            == "structtype.StrValidator(pattern='a', max_length=3)"
+            repr(StrConstraint(pattern="a", max_length=3))
+            == "structtype.StrConstraint(pattern='a', max_length=3)"
         )
 
     def test_bytes_collection_timezone_eq_hash(self):
-        assert BytesValidator(min_length=1) == BytesValidator(min_length=1)
-        assert BytesValidator(min_length=1) != CollectionValidator(min_length=1)
-        assert CollectionValidator() == CollectionValidator()
-        assert hash(TimezoneValidator(tz=True)) == hash(TimezoneValidator(tz=True))
-        assert TimezoneValidator(tz=True) == TimezoneValidator(tz=True)
-        assert TimezoneValidator(tz=True) != TimezoneValidator(tz=False)
+        assert BytesConstraint(min_length=1) == BytesConstraint(min_length=1)
+        assert BytesConstraint(min_length=1) != CollectionConstraint(min_length=1)
+        assert CollectionConstraint() == CollectionConstraint()
+        assert hash(TimezoneConstraint(tz=True)) == hash(TimezoneConstraint(tz=True))
+        assert TimezoneConstraint(tz=True) == TimezoneConstraint(tz=True)
+        assert TimezoneConstraint(tz=True) != TimezoneConstraint(tz=False)
         assert (
-            repr(TimezoneValidator(False)) == "structtype.TimezoneValidator(tz=False)"
+            repr(TimezoneConstraint(False)) == "structtype.TimezoneConstraint(tz=False)"
         )
 
 
@@ -825,7 +825,7 @@ class TestSerializerCodecWiring:
 class TestFutureAnnotations:
     """Annotations under ``from __future__ import annotations`` are stored as
     lazy strings. They must be resolved at class-creation time so Serializer
-    codecs, Field metadata, and Validator constraints work exactly as with
+    codecs, Field metadata, and Constraint constraints work exactly as with
     eager annotations."""
 
     def test_serializer_dump_and_load(self):
@@ -881,10 +881,10 @@ class TestFutureAnnotations:
         source = """
         from __future__ import annotations
         from typing import Annotated
-        from structtype import Struct, NumericValidator
+        from structtype import Struct, NumericConstraint
 
         class Msg(Struct):
-            n: Annotated[int, NumericValidator(gt=0)]
+            n: Annotated[int, NumericConstraint(gt=0)]
         """
         with temp_module(source) as mod:
             assert mod.Msg.struct_validate({"n": 5}).n == 5
@@ -974,13 +974,13 @@ class TestStructAdapterSerializerRejection:
             StructAdapter(Annotated[list[int], Serializer(dump=g)])
 
     def test_accepts_non_codec_annotations(self):
-        ta = StructAdapter(Annotated[list[int], CollectionValidator(min_length=1)])
+        ta = StructAdapter(Annotated[list[int], CollectionConstraint(min_length=1)])
         assert ta.struct_validate_json(b"[1]") == [1]
-        ta = StructAdapter(Annotated[int, NumericValidator(ge=0)])
+        ta = StructAdapter(Annotated[int, NumericConstraint(ge=0)])
         assert ta.struct_validate_json(b"42") == 42
 
 
-class TestNumericValidatorLowering:
+class TestNumericConstraintLowering:
     @pytest.mark.parametrize(
         "kwargs,good,bad",
         [
@@ -996,7 +996,7 @@ class TestNumericValidatorLowering:
     )
     def test_int_field(self, kwargs, good, bad):
         class Ex(Struct):
-            x: Annotated[int, NumericValidator(**kwargs)]
+            x: Annotated[int, NumericConstraint(**kwargs)]
 
         assert Ex.struct_validate_json(b'{"x": %d}' % good) == Ex(good)
         with pytest.raises(ValidationError):
@@ -1014,7 +1014,7 @@ class TestNumericValidatorLowering:
     )
     def test_float_field(self, kwargs, good, bad):
         class Ex(Struct):
-            x: Annotated[float, NumericValidator(**kwargs)]
+            x: Annotated[float, NumericConstraint(**kwargs)]
 
         assert Ex.struct_validate_json(b'{"x": %r}' % good) == Ex(good)
         with pytest.raises(ValidationError):
@@ -1022,7 +1022,7 @@ class TestNumericValidatorLowering:
 
     def test_nested_in_list_element(self):
         class Ex(Struct):
-            xs: list[Annotated[int, NumericValidator(ge=0)]]
+            xs: list[Annotated[int, NumericConstraint(ge=0)]]
 
         out = Ex.struct_validate_json(b'{"xs": [1, 2]}')
         assert out.xs == [1, 2]
@@ -1031,22 +1031,22 @@ class TestNumericValidatorLowering:
 
     def test_error_message_carries_path(self):
         class Ex(Struct):
-            x: Annotated[int, NumericValidator(ge=0)]
+            x: Annotated[int, NumericConstraint(ge=0)]
 
         with pytest.raises(ValidationError, match=r"Expected `int` >= 0 - at `\$.x`"):
             Ex.struct_validate_json(b'{"x": -1}')
 
     def test_empty_numeric_validator_is_inert(self):
         class Ex(Struct):
-            x: Annotated[int, NumericValidator()]
+            x: Annotated[int, NumericConstraint()]
 
         assert Ex.struct_validate_json(b'{"x": -5}') == Ex(-5)
 
 
-class TestStrValidatorLowering:
+class TestStrConstraintLowering:
     def test_passes(self):
         class Ex(Struct):
-            x: Annotated[str, StrValidator(min_length=2, max_length=4, pattern="a+")]
+            x: Annotated[str, StrConstraint(min_length=2, max_length=4, pattern="a+")]
 
         assert Ex.struct_validate_json(b'{"x": "aa"}') == Ex("aa")
 
@@ -1061,16 +1061,16 @@ class TestStrValidatorLowering:
     )
     def test_failures(self, value):
         class Ex(Struct):
-            x: Annotated[str, StrValidator(min_length=2, max_length=4, pattern="a+")]
+            x: Annotated[str, StrConstraint(min_length=2, max_length=4, pattern="a+")]
 
         with pytest.raises(ValidationError):
             Ex.struct_validate_json(b'{"x": %s}' % value.encode())
 
 
-class TestBytesValidatorLowering:
+class TestBytesConstraintLowering:
     def test_min_length(self):
         class Ex(Struct):
-            x: Annotated[bytes, BytesValidator(min_length=1)]
+            x: Annotated[bytes, BytesConstraint(min_length=1)]
 
         good = base64.b64encode(b"ab")
         bad = base64.b64encode(b"")
@@ -1079,10 +1079,10 @@ class TestBytesValidatorLowering:
             Ex.struct_validate_json(b'{"x": "%s"}' % bad)
 
 
-class TestCollectionValidatorLowering:
+class TestCollectionConstraintLowering:
     def test_list_min_length(self):
         class Ex(Struct):
-            x: Annotated[list[int], CollectionValidator(min_length=1)]
+            x: Annotated[list[int], CollectionConstraint(min_length=1)]
 
         assert Ex.struct_validate_json(b'{"x": [1]}') == Ex([1])
         with pytest.raises(ValidationError):
@@ -1090,20 +1090,20 @@ class TestCollectionValidatorLowering:
 
     def test_dict_max_length(self):
         class Ex(Struct):
-            x: Annotated[dict[str, int], CollectionValidator(max_length=1)]
+            x: Annotated[dict[str, int], CollectionConstraint(max_length=1)]
 
         assert Ex.struct_validate_json(b'{"x": {"a": 1}}') == Ex({"a": 1})
         with pytest.raises(ValidationError):
             Ex.struct_validate_json(b'{"x": {"a": 1, "b": 2}}')
 
 
-class TestTimezoneValidatorLowering:
+class TestTimezoneConstraintLowering:
     AWARE = b'"2020-01-01T00:00:00+00:00"'
     NAIVE = b'"2020-01-01T00:00:00"'
 
     def test_aware_required(self):
         class Ex(Struct):
-            x: Annotated[datetime.datetime, TimezoneValidator(tz=True)]
+            x: Annotated[datetime.datetime, TimezoneConstraint(tz=True)]
 
         assert b"+00:00" in Ex.struct_validate_json(b'{"x": %s}' % self.AWARE).x.isoformat().encode()
         with pytest.raises(ValidationError):
@@ -1111,7 +1111,7 @@ class TestTimezoneValidatorLowering:
 
     def test_naive_required(self):
         class Ex(Struct):
-            x: Annotated[datetime.datetime, TimezoneValidator(tz=False)]
+            x: Annotated[datetime.datetime, TimezoneConstraint(tz=False)]
 
         assert Ex.struct_validate_json(b'{"x": %s}' % self.NAIVE).x == datetime.datetime(
             2020, 1, 1
@@ -1121,59 +1121,59 @@ class TestTimezoneValidatorLowering:
 
     def test_time_field(self):
         class Ex(Struct):
-            x: Annotated[datetime.time, TimezoneValidator(tz=True)]
+            x: Annotated[datetime.time, TimezoneConstraint(tz=True)]
 
         assert Ex.struct_validate_json(b'{"x": "12:00:00+00:00"}').x.tzinfo is not None
 
 
-class TestValidatorApplicability:
+class TestConstraintApplicability:
     @pytest.mark.parametrize(
         "typ",
         [str, bytes, list[int], dict[str, int], datetime.datetime],
     )
     def test_numeric_validator_on_non_numeric(self, typ):
         with pytest.raises(TypeError, match="numeric"):
-            JSONDecoder(Annotated[typ, NumericValidator(ge=0)])
+            JSONDecoder(Annotated[typ, NumericConstraint(ge=0)])
 
     def test_str_validator_on_int(self):
         with pytest.raises(TypeError, match="str"):
-            JSONDecoder(Annotated[int, StrValidator(pattern="a+")])
+            JSONDecoder(Annotated[int, StrConstraint(pattern="a+")])
 
     def test_bytes_validator_on_int(self):
         with pytest.raises(TypeError, match="bytes"):
-            JSONDecoder(Annotated[int, BytesValidator(min_length=1)])
+            JSONDecoder(Annotated[int, BytesConstraint(min_length=1)])
 
     def test_collection_validator_on_int(self):
         with pytest.raises(TypeError, match="collection"):
-            JSONDecoder(Annotated[int, CollectionValidator(min_length=1)])
+            JSONDecoder(Annotated[int, CollectionConstraint(min_length=1)])
 
     def test_timezone_validator_on_int(self):
         with pytest.raises(TypeError, match="datetime or time"):
-            JSONDecoder(Annotated[int, TimezoneValidator(tz=True)])
+            JSONDecoder(Annotated[int, TimezoneConstraint(tz=True)])
 
     def test_applicability_checked_at_decoder_build(self):
         # Errors surface when the decoder is built, not when values decode.
         dec = None
         with pytest.raises(TypeError):
-            dec = JSONDecoder(Annotated[str, NumericValidator(ge=0)])
+            dec = JSONDecoder(Annotated[str, NumericConstraint(ge=0)])
         assert dec is None
 
 
-class TestMultipleValidatorsRejected:
+class TestMultipleConstraintsRejected:
     def test_two_base_validators(self):
         with pytest.raises(TypeError, match="Multiple"):
-            JSONDecoder(Annotated[int, Validator(f), Validator(g)])
+            JSONDecoder(Annotated[int, Constraint(f), Constraint(g)])
 
     def test_base_plus_fast(self):
         with pytest.raises(TypeError, match="Multiple"):
-            JSONDecoder(Annotated[int, Validator(f), NumericValidator(ge=0)])
+            JSONDecoder(Annotated[int, Constraint(f), NumericConstraint(ge=0)])
 
     def test_fast_plus_fast(self):
         with pytest.raises(TypeError, match="Multiple"):
-            JSONDecoder(Annotated[int, NumericValidator(ge=0), StrValidator(pattern="a")])
+            JSONDecoder(Annotated[int, NumericConstraint(ge=0), StrConstraint(pattern="a")])
 
     def test_subclass_instances(self):
-        class Even(Validator):
+        class Even(Constraint):
             def __call__(self, v):
                 if v % 2:
                     raise ValueError("not even")
@@ -1181,16 +1181,16 @@ class TestMultipleValidatorsRejected:
         with pytest.raises(TypeError, match="Multiple"):
             JSONDecoder(Annotated[int, Even(), Even()])
         with pytest.raises(TypeError, match="Multiple"):
-            JSONDecoder(Annotated[int, Even(), NumericValidator(gt=0)])
+            JSONDecoder(Annotated[int, Even(), NumericConstraint(gt=0)])
 
 
-class TestUserValidatorSmoke:
+class TestUserConstraintSmoke:
     """Full user-validator behavior lands in a later task; here we only check
     that annotations carrying base/user validators don't break decoder builds."""
 
     def test_bare_validator_is_noop(self):
         class Ex(Struct):
-            x: Annotated[int, Validator()]
+            x: Annotated[int, Constraint()]
 
         assert Ex.struct_validate_json(b'{"x": 5}') == Ex(5)
         # No fast constraints lowered; anything passes for now
@@ -1203,12 +1203,12 @@ class TestUserValidatorSmoke:
             calls.append(v)
 
         class Ex(Struct):
-            x: Annotated[int, Validator(record)]
+            x: Annotated[int, Constraint(record)]
 
         assert Ex.struct_validate_json(b'{"x": 5}') == Ex(5)
 
     def test_user_subclass_instance(self):
-        class Even(Validator):
+        class Even(Constraint):
             def __call__(self, v):
                 if v % 2:
                     raise ValueError("not even")
@@ -1221,21 +1221,21 @@ class TestUserValidatorSmoke:
 
     def test_user_validator_with_serializer_on_custom_type(self):
         class MsgCustom(Struct):
-            color: Annotated[Color, Serializer(), Validator()]
+            color: Annotated[Color, Serializer(), Constraint()]
 
         c = Color("red")
         assert MsgCustom.struct_validate({"color": c}).color is c
 
 
-class TestUserValidatorInvocation:
-    """Task 7: base/user Validator instances are invoked at runtime, after
+class TestUserConstraintInvocation:
+    """Task 7: base/user Constraint instances are invoked at runtime, after
     type-check/load, wherever constraints are enforced."""
 
     def test_container_typed_validator(self):
         # The getter must return the validator instance itself, not an
         # element TypeNode (which would crash or misfire).
         class Ex(Struct):
-            xs: Annotated[list[int], Validator(lambda v: None)]
+            xs: Annotated[list[int], Constraint(lambda v: None)]
 
         assert Ex.struct_validate_json(b'{"xs": [1, 2]}') == Ex([1, 2])
 
@@ -1250,7 +1250,7 @@ class TestUserValidatorInvocation:
             order.append(("check", color))
 
         class Msg(Struct):
-            color: Annotated[Color, Serializer(load=load), Validator(check)]
+            color: Annotated[Color, Serializer(load=load), Constraint(check)]
 
         out = Msg.struct_validate_json(b'{"color": [1, 2]}')
         assert out.color == Color((1, 2))
@@ -1262,7 +1262,7 @@ class TestUserValidatorInvocation:
             raise ValueError("no good")
 
         class Ex(Struct):
-            x: Annotated[int, Validator(fail)]
+            x: Annotated[int, Constraint(fail)]
 
         with pytest.raises(ValidationError, match=r"no good - at `\$.x`"):
             Ex.struct_validate_json(b'{"x": 5}')
@@ -1272,13 +1272,13 @@ class TestUserValidatorInvocation:
             raise ValueError("no good")
 
         class Ex(Struct):
-            xs: list[Annotated[int, Validator(fail)]]
+            xs: list[Annotated[int, Constraint(fail)]]
 
         with pytest.raises(ValidationError, match=r"no good - at `\$.xs\[0\]`"):
             Ex.struct_validate_json(b'{"xs": [0, 1]}')
 
     def test_pure_python_subclass_invoked(self):
-        class Even(Validator):
+        class Even(Constraint):
             def __call__(self, v):
                 if v % 2:
                     raise ValueError("not even")
@@ -1293,7 +1293,7 @@ class TestUserValidatorInvocation:
             Ex.struct_validate({"x": 3})
 
     def test_subclass_validator_not_shared_across_structs(self):
-        class Even(Validator):
+        class Even(Constraint):
             def __call__(self, v):
                 if v % 2:
                     raise ValueError("not even")
@@ -1302,9 +1302,9 @@ class TestUserValidatorInvocation:
             x: Annotated[int, Even()]
 
         class Other(Struct):
-            x: Annotated[int, Validator()]
+            x: Annotated[int, Constraint()]
 
-        # Regression: on Python 3.10, bare Validator() == Even() due to
+        # Regression: on Python 3.10, bare Constraint() == Even() due to
         # inherited richcompare, causing typing.Annotated to cache them as
         # the same object. Verify the two struct types are independent.
         assert Other.struct_validate_json(b'{"x": -5}') == Other(x=-5)
@@ -1313,15 +1313,15 @@ class TestUserValidatorInvocation:
     @pytest.mark.parametrize(
         "annotation,payload",
         [
-            ('Annotated[int, Validator()]', b'{"x": -5}'),
-            ('Annotated[list[int], Validator()]', b'{"x": []}'),
-            ('Annotated[Shade, Validator()]', b'{"x": {"name": "t"}}'),
+            ('Annotated[int, Constraint()]', b'{"x": -5}'),
+            ('Annotated[list[int], Constraint()]', b'{"x": []}'),
+            ('Annotated[Shade, Constraint()]', b'{"x": {"name": "t"}}'),
         ],
     )
     def test_bare_validator_is_inert(self, annotation, payload):
         ns = {
             "Annotated": Annotated,
-            "Validator": Validator,
+            "Constraint": Constraint,
             "Shade": Shade,
             "Struct": Struct,
         }
@@ -1334,7 +1334,7 @@ class TestUserValidatorInvocation:
             y: int = 0
 
         class Outer(Struct):
-            inner: Annotated[Inner, Validator()]
+            inner: Annotated[Inner, Constraint()]
 
         assert Outer.struct_validate({"inner": Inner()}).inner.y == 0
 
@@ -1342,37 +1342,37 @@ class TestUserValidatorInvocation:
         # Fast subclasses lower to bitflag checks; the ge=0 violation must
         # still be caught even though no USER_VALIDATOR call happens.
         class Ex(Struct):
-            x: Annotated[int, NumericValidator(ge=0)]
+            x: Annotated[int, NumericConstraint(ge=0)]
 
         with pytest.raises(ValidationError, match="Expected `int` >= 0"):
             Ex.struct_validate_json(b'{"x": -1}')
         with pytest.raises(ValidationError, match="Expected `int` >= 0"):
-            Ex(-1).struct_validate_self()
+            Ex(-1).struct_check_types()
 
     def test_optional_null_skips_validator(self):
         seen = []
 
         class Ex(Struct):
-            x: Optional[Annotated[str, Validator(lambda v: seen.append(v))]]
+            x: Optional[Annotated[str, Constraint(lambda v: seen.append(v))]]
 
         assert Ex.struct_validate_json(b'{"x": null}') == Ex(None)
         assert seen == []
         Ex.struct_validate_json(b'{"x": "s"}')
         assert seen == ["s"]
 
-    def test_struct_validate_self_field_context(self):
+    def test_struct_check_types_field_context(self):
         def fail(v):
             raise ValueError("selfcheck boom")
 
         class Ex(Struct):
-            x: Annotated[int, Validator(fail)]
+            x: Annotated[int, Constraint(fail)]
 
         with pytest.raises(
             ValidationError, match=r"selfcheck boom - at `\$\.x`"
         ):
-            Ex(1).struct_validate_self()
+            Ex(1).struct_check_types()
 
-    def test_struct_validate_self_nested_struct_field(self):
+    def test_struct_check_types_nested_struct_field(self):
         class Inner(Struct):
             y: int = 0
 
@@ -1380,34 +1380,34 @@ class TestUserValidatorInvocation:
             raise ValueError("bad inner")
 
         class Outer(Struct):
-            inner: Annotated[Inner, Validator(fail)]
+            inner: Annotated[Inner, Constraint(fail)]
 
         with pytest.raises(ValidationError, match=r"bad inner - at `\$.inner`"):
-            Outer(Inner()).struct_validate_self()
+            Outer(Inner()).struct_check_types()
 
     def test_dict_key_validator(self):
-        dec = JSONDecoder(dict[Annotated[int, NumericValidator(ge=0)], int])
+        dec = JSONDecoder(dict[Annotated[int, NumericConstraint(ge=0)], int])
         assert dec.decode(b'{"1": 2}') == {1: 2}
         with pytest.raises(ValidationError):
             dec.decode(b'{"-1": 2}')
 
     def test_adhoc_decoder_top_level(self):
-        dec = JSONDecoder(Annotated[list[int], CollectionValidator(min_length=1)])
+        dec = JSONDecoder(Annotated[list[int], CollectionConstraint(min_length=1)])
         assert dec.decode(b"[1]") == [1]
 
     def test_no_validation_on_encode(self):
         calls = []
 
         class Ex(Struct):
-            x: Annotated[int, Validator(calls.append)]
+            x: Annotated[int, Constraint(calls.append)]
 
         assert Ex(5).struct_dump_json() == b'{"x":5}'
         assert calls == []
 
 
 class TestValidateSelfCheckTypesOnly:
-    """struct_validate_self and validate_on_init are pure type-checks:
-    no Serializer.load, no protocol conversion, only isinstance + Validators."""
+    """struct_check_types and check_types_on_init are pure type-checks:
+    no Serializer.load, no protocol conversion, only isinstance + Constraints."""
 
     def test_custom_field_wrong_type_raises(self):
         calls = []
@@ -1419,10 +1419,10 @@ class TestValidateSelfCheckTypesOnly:
         ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
 
         class Ex(Struct):
-            struct_config = StructConfig(validate_on_init=True)
+            struct_config = StructConfig(check_types_on_init=True)
             c: Annotated[Color, ser]
 
-        # validate_on_init should raise because "blue" isn't a Color
+        # check_types_on_init should raise because "blue" isn't a Color
         with pytest.raises(ValidationError, match="Expected `Color`, got `str`"):
             Ex("blue")
         assert calls == []  # load was NOT called
@@ -1437,11 +1437,11 @@ class TestValidateSelfCheckTypesOnly:
         ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
 
         class Ex(Struct):
-            struct_config = StructConfig(validate_on_init=True)
+            struct_config = StructConfig(check_types_on_init=True)
             c: Annotated[Color, ser]
 
         # Already the right type — passes, load not called
-        Ex(Color("red")).struct_validate_self()
+        Ex(Color("red")).struct_check_types()
         assert calls == []
 
     def test_validate_self_raises_on_wrong_type(self):
@@ -1459,7 +1459,7 @@ class TestValidateSelfCheckTypesOnly:
         ex = Ex(Color("x"))
         ex.c = "blue"  # bypass type safety
         with pytest.raises(ValidationError, match="Expected `Color`, got `str`"):
-            ex.struct_validate_self()
+            ex.struct_check_types()
         assert calls == []  # load was NOT called
 
     def test_protocol_not_called_on_mismatch(self):
@@ -1472,7 +1472,7 @@ class TestValidateSelfCheckTypesOnly:
                 return cls(d["v"])
 
         class Ex(Struct):
-            struct_config = StructConfig(validate_on_init=True)
+            struct_config = StructConfig(check_types_on_init=True)
             c: Color
 
         with pytest.raises(ValidationError, match="Expected `Color`, got `dict`"):
@@ -1485,11 +1485,11 @@ class TestValidateSelfCheckTypesOnly:
                 self.v = v
 
         class Ex(Struct):
-            struct_config = StructConfig(validate_on_init=True)
+            struct_config = StructConfig(check_types_on_init=True)
             c: Optional[Annotated[Color, Serializer(load=Color)]]
 
         # None is valid for Optional[Color]
-        Ex(None).struct_validate_self()
+        Ex(None).struct_check_types()
 
     def test_validator_called_on_correct_type(self):
         seen = []
@@ -1499,8 +1499,8 @@ class TestValidateSelfCheckTypesOnly:
                 self.v = v
 
         class Ex(Struct):
-            struct_config = StructConfig(validate_on_init=True)
-            c: Annotated[Color, Serializer(load=Color), Validator(lambda v: seen.append(v.v))]
+            struct_config = StructConfig(check_types_on_init=True)
+            c: Annotated[Color, Serializer(load=Color), Constraint(lambda v: seen.append(v.v))]
 
         Ex(Color("ok"))
         assert seen == ["ok"]  # called once during construction
@@ -1537,7 +1537,7 @@ class TestValidateSelfCheckTypesOnly:
         Ex.struct_validate({"c": "blue"})
         assert calls == ["load"]  # load WAS called in struct_validate path
 
-    def test_validate_on_init_raises(self):
+    def test_check_types_on_init_raises(self):
         calls = []
 
         class Color:
@@ -1547,7 +1547,7 @@ class TestValidateSelfCheckTypesOnly:
         ser = Serializer(load=lambda s: (calls.append("load"), Color(s))[1])
 
         class Ex(Struct):
-            struct_config = StructConfig(validate_on_init=True)
+            struct_config = StructConfig(check_types_on_init=True)
             c: Annotated[Color, ser]
 
         with pytest.raises(ValidationError):
@@ -1556,7 +1556,7 @@ class TestValidateSelfCheckTypesOnly:
 
 
 class TestCompositionRules:
-    """Class-creation enforcement of at most one Field, Serializer, Validator
+    """Class-creation enforcement of at most one Field, Serializer, Constraint
     per annotation position."""
 
     def test_multiple_fields_rejected(self):
@@ -1578,14 +1578,14 @@ class TestCompositionRules:
                 x: Annotated[Color, Serializer(load=f), Serializer(dump=f)]
 
     def test_multiple_validators_rejected(self):
-        with pytest.raises(TypeError, match="Multiple `Validator` annotations"):
+        with pytest.raises(TypeError, match="Multiple `Constraint` annotations"):
             class Bad(Struct):
-                x: Annotated[int, Validator(), Validator()]
+                x: Annotated[int, Constraint(), Constraint()]
 
     def test_multiple_fast_validators_rejected(self):
-        with pytest.raises(TypeError, match="Multiple `Validator` annotations"):
+        with pytest.raises(TypeError, match="Multiple `Constraint` annotations"):
             class Bad(Struct):
-                x: Annotated[int, NumericValidator(ge=0), StrValidator(min_length=1)]
+                x: Annotated[int, NumericConstraint(ge=0), StrConstraint(min_length=1)]
 
     def test_cross_kind_combo_allowed(self):
         def fn(v):
@@ -1595,7 +1595,7 @@ class TestCompositionRules:
             return v
 
         class Good(Struct):
-            x: Annotated[Color, Field(title="x"), Serializer(dump=dump), Validator(fn)]
+            x: Annotated[Color, Field(title="x"), Serializer(dump=dump), Constraint(fn)]
 
         assert Good.__struct_fields__ == ("x",)
 
@@ -1611,118 +1611,118 @@ class TestCompositionRules:
 
         class Good(Struct):
             x: Annotated[
-                Color, Field(title="x"), Serializer(load=load, dump=dump), Validator(fn)
+                Color, Field(title="x"), Serializer(load=load, dump=dump), Constraint(fn)
             ]
 
         assert Good.__struct_fields__ == ("x",)
 
 
-class TestValidatorApplicability:
-    """Validator-vs-type-kind checks enforced at class creation time."""
+class TestConstraintApplicability:
+    """Constraint-vs-type-kind checks enforced at class creation time."""
 
     def test_numeric_validator_on_str_rejected(self):
-        with pytest.raises(TypeError, match="NumericValidator.*numeric types"):
+        with pytest.raises(TypeError, match="NumericConstraint.*numeric types"):
             class Bad(Struct):
-                x: Annotated[str, NumericValidator(ge=0)]
+                x: Annotated[str, NumericConstraint(ge=0)]
 
     def test_str_validator_on_int_rejected(self):
-        with pytest.raises(TypeError, match="StrValidator.*str.*types"):
+        with pytest.raises(TypeError, match="StrConstraint.*str.*types"):
             class Bad(Struct):
-                x: Annotated[int, StrValidator(min_length=1)]
+                x: Annotated[int, StrConstraint(min_length=1)]
 
     def test_timezone_validator_on_int_rejected(self):
-        with pytest.raises(TypeError, match="TimezoneValidator.*datetime.*time"):
+        with pytest.raises(TypeError, match="TimezoneConstraint.*datetime.*time"):
             class Bad(Struct):
-                x: Annotated[int, TimezoneValidator(tz=True)]
+                x: Annotated[int, TimezoneConstraint(tz=True)]
 
     def test_collection_validator_on_int_rejected(self):
-        with pytest.raises(TypeError, match="CollectionValidator.*collection"):
+        with pytest.raises(TypeError, match="CollectionConstraint.*collection"):
             class Bad(Struct):
-                x: Annotated[int, CollectionValidator(min_length=1)]
+                x: Annotated[int, CollectionConstraint(min_length=1)]
 
     def test_bytes_validator_on_int_rejected(self):
-        with pytest.raises(TypeError, match="BytesValidator.*bytes-like"):
+        with pytest.raises(TypeError, match="BytesConstraint.*bytes-like"):
             class Bad(Struct):
-                x: Annotated[int, BytesValidator(min_length=1)]
+                x: Annotated[int, BytesConstraint(min_length=1)]
 
     def test_numeric_validator_on_float_ok(self):
         class Good(Struct):
-            x: Annotated[float, NumericValidator(ge=0.0)]
+            x: Annotated[float, NumericConstraint(ge=0.0)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_collection_validator_on_list_ok(self):
         class Good(Struct):
-            x: Annotated[list[int], CollectionValidator(min_length=1)]
+            x: Annotated[list[int], CollectionConstraint(min_length=1)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_collection_validator_on_dict_ok(self):
         class Good(Struct):
-            x: Annotated[dict[str, int], CollectionValidator(min_length=1)]
+            x: Annotated[dict[str, int], CollectionConstraint(min_length=1)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_collection_validator_on_set_ok(self):
         class Good(Struct):
-            x: Annotated[set[int], CollectionValidator(min_length=1)]
+            x: Annotated[set[int], CollectionConstraint(min_length=1)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_collection_validator_on_tuple_ok(self):
         class Good(Struct):
-            x: Annotated[tuple[int, ...], CollectionValidator(min_length=1)]
+            x: Annotated[tuple[int, ...], CollectionConstraint(min_length=1)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_timezone_validator_on_datetime_ok(self):
         class Good(Struct):
-            x: Annotated[datetime.datetime, TimezoneValidator(tz=True)]
+            x: Annotated[datetime.datetime, TimezoneConstraint(tz=True)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_timezone_validator_on_time_ok(self):
         class Good(Struct):
-            x: Annotated[datetime.time, TimezoneValidator(tz=False)]
+            x: Annotated[datetime.time, TimezoneConstraint(tz=False)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_bytes_validator_on_bytes_ok(self):
         class Good(Struct):
-            x: Annotated[bytes, BytesValidator(min_length=1)]
+            x: Annotated[bytes, BytesConstraint(min_length=1)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_str_validator_on_str_ok(self):
         class Good(Struct):
-            x: Annotated[str, StrValidator(min_length=1)]
+            x: Annotated[str, StrConstraint(min_length=1)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_numeric_validator_on_int_ok(self):
         class Good(Struct):
-            x: Annotated[int, NumericValidator(ge=0)]
+            x: Annotated[int, NumericConstraint(ge=0)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_union_deferred(self):
         """Union types should NOT raise at class creation; defer to lazy decoder."""
         class Good(Struct):
-            x: Annotated[Union[int, str], NumericValidator(ge=0)]
+            x: Annotated[Union[int, str], NumericConstraint(ge=0)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_union_deferred_at_definition(self):
         """Python 3.10+ union syntax should also defer."""
         class Good(Struct):
-            x: Annotated[int | str, NumericValidator(ge=0)]
+            x: Annotated[int | str, NumericConstraint(ge=0)]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_adhoc_decoder_still_raises(self):
         """Ad-hoc JSONDecoder(invalid combo) still raises at decoder build time."""
         with pytest.raises(TypeError, match="numeric"):
-            JSONDecoder(Annotated[str, NumericValidator(ge=0)])
+            JSONDecoder(Annotated[str, NumericConstraint(ge=0)])
 
     def test_validator_inherits_from_base(self):
         """Subclass inherits codec maps + validators from base class."""
@@ -1739,7 +1739,7 @@ class TestValidatorApplicability:
         assert out.color.rgb == (1, 2, 3)
 
     def test_serializer_and_validator_together(self):
-        """Serializer.dump works alongside Validator constraints on same field."""
+        """Serializer.dump works alongside Constraint constraints on same field."""
         def dump(v):
             return list(v.rgb)
 
@@ -1750,21 +1750,21 @@ class TestValidatorApplicability:
             x: Annotated[
                 Color,
                 Serializer(load=load, dump=dump),
-                Validator(lambda v: None),
+                Constraint(lambda v: None),
             ]
 
         obj = Good(Color((1, 2, 3)))
         assert obj.struct_dump_json() == b'{"x":[1,2,3]}'
 
     def test_nested_collection_element_validator(self):
-        """Validator on element type inside a collection defers (inner is leaf)."""
+        """Constraint on element type inside a collection defers (inner is leaf)."""
         class Good(Struct):
-            x: list[Annotated[int, NumericValidator(ge=0)]]
+            x: list[Annotated[int, NumericConstraint(ge=0)]]
 
         assert Good.__struct_fields__ == ("x",)
 
     def test_nested_collection_element_validator_rejects(self):
-        """Validator mismatch on element type inside a collection raises."""
-        with pytest.raises(TypeError, match="NumericValidator.*numeric"):
+        """Constraint mismatch on element type inside a collection raises."""
+        with pytest.raises(TypeError, match="NumericConstraint.*numeric"):
             class Bad(Struct):
-                x: list[Annotated[str, NumericValidator(ge=0)]]
+                x: list[Annotated[str, NumericConstraint(ge=0)]]

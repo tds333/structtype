@@ -168,20 +168,20 @@ still slower than pure C. Pydantic also has more features, at the cost of
 performance.
 
 
-Validators & Serializers
-------------------------
+Constraints & Serializers
+-------------------------
 
 Here we benchmark `structtype.Struct` types that make heavy use of
-:doc:`Validator <annotation>` and :doc:`Serializer <extending>` annotations
+:doc:`Constraint <annotation>` and :doc:`Serializer <extending>` annotations
 on every field, comparing against an equivalent ``pydantic`` schema using
 ``Field(gt=, le=, min_length=, max_length=, pattern=)`` plus
 ``@field_validator`` / ``@field_serializer``.
 
 Each field carries either a constraint check or a custom-type codec:
 
-- numeric constraints (``NumericValidator`` ↔ ``Field(gt=, le=)``)
-- string constraints (``StrValidator`` ↔ ``Field(min_length=, pattern=)``)
-- collection constraints (``CollectionValidator`` ↔ ``Field(min_length=)``)
+- numeric constraints (``NumericConstraint`` ↔ ``Field(gt=, le=)``)
+- string constraints (``StrConstraint`` ↔ ``Field(min_length=, pattern=)``)
+- collection constraints (``CollectionConstraint`` ↔ ``Field(min_length=)``)
 - a custom ``PostalCode`` type converted via ``Serializer(dump=, load=)``
   (↔ pydantic ``@field_serializer`` / ``@field_validator``)
 
@@ -192,7 +192,7 @@ Operations measured, all over 500 orders:
 - ``Load JSON`` / ``Dump JSON`` — the same via the JSON codecs
 - ``Init (no validation)`` — constructor only. structtype does **not**
   validate on ``__init__`` by default; pydantic always does.
-- ``Init (with validation)`` — the same with ``validate_on_init=True`` on the
+- ``Init (with validation)`` — the same with ``check_types_on_init=True`` on the
   structtype side, so both libraries validate on construction.
 
 The full benchmark source can be found `here
@@ -235,7 +235,7 @@ Run it with ``make bench-validators``.
 With every field doing validation or codec conversion work, structtype is
 ~1.9–6x faster than pydantic on load/dump operations. The largest gap is
 construction: structtype's default (no init validation) is ~8.7x faster, and
-even with ``validate_on_init=True`` it is still ~1.9x faster than pydantic's
+even with ``check_types_on_init=True`` it is still ~1.9x faster than pydantic's
 always-on construction-time validation.
 
 

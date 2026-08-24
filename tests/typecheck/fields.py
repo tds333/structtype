@@ -1,4 +1,4 @@
-"""Type-check fixture: ``Field`` metadata and ``Validator`` constraints.
+"""Type-check fixture: ``Field`` metadata and ``Constraint`` constraints.
 
 Checked by ``make typecheck-tests`` and ``tests/test_typecheck.py`` against the
 shipped ``structtype`` type stubs. Must stay free of ``# type: ignore``.
@@ -11,19 +11,19 @@ from structtype import (
     UNSET,
     Factory,
     Field,
-    NumericValidator,
+    NumericConstraint,
     Serializer,
-    StrValidator,
+    StrConstraint,
     Struct,
     UnsetType,
 )
 
 
 class Num(Struct):
-    a: Annotated[int, NumericValidator(gt=0, le=10)]
-    b: Annotated[float, NumericValidator(ge=0.0, lt=1.0)]
-    c: Annotated[str, StrValidator(min_length=1, max_length=10, pattern=r"^[a-z]+$")]
-    d: Annotated[int, NumericValidator(multiple_of=2)]
+    a: Annotated[int, NumericConstraint(gt=0, le=10)]
+    b: Annotated[float, NumericConstraint(ge=0.0, lt=1.0)]
+    c: Annotated[str, StrConstraint(min_length=1, max_length=10, pattern=r"^[a-z]+$")]
+    d: Annotated[int, NumericConstraint(multiple_of=2)]
 
 
 num = Num(a=1, b=0.5, c="abc", d=4)

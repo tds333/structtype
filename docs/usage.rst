@@ -394,26 +394,26 @@ decode a message into a type validated `structtype.Struct` than into an untyped
 `dict`.
 
 You can also validate an existing struct instance at any time using
-``struct_validate_self``:
+``struct_check_types``:
 
 .. code-block:: python
 
     >>> p = Point(1.0, 2.0)
     >>> p.x = "bad"               # silently accepted at runtime
-    >>> p.struct_validate_self()          # → ValidationError: Expected `float`, got `str`
+    >>> p.struct_check_types()          # → ValidationError: Expected `float`, got `str`
 
 .. note::
 
-    ``struct_validate_self`` never modifies the struct — it only validates.
+    ``struct_check_types`` never modifies the struct — it only validates.
 
-    ``struct_validate_self`` is a **pure type check**: if a custom-typed
+    ``struct_check_types`` is a **pure type check**: if a custom-typed
     field's value is not already an instance of the declared type, a
     ``ValidationError`` is raised immediately.  ``Serializer.load`` and
     protocol fallbacks (``struct_validate``/``model_validate`` methods)
     are **not** called — use ``struct_validate`` or
     ``struct_validate_json`` when you need conversion.
 
-    Any annotated ``Validator`` **is** called on correctly-typed values.
+    Any annotated ``Constraint`` **is** called on correctly-typed values.
 
 
 Pattern Matching

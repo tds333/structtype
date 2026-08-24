@@ -17,15 +17,15 @@ from structtype import NODEFAULT, UNSET
 from structtype import UnsetType as _UnsetType
 
 from ._core import (  # type: ignore
+    Constraint as _Constraint,
+)
+from ._core import (  # type: ignore
     Factory as _Factory,
 )
 from ._core import (  # type: ignore
     Struct,
     StructMeta,
     _dump,
-)
-from ._core import (  # type: ignore
-    Validator as _Validator,
 )
 from ._utils import (
     _CONCRETE_TYPES,
@@ -798,7 +798,7 @@ def _origin_args_metadata(t):
                 metadata.extend(
                     m
                     for m in t.__metadata__
-                    if type(m) is structtype.Field or isinstance(m, _Validator)
+                    if type(m) is structtype.Field or isinstance(m, _Constraint)
                 )
                 t = origin
             elif origin == Final:
@@ -915,8 +915,8 @@ class _Translator:
         constrs = {}
         extra_json_schema = {}
         for meta in metadata:
-            # Constraints come from Validator instances
-            if isinstance(meta, _Validator):
+            # Constraints come from Constraint instances
+            if isinstance(meta, _Constraint):
                 for attr in (
                     "ge",
                     "gt",

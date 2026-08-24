@@ -1683,7 +1683,7 @@ class TestDict:
             dec.decode(b'{"apple": 1, "carrot": 2}')
 
     def test_decode_dict_str_key_constraints(self):
-        dec = JSONDecoder(dict[Annotated[str, structtype.StrValidator(min_length=3)], int])
+        dec = JSONDecoder(dict[Annotated[str, structtype.StrConstraint(min_length=3)], int])
         assert dec.decode(b'{"abc": 1, "def": 2}') == {"abc": 1, "def": 2}
 
         with pytest.raises(
@@ -1800,7 +1800,7 @@ class TestDict:
         assert type(list(res)[0]) is int
 
     def test_decode_dict_int_key_constraints(self):
-        dec = JSONDecoder(dict[Annotated[int, structtype.NumericValidator(ge=3)], int])
+        dec = JSONDecoder(dict[Annotated[int, structtype.NumericConstraint(ge=3)], int])
         assert dec.decode(b'{"4": 1, "5": 2}') == {4: 1, 5: 2}
 
         with pytest.raises(structtype.ValidationError, match="Expected `int` >= 3"):
@@ -2866,7 +2866,7 @@ class TestFieldCodecDecode:
             value: Annotated[complex, Serializer(load=load)]
 
         m = Msg(complex(1.0, 2.0))
-        m.struct_validate_self()  # must not call load on the already-valid value
+        m.struct_check_types()  # must not call load on the already-valid value
 
     def test_native_type_codec_errors(self):
         # Raised at class definition: the class-creation codec walker

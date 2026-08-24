@@ -29,13 +29,13 @@ import pytest
 
 import structtype
 from structtype import (
-    BytesValidator,
-    CollectionValidator,
+    BytesConstraint,
+    CollectionConstraint,
     Field,
-    NumericValidator,
-    StrValidator,
+    NumericConstraint,
+    StrConstraint,
     StructConfig,
-    TimezoneValidator,
+    TimezoneConstraint,
 )
 from structtype._json_schema import json_schema as make_schema, json_schema_components, json_schema_dump
 
@@ -120,8 +120,8 @@ def test_binary(typ):
     "annot, extra",
     [
         (None, {}),
-        (TimezoneValidator(tz=True), {"format": "date-time"}),
-        (TimezoneValidator(tz=False), {}),
+        (TimezoneConstraint(tz=True), {"format": "date-time"}),
+        (TimezoneConstraint(tz=False), {}),
     ],
 )
 def test_datetime(annot, extra):
@@ -135,8 +135,8 @@ def test_datetime(annot, extra):
     "annot, extra",
     [
         (None, {}),
-        (TimezoneValidator(tz=True), {"format": "time"}),
-        (TimezoneValidator(tz=False), {"format": "partial-time"}),
+        (TimezoneConstraint(tz=True), {"format": "time"}),
+        (TimezoneConstraint(tz=False), {"format": "partial-time"}),
     ],
 )
 def test_time(annot, extra):
@@ -177,7 +177,7 @@ def test_decimal():
 def test_newtype():
     UserId = NewType("UserId", str)
     assert make_schema(UserId) == {"type": "string"}
-    assert make_schema(Annotated[UserId, StrValidator(max_length=10)]) == {
+    assert make_schema(Annotated[UserId, StrConstraint(max_length=10)]) == {
         "type": "string",
         "maxLength": 10,
     }
@@ -1186,7 +1186,7 @@ def test_generic_struct_tagged_union():
     ],
 )
 def test_numeric_metadata(field, constraint):
-    typ = Annotated[int, NumericValidator(**{field: 2})]
+    typ = Annotated[int, NumericConstraint(**{field: 2})]
     assert make_schema(typ) == {"type": "integer", constraint: 2}
 
 
@@ -1199,7 +1199,7 @@ def test_numeric_metadata(field, constraint):
     ],
 )
 def test_string_metadata(field, val, constraint):
-    typ = Annotated[str, StrValidator(**{field: val})]
+    typ = Annotated[str, StrConstraint(**{field: val})]
     assert make_schema(typ) == {"type": "string", constraint: val}
 
 
@@ -1212,7 +1212,7 @@ def test_string_metadata(field, val, constraint):
     ],
 )
 def test_dict_key_metadata(field, val, constraint):
-    typ = Annotated[str, StrValidator(**{field: val})]
+    typ = Annotated[str, StrConstraint(**{field: val})]
     assert make_schema(dict[typ, int]) == {
         "type": "object",
         "additionalProperties": {"type": "integer"},
@@ -1227,7 +1227,7 @@ def test_dict_key_metadata(field, val, constraint):
 )
 def test_binary_metadata(typ, field, n, constraint):
     n2 = len(b64encode(b"x" * n))
-    typ = Annotated[typ, BytesValidator(**{field: n})]
+    typ = Annotated[typ, BytesConstraint(**{field: n})]
     assert make_schema(typ) == {
         "type": "string",
         constraint: n2,
@@ -1241,7 +1241,7 @@ def test_binary_metadata(typ, field, n, constraint):
     [("min_length", "minItems"), ("max_length", "maxItems")],
 )
 def test_array_metadata(typ, field, constraint):
-    typ = Annotated[typ, CollectionValidator(**{field: 2})]
+    typ = Annotated[typ, CollectionConstraint(**{field: 2})]
     assert make_schema(typ) == {"type": "array", constraint: 2}
 
 
@@ -1251,7 +1251,7 @@ def test_array_metadata(typ, field, constraint):
     [("min_length", "minItems"), ("max_length", "maxItems")],
 )
 def test_set_metadata(typ, field, constraint):
-    typ = Annotated[typ[int], CollectionValidator(**{field: 2})]
+    typ = Annotated[typ[int], CollectionConstraint(**{field: 2})]
     assert make_schema(typ) == {
         "type": "array",
         "uniqueItems": True,
@@ -1265,7 +1265,7 @@ def test_set_metadata(typ, field, constraint):
     [("min_length", "minProperties"), ("max_length", "maxProperties")],
 )
 def test_object_metadata(field, constraint):
-    typ = Annotated[dict, CollectionValidator(**{field: 2})]
+    typ = Annotated[dict, CollectionConstraint(**{field: 2})]
     assert make_schema(typ) == {"type": "object", constraint: 2}
 
 

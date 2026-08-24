@@ -8,7 +8,7 @@ Structs
 
 .. autoclass:: Struct
     :members: struct_dump_json, struct_validate_json, struct_dump, struct_validate,
-              struct_validate_self
+              struct_check_types
 
     .. attribute:: __struct_fields__
 
@@ -151,7 +151,7 @@ Structs
 
         :type: bool
 
-    .. attribute:: validate_on_init
+    .. attribute:: check_types_on_init
 
         :type: bool
 
@@ -225,7 +225,7 @@ Serializer
         A callable converting a value composed of natively supported types
         back into a custom-type value. Called during decoding
         (``struct_validate`` / ``struct_validate_json``). In
-        ``struct_validate_self`` / ``validate_on_init``, if the field value is
+        ``struct_check_types`` / ``check_types_on_init``, if the field value is
         not already an instance of the custom type, a ``ValidationError`` is
         raised instead — ``load`` is **not** called. Only valid for custom
         types; attaching a ``load`` codec to a natively supported type or a
@@ -235,45 +235,45 @@ Serializer
         ``StructAdapter``. See :doc:`extending`.
 
 
-Validator
----------
+Constraint
+----------
 
-.. autoclass:: Validator
+.. autoclass:: Constraint
     :members:
 
 
-NumericValidator
-----------------
-
-.. autoclass:: NumericValidator
-    :members:
-
-
-StrValidator
-------------
-
-.. autoclass:: StrValidator
-    :members:
-
-
-BytesValidator
---------------
-
-.. autoclass:: BytesValidator
-    :members:
-
-
-CollectionValidator
--------------------
-
-.. autoclass:: CollectionValidator
-    :members:
-
-
-TimezoneValidator
+NumericConstraint
 -----------------
 
-.. autoclass:: TimezoneValidator
+.. autoclass:: NumericConstraint
+    :members:
+
+
+StrConstraint
+-------------
+
+.. autoclass:: StrConstraint
+    :members:
+
+
+BytesConstraint
+---------------
+
+.. autoclass:: BytesConstraint
+    :members:
+
+
+CollectionConstraint
+--------------------
+
+.. autoclass:: CollectionConstraint
+    :members:
+
+
+TimezoneConstraint
+------------------
+
+.. autoclass:: TimezoneConstraint
     :members:
 
 

@@ -2569,35 +2569,35 @@ static PyTypeObject Serializer_Type = {
 };
 
 /*************************************************************************
- * Validator                                                             *
+ * Constraint                                                             *
  *************************************************************************/
 
-static PyTypeObject Validator_Type;
+static PyTypeObject Constraint_Type;
 
 typedef struct {
     PyObject_HEAD
     /* User-provided validation callable */
     PyObject *fn;  /* value -> None, signals failure by raising */
-} Validator;
+} Constraint;
 
-PyDoc_STRVAR(Validator__doc__,
-"A user-defined validator.\n"
+PyDoc_STRVAR(Constraint__doc__,
+"A user-defined constraint.\n"
 "\n"
 "Parameters\n"
 "----------\n"
 "fn : callable, optional\n"
 "    A callable invoked with the annotated value after decoding/coercion.\n"
-"    The return value is ignored; the validator must signal failure by\n"
-"    raising an exception. When omitted, calling the validator is a no-op,\n"
-"    making bare ``Validator()`` an inert base meant for subclassing.\n"
+"    The return value is ignored; the callable must signal failure by\n"
+"    raising an exception. When omitted, calling the constraint is a no-op,\n"
+"    making bare ``Constraint()`` an inert base meant for subclassing.\n"
 );
 static PyObject *
-Validator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+Constraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     char *kwlist[] = {"fn", NULL};
     PyObject *fn = Py_None;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|O:Validator.__new__", kwlist,
+            args, kwargs, "|O:Constraint.__new__", kwlist,
             &fn
         )
     )
@@ -2613,8 +2613,8 @@ Validator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     }
 
     /* Allocate via `type` so that user-defined Python subclasses of
-     * `Validator` get correctly-typed instances */
-    Validator *self = (Validator *)type->tp_alloc(type, 0);
+     * `Constraint` get correctly-typed instances */
+    Constraint *self = (Constraint *)type->tp_alloc(type, 0);
     if (self == NULL) return NULL;
 
     Py_XINCREF(fn);
@@ -2626,11 +2626,11 @@ Validator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
 /* Calling a validator invokes its stored callable with the value (the
  * return value is ignored); without one it is a no-op */
 static PyObject *
-Validator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
-    Validator *self = (Validator *)py_self;
+Constraint_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
+    Constraint *self = (Constraint *)py_self;
     PyObject *value;
 
-    if (!PyArg_ParseTuple(args, "O:Validator.__call__", &value)) {
+    if (!PyArg_ParseTuple(args, "O:Constraint.__call__", &value)) {
         return NULL;
     }
 
@@ -2643,10 +2643,10 @@ Validator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *
-Validator_repr(Validator *self) {
+Constraint_repr(Constraint *self) {
     strbuilder builder = {0};
     bool first = true;
-    if (!strbuilder_extend_literal(&builder, "structtype.Validator(")) return NULL;
+    if (!strbuilder_extend_literal(&builder, "structtype.Constraint(")) return NULL;
 #define DO_REPR(field) do { \
     if (self->field != NULL) { \
         if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
@@ -2664,8 +2664,8 @@ error:
 }
 
 static PyObject *
-Validator_rich_repr(PyObject *py_self, PyObject *args) {
-    Validator *self = (Validator *)py_self;
+Constraint_rich_repr(PyObject *py_self, PyObject *args) {
+    Constraint *self = (Constraint *)py_self;
     PyObject *out = PyList_New(0);
     if (out == NULL) goto error;
 #define DO_REPR(field) do { \
@@ -2685,7 +2685,7 @@ error:
 }
 
 static PyObject *
-Validator_richcompare(Validator *self, PyObject *py_other, int op) {
+Constraint_richcompare(Constraint *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
@@ -2697,7 +2697,7 @@ Validator_richcompare(Validator *self, PyObject *py_other, int op) {
     if (!(op == Py_EQ || op == Py_NE)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
-    Validator *other = (Validator *)py_other;
+    Constraint *other = (Constraint *)py_other;
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
@@ -2721,13 +2721,13 @@ done:
 }
 
 static Py_hash_t
-Validator_hash(Validator *self) {
+Constraint_hash(Constraint *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
 
     /* Fold the exact type into the hash so different validator types hash
      * differently — prevents Python 3.10's typing.Annotated cache from
-     * collapsing Annotated[int, Validator()] and Annotated[int, Subclass()]. */
+     * collapsing Annotated[int, Constraint()] and Annotated[int, Subclass()]. */
     Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
     acc += type_lane * MS_HASH_XXPRIME_2;
     acc = MS_HASH_XXROTATE(acc);
@@ -2748,71 +2748,71 @@ Validator_hash(Validator *self) {
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
 
-static PyMethodDef Validator_methods[] = {
-    {"__rich_repr__", Validator_rich_repr, METH_NOARGS, "rich repr"},
+static PyMethodDef Constraint_methods[] = {
+    {"__rich_repr__", Constraint_rich_repr, METH_NOARGS, "rich repr"},
     {NULL, NULL},
 };
 
 static int
-Validator_traverse(Validator *self, visitproc visit, void *arg)
+Constraint_traverse(Constraint *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->fn);
     return 0;
 }
 
 static int
-Validator_clear(Validator *self)
+Constraint_clear(Constraint *self)
 {
     Py_CLEAR(self->fn);
     return 0;
 }
 
 static void
-Validator_dealloc(Validator *self)
+Constraint_dealloc(Constraint *self)
 {
     PyObject_GC_UnTrack(self);
-    Validator_clear(self);
+    Constraint_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyMemberDef Validator_members[] = {
-    {"fn", T_OBJECT, offsetof(Validator, fn), READONLY,
+static PyMemberDef Constraint_members[] = {
+    {"fn", T_OBJECT, offsetof(Constraint, fn), READONLY,
      "A callable validating the annotated value"},
     {NULL},
 };
 
-static PyTypeObject Validator_Type = {
+static PyTypeObject Constraint_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype._core.Validator",
-    .tp_doc = Validator__doc__,
-    .tp_basicsize = sizeof(Validator),
+    .tp_name = "structtype._core.Constraint",
+    .tp_doc = Constraint__doc__,
+    .tp_basicsize = sizeof(Constraint),
     .tp_itemsize = 0,
-    .tp_new = Validator_new,
-    .tp_call = Validator_tp_call,
+    .tp_new = Constraint_new,
+    .tp_call = Constraint_tp_call,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_BASETYPE,
-    .tp_clear = (inquiry)Validator_clear,
-    .tp_traverse = (traverseproc)Validator_traverse,
-    .tp_dealloc = (destructor) Validator_dealloc,
-    .tp_repr = (reprfunc)Validator_repr,
-    .tp_richcompare = (richcmpfunc)Validator_richcompare,
-    .tp_hash = (hashfunc)Validator_hash,
-    .tp_methods = Validator_methods,
-    .tp_members = Validator_members,
+    .tp_clear = (inquiry)Constraint_clear,
+    .tp_traverse = (traverseproc)Constraint_traverse,
+    .tp_dealloc = (destructor) Constraint_dealloc,
+    .tp_repr = (reprfunc)Constraint_repr,
+    .tp_richcompare = (richcmpfunc)Constraint_richcompare,
+    .tp_hash = (hashfunc)Constraint_hash,
+    .tp_methods = Constraint_methods,
+    .tp_members = Constraint_members,
 };
 
 /*************************************************************************
- * NumericValidator                                                      *
+ * NumericConstraint                                                      *
  *************************************************************************/
 
-static PyTypeObject NumericValidator_Type;
+static PyTypeObject NumericConstraint_Type;
 
 typedef struct {
-    Validator base;  /* embedded Validator_Type instance state */
+    Constraint base;  /* embedded Constraint_Type instance state */
     /* Numeric constraint fields */
     PyObject *gt, *ge, *lt, *le, *multiple_of;
-} NumericValidator;
+} NumericConstraint;
 
-PyDoc_STRVAR(NumericValidator__doc__,
+PyDoc_STRVAR(NumericConstraint__doc__,
 "Numeric constraints for ``int``/``float`` values.\n"
 "\n"
 "Parameters\n"
@@ -2829,12 +2829,12 @@ PyDoc_STRVAR(NumericValidator__doc__,
 "    The annotated value must be a multiple of ``multiple_of``.\n"
 );
 static PyObject *
-NumericValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+NumericConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     char *kwlist[] = {"gt", "ge", "lt", "le", "multiple_of", NULL};
     PyObject *gt = NULL, *ge = NULL, *lt = NULL, *le = NULL, *multiple_of = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|$OOOOO:NumericValidator.__new__", kwlist,
+            args, kwargs, "|$OOOOO:NumericConstraint.__new__", kwlist,
             &gt, &ge, &lt, &le, &multiple_of
         )
     )
@@ -2865,7 +2865,7 @@ NumericValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
         return NULL;
     }
 
-    NumericValidator *self = (NumericValidator *)NumericValidator_Type.tp_alloc(&NumericValidator_Type, 0);
+    NumericConstraint *self = (NumericConstraint *)NumericConstraint_Type.tp_alloc(&NumericConstraint_Type, 0);
     if (self == NULL) return NULL;
 
 #define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
@@ -2879,7 +2879,7 @@ NumericValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     return (PyObject *)self;
 }
 
-/* ---- numeric constraint checks for `NumericValidator.__call__` ---- */
+/* ---- numeric constraint checks for `NumericConstraint.__call__` ---- */
 
 /* Mirrors `_constr_as_i64`: true when an exact int fits in an int64.
  * Never sets an exception on the overflow path */
@@ -3052,11 +3052,11 @@ numeric_check_multiple_of(PyObject *value, bool is_int, PyObject *bound)
 }
 
 static PyObject *
-NumericValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
-    NumericValidator *self = (NumericValidator *)py_self;
+NumericConstraint_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
+    NumericConstraint *self = (NumericConstraint *)py_self;
     PyObject *value;
 
-    if (!PyArg_ParseTuple(args, "O:NumericValidator.__call__", &value)) {
+    if (!PyArg_ParseTuple(args, "O:NumericConstraint.__call__", &value)) {
         return NULL;
     }
 
@@ -3093,10 +3093,10 @@ NumericValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *
-NumericValidator_repr(NumericValidator *self) {
+NumericConstraint_repr(NumericConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
-    if (!strbuilder_extend_literal(&builder, "structtype.NumericValidator(")) return NULL;
+    if (!strbuilder_extend_literal(&builder, "structtype.NumericConstraint(")) return NULL;
 #define DO_REPR(field) do { \
     if (self->field != NULL) { \
         if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
@@ -3118,8 +3118,8 @@ error:
 }
 
 static PyObject *
-NumericValidator_rich_repr(PyObject *py_self, PyObject *args) {
-    NumericValidator *self = (NumericValidator *)py_self;
+NumericConstraint_rich_repr(PyObject *py_self, PyObject *args) {
+    NumericConstraint *self = (NumericConstraint *)py_self;
     PyObject *out = PyList_New(0);
     if (out == NULL) goto error;
 #define DO_REPR(field) do { \
@@ -3143,7 +3143,7 @@ error:
 }
 
 static PyObject *
-NumericValidator_richcompare(NumericValidator *self, PyObject *py_other, int op) {
+NumericConstraint_richcompare(NumericConstraint *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
@@ -3155,7 +3155,7 @@ NumericValidator_richcompare(NumericValidator *self, PyObject *py_other, int op)
     if (!(op == Py_EQ || op == Py_NE)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
-    NumericValidator *other = (NumericValidator *)py_other;
+    NumericConstraint *other = (NumericConstraint *)py_other;
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
@@ -3183,7 +3183,7 @@ done:
 }
 
 static Py_hash_t
-NumericValidator_hash(NumericValidator *self) {
+NumericConstraint_hash(NumericConstraint *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
 
@@ -3212,13 +3212,13 @@ NumericValidator_hash(NumericValidator *self) {
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
 
-static PyMethodDef NumericValidator_methods[] = {
-    {"__rich_repr__", NumericValidator_rich_repr, METH_NOARGS, "rich repr"},
+static PyMethodDef NumericConstraint_methods[] = {
+    {"__rich_repr__", NumericConstraint_rich_repr, METH_NOARGS, "rich repr"},
     {NULL, NULL},
 };
 
 static int
-NumericValidator_traverse(NumericValidator *self, visitproc visit, void *arg)
+NumericConstraint_traverse(NumericConstraint *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->base.fn);
     Py_VISIT(self->gt);
@@ -3230,7 +3230,7 @@ NumericValidator_traverse(NumericValidator *self, visitproc visit, void *arg)
 }
 
 static int
-NumericValidator_clear(NumericValidator *self)
+NumericConstraint_clear(NumericConstraint *self)
 {
     Py_CLEAR(self->base.fn);
     Py_CLEAR(self->gt);
@@ -3242,56 +3242,56 @@ NumericValidator_clear(NumericValidator *self)
 }
 
 static void
-NumericValidator_dealloc(NumericValidator *self)
+NumericConstraint_dealloc(NumericConstraint *self)
 {
     PyObject_GC_UnTrack(self);
-    NumericValidator_clear(self);
+    NumericConstraint_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyMemberDef NumericValidator_members[] = {
-    {"gt", T_OBJECT, offsetof(NumericValidator, gt), READONLY, NULL},
-    {"ge", T_OBJECT, offsetof(NumericValidator, ge), READONLY, NULL},
-    {"lt", T_OBJECT, offsetof(NumericValidator, lt), READONLY, NULL},
-    {"le", T_OBJECT, offsetof(NumericValidator, le), READONLY, NULL},
-    {"multiple_of", T_OBJECT, offsetof(NumericValidator, multiple_of), READONLY, NULL},
+static PyMemberDef NumericConstraint_members[] = {
+    {"gt", T_OBJECT, offsetof(NumericConstraint, gt), READONLY, NULL},
+    {"ge", T_OBJECT, offsetof(NumericConstraint, ge), READONLY, NULL},
+    {"lt", T_OBJECT, offsetof(NumericConstraint, lt), READONLY, NULL},
+    {"le", T_OBJECT, offsetof(NumericConstraint, le), READONLY, NULL},
+    {"multiple_of", T_OBJECT, offsetof(NumericConstraint, multiple_of), READONLY, NULL},
     {NULL},
 };
 
-static PyTypeObject NumericValidator_Type = {
+static PyTypeObject NumericConstraint_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype._core.NumericValidator",
-    .tp_doc = NumericValidator__doc__,
-    .tp_basicsize = sizeof(NumericValidator),
+    .tp_name = "structtype._core.NumericConstraint",
+    .tp_doc = NumericConstraint__doc__,
+    .tp_basicsize = sizeof(NumericConstraint),
     .tp_itemsize = 0,
-    .tp_new = NumericValidator_new,
-    .tp_call = NumericValidator_tp_call,
-    .tp_base = &Validator_Type,
+    .tp_new = NumericConstraint_new,
+    .tp_call = NumericConstraint_tp_call,
+    .tp_base = &Constraint_Type,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-    .tp_clear = (inquiry)NumericValidator_clear,
-    .tp_traverse = (traverseproc)NumericValidator_traverse,
-    .tp_dealloc = (destructor) NumericValidator_dealloc,
-    .tp_repr = (reprfunc)NumericValidator_repr,
-    .tp_richcompare = (richcmpfunc)NumericValidator_richcompare,
-    .tp_hash = (hashfunc)NumericValidator_hash,
-    .tp_methods = NumericValidator_methods,
-    .tp_members = NumericValidator_members,
+    .tp_clear = (inquiry)NumericConstraint_clear,
+    .tp_traverse = (traverseproc)NumericConstraint_traverse,
+    .tp_dealloc = (destructor) NumericConstraint_dealloc,
+    .tp_repr = (reprfunc)NumericConstraint_repr,
+    .tp_richcompare = (richcmpfunc)NumericConstraint_richcompare,
+    .tp_hash = (hashfunc)NumericConstraint_hash,
+    .tp_methods = NumericConstraint_methods,
+    .tp_members = NumericConstraint_members,
 };
 
 /*************************************************************************
- * StrValidator                                                          *
+ * StrConstraint                                                          *
  *************************************************************************/
 
-static PyTypeObject StrValidator_Type;
+static PyTypeObject StrConstraint_Type;
 
 typedef struct {
-    Validator base;  /* embedded Validator_Type instance state */
+    Constraint base;  /* embedded Constraint_Type instance state */
     /* String constraint fields */
     PyObject *pattern, *regex;
     PyObject *min_length, *max_length;
-} StrValidator;
+} StrConstraint;
 
-PyDoc_STRVAR(StrValidator__doc__,
+PyDoc_STRVAR(StrConstraint__doc__,
 "Constraints for ``str`` values.\n"
 "\n"
 "Parameters\n"
@@ -3306,13 +3306,13 @@ PyDoc_STRVAR(StrValidator__doc__,
 "    The annotated value must have a length <= ``max_length``.\n"
 );
 static PyObject *
-StrValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+StrConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     char *kwlist[] = {"pattern", "min_length", "max_length", NULL};
     PyObject *pattern = NULL, *min_length = NULL, *max_length = NULL;
     PyObject *regex = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|$OOO:StrValidator.__new__", kwlist,
+            args, kwargs, "|$OOO:StrConstraint.__new__", kwlist,
             &pattern, &min_length, &max_length
         )
     )
@@ -3336,7 +3336,7 @@ StrValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
         if (regex == NULL) return NULL;
     }
 
-    StrValidator *self = (StrValidator *)StrValidator_Type.tp_alloc(&StrValidator_Type, 0);
+    StrConstraint *self = (StrConstraint *)StrConstraint_Type.tp_alloc(&StrConstraint_Type, 0);
     if (self == NULL) {
         Py_XDECREF(regex);
         return NULL;
@@ -3355,11 +3355,11 @@ StrValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *
-StrValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
-    StrValidator *self = (StrValidator *)py_self;
+StrConstraint_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
+    StrConstraint *self = (StrConstraint *)py_self;
     PyObject *value;
 
-    if (!PyArg_ParseTuple(args, "O:StrValidator.__call__", &value)) {
+    if (!PyArg_ParseTuple(args, "O:StrConstraint.__call__", &value)) {
         return NULL;
     }
 
@@ -3409,10 +3409,10 @@ StrValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *
-StrValidator_repr(StrValidator *self) {
+StrConstraint_repr(StrConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
-    if (!strbuilder_extend_literal(&builder, "structtype.StrValidator(")) return NULL;
+    if (!strbuilder_extend_literal(&builder, "structtype.StrConstraint(")) return NULL;
 #define DO_REPR(field) do { \
     if (self->field != NULL) { \
         if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
@@ -3432,8 +3432,8 @@ error:
 }
 
 static PyObject *
-StrValidator_rich_repr(PyObject *py_self, PyObject *args) {
-    StrValidator *self = (StrValidator *)py_self;
+StrConstraint_rich_repr(PyObject *py_self, PyObject *args) {
+    StrConstraint *self = (StrConstraint *)py_self;
     PyObject *out = PyList_New(0);
     if (out == NULL) goto error;
 #define DO_REPR(field) do { \
@@ -3455,7 +3455,7 @@ error:
 }
 
 static PyObject *
-StrValidator_richcompare(StrValidator *self, PyObject *py_other, int op) {
+StrConstraint_richcompare(StrConstraint *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
@@ -3467,7 +3467,7 @@ StrValidator_richcompare(StrValidator *self, PyObject *py_other, int op) {
     if (!(op == Py_EQ || op == Py_NE)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
-    StrValidator *other = (StrValidator *)py_other;
+    StrConstraint *other = (StrConstraint *)py_other;
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
@@ -3493,7 +3493,7 @@ done:
 }
 
 static Py_hash_t
-StrValidator_hash(StrValidator *self) {
+StrConstraint_hash(StrConstraint *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
 
@@ -3520,13 +3520,13 @@ StrValidator_hash(StrValidator *self) {
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
 
-static PyMethodDef StrValidator_methods[] = {
-    {"__rich_repr__", StrValidator_rich_repr, METH_NOARGS, "rich repr"},
+static PyMethodDef StrConstraint_methods[] = {
+    {"__rich_repr__", StrConstraint_rich_repr, METH_NOARGS, "rich repr"},
     {NULL, NULL},
 };
 
 static int
-StrValidator_traverse(StrValidator *self, visitproc visit, void *arg)
+StrConstraint_traverse(StrConstraint *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->base.fn);
     Py_VISIT(self->pattern);
@@ -3537,7 +3537,7 @@ StrValidator_traverse(StrValidator *self, visitproc visit, void *arg)
 }
 
 static int
-StrValidator_clear(StrValidator *self)
+StrConstraint_clear(StrConstraint *self)
 {
     Py_CLEAR(self->base.fn);
     Py_CLEAR(self->pattern);
@@ -3548,53 +3548,53 @@ StrValidator_clear(StrValidator *self)
 }
 
 static void
-StrValidator_dealloc(StrValidator *self)
+StrConstraint_dealloc(StrConstraint *self)
 {
     PyObject_GC_UnTrack(self);
-    StrValidator_clear(self);
+    StrConstraint_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyMemberDef StrValidator_members[] = {
-    {"pattern", T_OBJECT, offsetof(StrValidator, pattern), READONLY, NULL},
-    {"min_length", T_OBJECT, offsetof(StrValidator, min_length), READONLY, NULL},
-    {"max_length", T_OBJECT, offsetof(StrValidator, max_length), READONLY, NULL},
+static PyMemberDef StrConstraint_members[] = {
+    {"pattern", T_OBJECT, offsetof(StrConstraint, pattern), READONLY, NULL},
+    {"min_length", T_OBJECT, offsetof(StrConstraint, min_length), READONLY, NULL},
+    {"max_length", T_OBJECT, offsetof(StrConstraint, max_length), READONLY, NULL},
     {NULL},
 };
 
-static PyTypeObject StrValidator_Type = {
+static PyTypeObject StrConstraint_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype._core.StrValidator",
-    .tp_doc = StrValidator__doc__,
-    .tp_basicsize = sizeof(StrValidator),
+    .tp_name = "structtype._core.StrConstraint",
+    .tp_doc = StrConstraint__doc__,
+    .tp_basicsize = sizeof(StrConstraint),
     .tp_itemsize = 0,
-    .tp_new = StrValidator_new,
-    .tp_call = StrValidator_tp_call,
-    .tp_base = &Validator_Type,
+    .tp_new = StrConstraint_new,
+    .tp_call = StrConstraint_tp_call,
+    .tp_base = &Constraint_Type,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-    .tp_clear = (inquiry)StrValidator_clear,
-    .tp_traverse = (traverseproc)StrValidator_traverse,
-    .tp_dealloc = (destructor) StrValidator_dealloc,
-    .tp_repr = (reprfunc)StrValidator_repr,
-    .tp_richcompare = (richcmpfunc)StrValidator_richcompare,
-    .tp_hash = (hashfunc)StrValidator_hash,
-    .tp_methods = StrValidator_methods,
-    .tp_members = StrValidator_members,
+    .tp_clear = (inquiry)StrConstraint_clear,
+    .tp_traverse = (traverseproc)StrConstraint_traverse,
+    .tp_dealloc = (destructor) StrConstraint_dealloc,
+    .tp_repr = (reprfunc)StrConstraint_repr,
+    .tp_richcompare = (richcmpfunc)StrConstraint_richcompare,
+    .tp_hash = (hashfunc)StrConstraint_hash,
+    .tp_methods = StrConstraint_methods,
+    .tp_members = StrConstraint_members,
 };
 
 /*************************************************************************
- * BytesValidator                                                        *
+ * BytesConstraint                                                        *
  *************************************************************************/
 
-static PyTypeObject BytesValidator_Type;
+static PyTypeObject BytesConstraint_Type;
 
 typedef struct {
-    Validator base;  /* embedded Validator_Type instance state */
+    Constraint base;  /* embedded Constraint_Type instance state */
     /* Length constraint fields */
     PyObject *min_length, *max_length;
-} BytesValidator;
+} BytesConstraint;
 
-PyDoc_STRVAR(BytesValidator__doc__,
+PyDoc_STRVAR(BytesConstraint__doc__,
 "Length constraints for bytes-like values (``bytes``, ``bytearray``,\n"
 "``memoryview``).\n"
 "\n"
@@ -3606,12 +3606,12 @@ PyDoc_STRVAR(BytesValidator__doc__,
 "    The annotated value must have a length <= ``max_length``.\n"
 );
 static PyObject *
-BytesValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+BytesConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     char *kwlist[] = {"min_length", "max_length", NULL};
     PyObject *min_length = NULL, *max_length = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|$OO:BytesValidator.__new__", kwlist,
+            args, kwargs, "|$OO:BytesConstraint.__new__", kwlist,
             &min_length, &max_length
         )
     )
@@ -3626,7 +3626,7 @@ BytesValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
     if (max_length != NULL && !ensure_is_nonnegative_integer(max_length, "max_length")) return NULL;
 
-    BytesValidator *self = (BytesValidator *)BytesValidator_Type.tp_alloc(&BytesValidator_Type, 0);
+    BytesConstraint *self = (BytesConstraint *)BytesConstraint_Type.tp_alloc(&BytesConstraint_Type, 0);
     if (self == NULL) return NULL;
 
 #define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
@@ -3673,11 +3673,11 @@ validator_check_length(PyObject *value, PyObject *min_length, PyObject *max_leng
 }
 
 static PyObject *
-BytesValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
-    BytesValidator *self = (BytesValidator *)py_self;
+BytesConstraint_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
+    BytesConstraint *self = (BytesConstraint *)py_self;
     PyObject *value;
 
-    if (!PyArg_ParseTuple(args, "O:BytesValidator.__call__", &value)) {
+    if (!PyArg_ParseTuple(args, "O:BytesConstraint.__call__", &value)) {
         return NULL;
     }
 
@@ -3701,10 +3701,10 @@ BytesValidator_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *
-BytesValidator_repr(BytesValidator *self) {
+BytesConstraint_repr(BytesConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
-    if (!strbuilder_extend_literal(&builder, "structtype.BytesValidator(")) return NULL;
+    if (!strbuilder_extend_literal(&builder, "structtype.BytesConstraint(")) return NULL;
 #define DO_REPR(field) do { \
     if (self->field != NULL) { \
         if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
@@ -3723,8 +3723,8 @@ error:
 }
 
 static PyObject *
-BytesValidator_rich_repr(PyObject *py_self, PyObject *args) {
-    BytesValidator *self = (BytesValidator *)py_self;
+BytesConstraint_rich_repr(PyObject *py_self, PyObject *args) {
+    BytesConstraint *self = (BytesConstraint *)py_self;
     PyObject *out = PyList_New(0);
     if (out == NULL) goto error;
 #define DO_REPR(field) do { \
@@ -3745,7 +3745,7 @@ error:
 }
 
 static PyObject *
-BytesValidator_richcompare(BytesValidator *self, PyObject *py_other, int op) {
+BytesConstraint_richcompare(BytesConstraint *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
@@ -3757,7 +3757,7 @@ BytesValidator_richcompare(BytesValidator *self, PyObject *py_other, int op) {
     if (!(op == Py_EQ || op == Py_NE)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
-    BytesValidator *other = (BytesValidator *)py_other;
+    BytesConstraint *other = (BytesConstraint *)py_other;
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
@@ -3782,7 +3782,7 @@ done:
 }
 
 static Py_hash_t
-BytesValidator_hash(BytesValidator *self) {
+BytesConstraint_hash(BytesConstraint *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
 
@@ -3808,13 +3808,13 @@ BytesValidator_hash(BytesValidator *self) {
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
 
-static PyMethodDef BytesValidator_methods[] = {
-    {"__rich_repr__", BytesValidator_rich_repr, METH_NOARGS, "rich repr"},
+static PyMethodDef BytesConstraint_methods[] = {
+    {"__rich_repr__", BytesConstraint_rich_repr, METH_NOARGS, "rich repr"},
     {NULL, NULL},
 };
 
 static int
-BytesValidator_traverse(BytesValidator *self, visitproc visit, void *arg)
+BytesConstraint_traverse(BytesConstraint *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->base.fn);
     Py_VISIT(self->min_length);
@@ -3823,7 +3823,7 @@ BytesValidator_traverse(BytesValidator *self, visitproc visit, void *arg)
 }
 
 static int
-BytesValidator_clear(BytesValidator *self)
+BytesConstraint_clear(BytesConstraint *self)
 {
     Py_CLEAR(self->base.fn);
     Py_CLEAR(self->min_length);
@@ -3832,52 +3832,52 @@ BytesValidator_clear(BytesValidator *self)
 }
 
 static void
-BytesValidator_dealloc(BytesValidator *self)
+BytesConstraint_dealloc(BytesConstraint *self)
 {
     PyObject_GC_UnTrack(self);
-    BytesValidator_clear(self);
+    BytesConstraint_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyMemberDef BytesValidator_members[] = {
-    {"min_length", T_OBJECT, offsetof(BytesValidator, min_length), READONLY, NULL},
-    {"max_length", T_OBJECT, offsetof(BytesValidator, max_length), READONLY, NULL},
+static PyMemberDef BytesConstraint_members[] = {
+    {"min_length", T_OBJECT, offsetof(BytesConstraint, min_length), READONLY, NULL},
+    {"max_length", T_OBJECT, offsetof(BytesConstraint, max_length), READONLY, NULL},
     {NULL},
 };
 
-static PyTypeObject BytesValidator_Type = {
+static PyTypeObject BytesConstraint_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype._core.BytesValidator",
-    .tp_doc = BytesValidator__doc__,
-    .tp_basicsize = sizeof(BytesValidator),
+    .tp_name = "structtype._core.BytesConstraint",
+    .tp_doc = BytesConstraint__doc__,
+    .tp_basicsize = sizeof(BytesConstraint),
     .tp_itemsize = 0,
-    .tp_new = BytesValidator_new,
-    .tp_call = BytesValidator_tp_call,
-    .tp_base = &Validator_Type,
+    .tp_new = BytesConstraint_new,
+    .tp_call = BytesConstraint_tp_call,
+    .tp_base = &Constraint_Type,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-    .tp_clear = (inquiry)BytesValidator_clear,
-    .tp_traverse = (traverseproc)BytesValidator_traverse,
-    .tp_dealloc = (destructor) BytesValidator_dealloc,
-    .tp_repr = (reprfunc)BytesValidator_repr,
-    .tp_richcompare = (richcmpfunc)BytesValidator_richcompare,
-    .tp_hash = (hashfunc)BytesValidator_hash,
-    .tp_methods = BytesValidator_methods,
-    .tp_members = BytesValidator_members,
+    .tp_clear = (inquiry)BytesConstraint_clear,
+    .tp_traverse = (traverseproc)BytesConstraint_traverse,
+    .tp_dealloc = (destructor) BytesConstraint_dealloc,
+    .tp_repr = (reprfunc)BytesConstraint_repr,
+    .tp_richcompare = (richcmpfunc)BytesConstraint_richcompare,
+    .tp_hash = (hashfunc)BytesConstraint_hash,
+    .tp_methods = BytesConstraint_methods,
+    .tp_members = BytesConstraint_members,
 };
 
 /*************************************************************************
- * CollectionValidator                                                   *
+ * CollectionConstraint                                                   *
  *************************************************************************/
 
-static PyTypeObject CollectionValidator_Type;
+static PyTypeObject CollectionConstraint_Type;
 
 typedef struct {
-    Validator base;  /* embedded Validator_Type instance state */
+    Constraint base;  /* embedded Constraint_Type instance state */
     /* Length constraint fields */
     PyObject *min_length, *max_length;
-} CollectionValidator;
+} CollectionConstraint;
 
-PyDoc_STRVAR(CollectionValidator__doc__,
+PyDoc_STRVAR(CollectionConstraint__doc__,
 "Length constraints for collection values (``list``, ``set``,\n"
 "``frozenset``, variadic ``tuple``, ``dict``).\n"
 "\n"
@@ -3889,12 +3889,12 @@ PyDoc_STRVAR(CollectionValidator__doc__,
 "    The annotated value must have a length <= ``max_length``.\n"
 );
 static PyObject *
-CollectionValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+CollectionConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     char *kwlist[] = {"min_length", "max_length", NULL};
     PyObject *min_length = NULL, *max_length = NULL;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|$OO:CollectionValidator.__new__", kwlist,
+            args, kwargs, "|$OO:CollectionConstraint.__new__", kwlist,
             &min_length, &max_length
         )
     )
@@ -3909,7 +3909,7 @@ CollectionValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
     if (max_length != NULL && !ensure_is_nonnegative_integer(max_length, "max_length")) return NULL;
 
-    CollectionValidator *self = (CollectionValidator *)CollectionValidator_Type.tp_alloc(&CollectionValidator_Type, 0);
+    CollectionConstraint *self = (CollectionConstraint *)CollectionConstraint_Type.tp_alloc(&CollectionConstraint_Type, 0);
     if (self == NULL) return NULL;
 
 #define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
@@ -3921,13 +3921,13 @@ CollectionValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *
-CollectionValidator_tp_call(
+CollectionConstraint_tp_call(
     PyObject *py_self, PyObject *args, PyObject *kwargs
 ) {
-    CollectionValidator *self = (CollectionValidator *)py_self;
+    CollectionConstraint *self = (CollectionConstraint *)py_self;
     PyObject *value;
 
-    if (!PyArg_ParseTuple(args, "O:CollectionValidator.__call__", &value)) {
+    if (!PyArg_ParseTuple(args, "O:CollectionConstraint.__call__", &value)) {
         return NULL;
     }
 
@@ -3957,10 +3957,10 @@ CollectionValidator_tp_call(
 }
 
 static PyObject *
-CollectionValidator_repr(CollectionValidator *self) {
+CollectionConstraint_repr(CollectionConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
-    if (!strbuilder_extend_literal(&builder, "structtype.CollectionValidator(")) return NULL;
+    if (!strbuilder_extend_literal(&builder, "structtype.CollectionConstraint(")) return NULL;
 #define DO_REPR(field) do { \
     if (self->field != NULL) { \
         if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
@@ -3979,8 +3979,8 @@ error:
 }
 
 static PyObject *
-CollectionValidator_rich_repr(PyObject *py_self, PyObject *args) {
-    CollectionValidator *self = (CollectionValidator *)py_self;
+CollectionConstraint_rich_repr(PyObject *py_self, PyObject *args) {
+    CollectionConstraint *self = (CollectionConstraint *)py_self;
     PyObject *out = PyList_New(0);
     if (out == NULL) goto error;
 #define DO_REPR(field) do { \
@@ -4001,7 +4001,7 @@ error:
 }
 
 static PyObject *
-CollectionValidator_richcompare(CollectionValidator *self, PyObject *py_other, int op) {
+CollectionConstraint_richcompare(CollectionConstraint *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
@@ -4013,7 +4013,7 @@ CollectionValidator_richcompare(CollectionValidator *self, PyObject *py_other, i
     if (!(op == Py_EQ || op == Py_NE)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
-    CollectionValidator *other = (CollectionValidator *)py_other;
+    CollectionConstraint *other = (CollectionConstraint *)py_other;
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
@@ -4038,7 +4038,7 @@ done:
 }
 
 static Py_hash_t
-CollectionValidator_hash(CollectionValidator *self) {
+CollectionConstraint_hash(CollectionConstraint *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
 
@@ -4064,13 +4064,13 @@ CollectionValidator_hash(CollectionValidator *self) {
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
 
-static PyMethodDef CollectionValidator_methods[] = {
-    {"__rich_repr__", CollectionValidator_rich_repr, METH_NOARGS, "rich repr"},
+static PyMethodDef CollectionConstraint_methods[] = {
+    {"__rich_repr__", CollectionConstraint_rich_repr, METH_NOARGS, "rich repr"},
     {NULL, NULL},
 };
 
 static int
-CollectionValidator_traverse(CollectionValidator *self, visitproc visit, void *arg)
+CollectionConstraint_traverse(CollectionConstraint *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->base.fn);
     Py_VISIT(self->min_length);
@@ -4079,7 +4079,7 @@ CollectionValidator_traverse(CollectionValidator *self, visitproc visit, void *a
 }
 
 static int
-CollectionValidator_clear(CollectionValidator *self)
+CollectionConstraint_clear(CollectionConstraint *self)
 {
     Py_CLEAR(self->base.fn);
     Py_CLEAR(self->min_length);
@@ -4088,52 +4088,52 @@ CollectionValidator_clear(CollectionValidator *self)
 }
 
 static void
-CollectionValidator_dealloc(CollectionValidator *self)
+CollectionConstraint_dealloc(CollectionConstraint *self)
 {
     PyObject_GC_UnTrack(self);
-    CollectionValidator_clear(self);
+    CollectionConstraint_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyMemberDef CollectionValidator_members[] = {
-    {"min_length", T_OBJECT, offsetof(CollectionValidator, min_length), READONLY, NULL},
-    {"max_length", T_OBJECT, offsetof(CollectionValidator, max_length), READONLY, NULL},
+static PyMemberDef CollectionConstraint_members[] = {
+    {"min_length", T_OBJECT, offsetof(CollectionConstraint, min_length), READONLY, NULL},
+    {"max_length", T_OBJECT, offsetof(CollectionConstraint, max_length), READONLY, NULL},
     {NULL},
 };
 
-static PyTypeObject CollectionValidator_Type = {
+static PyTypeObject CollectionConstraint_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype._core.CollectionValidator",
-    .tp_doc = CollectionValidator__doc__,
-    .tp_basicsize = sizeof(CollectionValidator),
+    .tp_name = "structtype._core.CollectionConstraint",
+    .tp_doc = CollectionConstraint__doc__,
+    .tp_basicsize = sizeof(CollectionConstraint),
     .tp_itemsize = 0,
-    .tp_new = CollectionValidator_new,
-    .tp_call = CollectionValidator_tp_call,
-    .tp_base = &Validator_Type,
+    .tp_new = CollectionConstraint_new,
+    .tp_call = CollectionConstraint_tp_call,
+    .tp_base = &Constraint_Type,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-    .tp_clear = (inquiry)CollectionValidator_clear,
-    .tp_traverse = (traverseproc)CollectionValidator_traverse,
-    .tp_dealloc = (destructor) CollectionValidator_dealloc,
-    .tp_repr = (reprfunc)CollectionValidator_repr,
-    .tp_richcompare = (richcmpfunc)CollectionValidator_richcompare,
-    .tp_hash = (hashfunc)CollectionValidator_hash,
-    .tp_methods = CollectionValidator_methods,
-    .tp_members = CollectionValidator_members,
+    .tp_clear = (inquiry)CollectionConstraint_clear,
+    .tp_traverse = (traverseproc)CollectionConstraint_traverse,
+    .tp_dealloc = (destructor) CollectionConstraint_dealloc,
+    .tp_repr = (reprfunc)CollectionConstraint_repr,
+    .tp_richcompare = (richcmpfunc)CollectionConstraint_richcompare,
+    .tp_hash = (hashfunc)CollectionConstraint_hash,
+    .tp_methods = CollectionConstraint_methods,
+    .tp_members = CollectionConstraint_members,
 };
 
 /*************************************************************************
- * TimezoneValidator                                                     *
+ * TimezoneConstraint                                                     *
  *************************************************************************/
 
-static PyTypeObject TimezoneValidator_Type;
+static PyTypeObject TimezoneConstraint_Type;
 
 typedef struct {
-    Validator base;  /* embedded Validator_Type instance state */
+    Constraint base;  /* embedded Constraint_Type instance state */
     /* Timezone requirement field */
     PyObject *tz;
-} TimezoneValidator;
+} TimezoneConstraint;
 
-PyDoc_STRVAR(TimezoneValidator__doc__,
+PyDoc_STRVAR(TimezoneConstraint__doc__,
 "Timezone requirements for ``datetime.datetime``/``datetime.time`` values.\n"
 "\n"
 "Parameters\n"
@@ -4143,12 +4143,12 @@ PyDoc_STRVAR(TimezoneValidator__doc__,
 "    require timezone-naive values.\n"
 );
 static PyObject *
-TimezoneValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+TimezoneConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     char *kwlist[] = {"tz", NULL};
     PyObject *tz;
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "O:TimezoneValidator.__new__", kwlist,
+            args, kwargs, "O:TimezoneConstraint.__new__", kwlist,
             &tz
         )
     )
@@ -4157,7 +4157,7 @@ TimezoneValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     /* Check constraint parameter types/values */
     if (!ensure_is_bool(tz, "tz")) return NULL;
 
-    TimezoneValidator *self = (TimezoneValidator *)TimezoneValidator_Type.tp_alloc(&TimezoneValidator_Type, 0);
+    TimezoneConstraint *self = (TimezoneConstraint *)TimezoneConstraint_Type.tp_alloc(&TimezoneConstraint_Type, 0);
     if (self == NULL) return NULL;
 
     Py_INCREF(tz);
@@ -4167,13 +4167,13 @@ TimezoneValidator_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *
-TimezoneValidator_tp_call(
+TimezoneConstraint_tp_call(
     PyObject *py_self, PyObject *args, PyObject *kwargs
 ) {
-    TimezoneValidator *self = (TimezoneValidator *)py_self;
+    TimezoneConstraint *self = (TimezoneConstraint *)py_self;
     PyObject *value;
 
-    if (!PyArg_ParseTuple(args, "O:TimezoneValidator.__call__", &value)) {
+    if (!PyArg_ParseTuple(args, "O:TimezoneConstraint.__call__", &value)) {
         return NULL;
     }
 
@@ -4211,10 +4211,10 @@ TimezoneValidator_tp_call(
 }
 
 static PyObject *
-TimezoneValidator_repr(TimezoneValidator *self) {
+TimezoneConstraint_repr(TimezoneConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
-    if (!strbuilder_extend_literal(&builder, "structtype.TimezoneValidator(")) return NULL;
+    if (!strbuilder_extend_literal(&builder, "structtype.TimezoneConstraint(")) return NULL;
 #define DO_REPR(field) do { \
     if (self->field != NULL) { \
         if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
@@ -4232,8 +4232,8 @@ error:
 }
 
 static PyObject *
-TimezoneValidator_rich_repr(PyObject *py_self, PyObject *args) {
-    TimezoneValidator *self = (TimezoneValidator *)py_self;
+TimezoneConstraint_rich_repr(PyObject *py_self, PyObject *args) {
+    TimezoneConstraint *self = (TimezoneConstraint *)py_self;
     PyObject *out = PyList_New(0);
     if (out == NULL) goto error;
 #define DO_REPR(field) do { \
@@ -4253,7 +4253,7 @@ error:
 }
 
 static PyObject *
-TimezoneValidator_richcompare(TimezoneValidator *self, PyObject *py_other, int op) {
+TimezoneConstraint_richcompare(TimezoneConstraint *self, PyObject *py_other, int op) {
     int equal = 1;
     PyObject *out;
 
@@ -4265,7 +4265,7 @@ TimezoneValidator_richcompare(TimezoneValidator *self, PyObject *py_other, int o
     if (!(op == Py_EQ || op == Py_NE)) {
         Py_RETURN_NOTIMPLEMENTED;
     }
-    TimezoneValidator *other = (TimezoneValidator *)py_other;
+    TimezoneConstraint *other = (TimezoneConstraint *)py_other;
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
@@ -4289,7 +4289,7 @@ done:
 }
 
 static Py_hash_t
-TimezoneValidator_hash(TimezoneValidator *self) {
+TimezoneConstraint_hash(TimezoneConstraint *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
 
@@ -4314,13 +4314,13 @@ TimezoneValidator_hash(TimezoneValidator *self) {
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
 
-static PyMethodDef TimezoneValidator_methods[] = {
-    {"__rich_repr__", TimezoneValidator_rich_repr, METH_NOARGS, "rich repr"},
+static PyMethodDef TimezoneConstraint_methods[] = {
+    {"__rich_repr__", TimezoneConstraint_rich_repr, METH_NOARGS, "rich repr"},
     {NULL, NULL},
 };
 
 static int
-TimezoneValidator_traverse(TimezoneValidator *self, visitproc visit, void *arg)
+TimezoneConstraint_traverse(TimezoneConstraint *self, visitproc visit, void *arg)
 {
     Py_VISIT(self->base.fn);
     Py_VISIT(self->tz);
@@ -4328,7 +4328,7 @@ TimezoneValidator_traverse(TimezoneValidator *self, visitproc visit, void *arg)
 }
 
 static int
-TimezoneValidator_clear(TimezoneValidator *self)
+TimezoneConstraint_clear(TimezoneConstraint *self)
 {
     Py_CLEAR(self->base.fn);
     Py_CLEAR(self->tz);
@@ -4336,36 +4336,36 @@ TimezoneValidator_clear(TimezoneValidator *self)
 }
 
 static void
-TimezoneValidator_dealloc(TimezoneValidator *self)
+TimezoneConstraint_dealloc(TimezoneConstraint *self)
 {
     PyObject_GC_UnTrack(self);
-    TimezoneValidator_clear(self);
+    TimezoneConstraint_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyMemberDef TimezoneValidator_members[] = {
-    {"tz", T_OBJECT_EX, offsetof(TimezoneValidator, tz), READONLY, NULL},
+static PyMemberDef TimezoneConstraint_members[] = {
+    {"tz", T_OBJECT_EX, offsetof(TimezoneConstraint, tz), READONLY, NULL},
     {NULL},
 };
 
-static PyTypeObject TimezoneValidator_Type = {
+static PyTypeObject TimezoneConstraint_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype._core.TimezoneValidator",
-    .tp_doc = TimezoneValidator__doc__,
-    .tp_basicsize = sizeof(TimezoneValidator),
+    .tp_name = "structtype._core.TimezoneConstraint",
+    .tp_doc = TimezoneConstraint__doc__,
+    .tp_basicsize = sizeof(TimezoneConstraint),
     .tp_itemsize = 0,
-    .tp_new = TimezoneValidator_new,
-    .tp_call = TimezoneValidator_tp_call,
-    .tp_base = &Validator_Type,
+    .tp_new = TimezoneConstraint_new,
+    .tp_call = TimezoneConstraint_tp_call,
+    .tp_base = &Constraint_Type,
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-    .tp_clear = (inquiry)TimezoneValidator_clear,
-    .tp_traverse = (traverseproc)TimezoneValidator_traverse,
-    .tp_dealloc = (destructor) TimezoneValidator_dealloc,
-    .tp_repr = (reprfunc)TimezoneValidator_repr,
-    .tp_richcompare = (richcmpfunc)TimezoneValidator_richcompare,
-    .tp_hash = (hashfunc)TimezoneValidator_hash,
-    .tp_methods = TimezoneValidator_methods,
-    .tp_members = TimezoneValidator_members,
+    .tp_clear = (inquiry)TimezoneConstraint_clear,
+    .tp_traverse = (traverseproc)TimezoneConstraint_traverse,
+    .tp_dealloc = (destructor) TimezoneConstraint_dealloc,
+    .tp_repr = (reprfunc)TimezoneConstraint_repr,
+    .tp_richcompare = (richcmpfunc)TimezoneConstraint_richcompare,
+    .tp_hash = (hashfunc)TimezoneConstraint_hash,
+    .tp_methods = TimezoneConstraint_methods,
+    .tp_members = TimezoneConstraint_members,
 };
 
 /*************************************************************************
@@ -4629,7 +4629,7 @@ AssocList_Sort(AssocList* list) {
 #define MS_CONSTR_TZ_AWARE          (1ull << 59)
 #define MS_CONSTR_TZ_NAIVE          (1ull << 60)
 #define MS_CONSTR_CODEC             (1ull << 61)
-/* Base/user `Validator` instances; the instance itself is stored in details */
+/* Base/user `Constraint` instances; the instance itself is stored in details */
 #define MS_CONSTR_USER_VALIDATOR    (1ull << 62)
 /* Extra flag bit, used by TypedDict/dataclass implementations */
 #define MS_EXTRA_FLAG               (1ull << 63)
@@ -4816,7 +4816,7 @@ typedef struct {
     int8_t array_like;
     int8_t omit_defaults;
     int8_t forbid_unknown_fields;
-    int8_t validate_on_init;
+    int8_t check_types_on_init;
     int8_t kw_only;
 } StructMetaObject;
 
@@ -5382,7 +5382,7 @@ typenode_simple_repr(TypeNode *self) {
 
 typedef struct {
     PyObject *serializer;  /* the Serializer carrying load/dump, or NULL */
-    PyObject *validator;   /* the Validator instance (never .fn), or NULL */
+    PyObject *validator;   /* the Constraint instance (never .fn), or NULL */
 } Constraints;
 
 typedef struct {
@@ -5419,7 +5419,7 @@ typedef struct {
     double c_float_multiple_of;
     PyObject *c_str_regex;
     PyObject *serializer_obj;  /* Serializer* with load/dump, or NULL */
-    PyObject *validator_obj;   /* owned Validator instance (never .fn), or NULL */
+    PyObject *validator_obj;   /* owned Constraint instance (never .fn), or NULL */
     Py_ssize_t c_str_min_length;
     Py_ssize_t c_str_max_length;
     Py_ssize_t c_bytes_min_length;
@@ -5551,14 +5551,14 @@ typenode_collect_constraints(
         state->serializer_obj = constraints->serializer;
     }
 
-    /* Fast `Validator` subclasses lower into the same constraint machinery as
-     * constraints via `Validator` subclasses; base/user-defined validators are kept
+    /* Fast `Constraint` subclasses lower into the same constraint machinery as
+     * constraints via `Constraint` subclasses; base/user-defined validators are kept
      * as instances for the decode path. */
     if (constraints->validator != NULL) {
-        Validator *validator = (Validator *)constraints->validator;
+        Constraint *validator = (Constraint *)constraints->validator;
         PyTypeObject *vtype = Py_TYPE(validator);
-        if (vtype == &NumericValidator_Type) {
-            NumericValidator *v = (NumericValidator *)validator;
+        if (vtype == &NumericConstraint_Type) {
+            NumericConstraint *v = (NumericConstraint *)validator;
             if (kind == CK_INT) {
                 if (v->gt != NULL) {
                     state->types |= MS_CONSTR_INT_MIN;
@@ -5612,8 +5612,8 @@ typenode_collect_constraints(
                 if (v->multiple_of != NULL) return err_invalid_constraint("multiple_of", "numeric", obj);
             }
         }
-        else if (vtype == &StrValidator_Type) {
-            StrValidator *v = (StrValidator *)validator;
+        else if (vtype == &StrConstraint_Type) {
+            StrConstraint *v = (StrConstraint *)validator;
             if (kind != CK_STR) {
                 if (v->pattern != NULL) return err_invalid_constraint("pattern", "str", obj);
                 if (v->min_length != NULL) return err_invalid_constraint("min_length", "str", obj);
@@ -5635,8 +5635,8 @@ typenode_collect_constraints(
                 }
             }
         }
-        else if (vtype == &BytesValidator_Type) {
-            BytesValidator *v = (BytesValidator *)validator;
+        else if (vtype == &BytesConstraint_Type) {
+            BytesConstraint *v = (BytesConstraint *)validator;
             if (kind != CK_BYTES) {
                 if (v->min_length != NULL) return err_invalid_constraint("min_length", "bytes-like", obj);
                 if (v->max_length != NULL) return err_invalid_constraint("max_length", "bytes-like", obj);
@@ -5652,8 +5652,8 @@ typenode_collect_constraints(
                 }
             }
         }
-        else if (vtype == &CollectionValidator_Type) {
-            CollectionValidator *v = (CollectionValidator *)validator;
+        else if (vtype == &CollectionConstraint_Type) {
+            CollectionConstraint *v = (CollectionConstraint *)validator;
             if (kind == CK_ARRAY) {
                 if (v->min_length != NULL) {
                     state->types |= MS_CONSTR_ARRAY_MIN_LENGTH;
@@ -5679,8 +5679,8 @@ typenode_collect_constraints(
                 if (v->max_length != NULL) return err_invalid_constraint("max_length", "collection", obj);
             }
         }
-        else if (vtype == &TimezoneValidator_Type) {
-            TimezoneValidator *v = (TimezoneValidator *)validator;
+        else if (vtype == &TimezoneConstraint_Type) {
+            TimezoneConstraint *v = (TimezoneConstraint *)validator;
             if (kind != CK_TIME) {
                 return err_invalid_constraint("tz", "datetime or time", obj);
             }
@@ -5692,7 +5692,7 @@ typenode_collect_constraints(
             }
         }
         else {
-            /* Base `Validator` or a user-defined Python subclass: keep the
+            /* Base `Constraint` or a user-defined Python subclass: keep the
              * instance itself for the decode path */
             state->types |= MS_CONSTR_USER_VALIDATOR;
             Py_INCREF(validator);
@@ -6580,8 +6580,8 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
  *   applied to work around differences in type spelling (List vs list) and
  *   python version.
  * - `args`: `__args__` on `t` (if present)
- * - `constraints`: Any constraints from `Validator` objects and the codec
- *   (`Serializer`) / validator (`Validator`) annotated on the type
+ * - `constraints`: Any constraints from `Constraint` objects and the codec
+ *   (`Serializer`) / validator (`Constraint`) annotated on the type
  */
 static PyObject *
 typenode_origin_args_metadata(
@@ -6641,11 +6641,11 @@ typenode_origin_args_metadata(
                         }
                          constraints->serializer = (PyObject *)ser;
                     }
-                    else if (PyObject_TypeCheck(annot, (PyTypeObject *)&Validator_Type)) {
+                    else if (PyObject_TypeCheck(annot, (PyTypeObject *)&Constraint_Type)) {
                         if (constraints->validator != NULL) {
                             PyErr_Format(
                                 PyExc_TypeError,
-                                "Multiple `Validator` annotations found, "
+                                "Multiple `Constraint` annotations found, "
                                 "type `%R` is invalid",
                                 obj
                             );
@@ -7222,7 +7222,7 @@ ms_maybe_wrap_validation_error(PathNode *path) {
     PyErr_Restore(exc_type, exc, tb);
 }
 
-/* Invoke the stored base/user `Validator` instance on `value`. Only call
+/* Invoke the stored base/user `Constraint` instance on `value`. Only call
  * this when `MS_CONSTR_USER_VALIDATOR` is set. Takes ownership of `value`;
  * returns it unchanged when validation passes, or NULL (having DECREF'd
  * `value`) after wrapping ValueError/TypeError failures into a
@@ -7484,7 +7484,7 @@ typedef struct {
     PyObject *rename;
     int omit_defaults;
     int forbid_unknown_fields;
-    int validate_on_init;
+    int check_types_on_init;
     int frozen;
     int eq;
     int order;
@@ -7957,9 +7957,9 @@ classify_annotation_kind(PyObject *t, StructspecState *mod) {
     return CK_OTHER;
 }
 
-/* Validate that a fast Validator subclass is applicable to the given type
+/* Validate that a fast Constraint subclass is applicable to the given type
  * kind at class creation time.  Returns 0 on success, -1 with TypeError on
- * mismatch.  Base Validators (and user-defined subclasses) always pass --
+ * mismatch.  Base Constraints (and user-defined subclasses) always pass --
  * their kind check is deferred to the lazy decoder-build path. */
 static int
 validate_fast_validator_kind(
@@ -7967,55 +7967,55 @@ validate_fast_validator_kind(
 ) {
     PyTypeObject *vtype = Py_TYPE(validator);
 
-    if (vtype == &NumericValidator_Type) {
+    if (vtype == &NumericConstraint_Type) {
         if (kind != CK_INT && kind != CK_FLOAT) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`NumericValidator` can only be applied to numeric types "
+                "`NumericConstraint` can only be applied to numeric types "
                 "- type `%R` is invalid",
                 obj
             );
             return -1;
         }
     }
-    else if (vtype == &StrValidator_Type) {
+    else if (vtype == &StrConstraint_Type) {
         if (kind != CK_STR) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`StrValidator` can only be applied to `str` types "
+                "`StrConstraint` can only be applied to `str` types "
                 "- type `%R` is invalid",
                 obj
             );
             return -1;
         }
     }
-    else if (vtype == &BytesValidator_Type) {
+    else if (vtype == &BytesConstraint_Type) {
         if (kind != CK_BYTES) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`BytesValidator` can only be applied to bytes-like types "
+                "`BytesConstraint` can only be applied to bytes-like types "
                 "- type `%R` is invalid",
                 obj
             );
             return -1;
         }
     }
-    else if (vtype == &CollectionValidator_Type) {
+    else if (vtype == &CollectionConstraint_Type) {
         if (kind != CK_ARRAY && kind != CK_MAP) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`CollectionValidator` can only be applied to collection types "
+                "`CollectionConstraint` can only be applied to collection types "
                 "- type `%R` is invalid",
                 obj
             );
             return -1;
         }
     }
-    else if (vtype == &TimezoneValidator_Type) {
+    else if (vtype == &TimezoneConstraint_Type) {
         if (kind != CK_TIME) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`TimezoneValidator` can only be applied to `datetime` or "
+                "`TimezoneConstraint` can only be applied to `datetime` or "
                 "`time` types - type `%R` is invalid",
                 obj
             );
@@ -8026,8 +8026,8 @@ validate_fast_validator_kind(
 }
 
 /* Recursively walk an annotation, enforcing composition rules (at most one
- * Field, Serializer, and Validator per Annotated position), validating
- * Validator-vs-type-kind applicability, and collecting Serializer.dump
+ * Field, Serializer, and Constraint per Annotated position), validating
+ * Constraint-vs-type-kind applicability, and collecting Serializer.dump
  * codecs into a per-field codec map. */
 static int
 codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyObject *ctx) {
@@ -8101,12 +8101,12 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     }
                 }
             }
-            else if (PyObject_TypeCheck(item, (PyTypeObject *)&Validator_Type)) {
+            else if (PyObject_TypeCheck(item, (PyTypeObject *)&Constraint_Type)) {
                 n_validators++;
                 if (n_validators > 1) {
                     PyErr_Format(
                         PyExc_TypeError,
-                        "Multiple `Validator` annotations found, "
+                        "Multiple `Constraint` annotations found, "
                         "type `%R` is invalid",
                         ctx
                     );
@@ -8121,7 +8121,7 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
         Py_SETREF(t, origin);
     }
 
-    /* Validate Validator-vs-type-kind applicability.  After stripping all
+    /* Validate Constraint-vs-type-kind applicability.  After stripping all
      * Annotated wrappers `t` is the base type for this position. */
     if (validator_obj != NULL) {
         enum constraint_kind kind = classify_annotation_kind(t, mod);
@@ -8182,7 +8182,7 @@ error:
 
 /* Build per-field codec maps ({base_type: dump}) from field annotations.
  * Delegates per-position work to the unified codec_walk_annotation which now
- * also enforces composition rules and Validator applicability.  Fields
+ * also enforces composition rules and Constraint applicability.  Fields
  * inherited from struct base classes keep their base codec maps. */
 static int
 structmeta_collect_codecs(StructMetaInfo *info, StructspecState *mod, PyObject *bases) {
@@ -8306,7 +8306,7 @@ structmeta_collect_fields(StructMetaInfo *info, StructspecState *mod, bool kwonl
         return -1;
     }
 
-    /* Resolve annotations for Field/Serializer/Validator extraction.
+    /* Resolve annotations for Field/Serializer/Constraint extraction.
      * `annotations` may hold lazy strings (from `from __future__ import
      * annotations`); resolve them against the class namespace + module
      * namespace so codecs and Field metadata are visible at class creation,
@@ -8745,7 +8745,7 @@ structmeta_construct_offsets(
 /* The 15 known config keys for validation */
 static const char *known_config_keys[] = {
     "frozen", "eq", "order", "kw_only", "repr_omit_defaults", "array_like",
-    "omit_defaults", "forbid_unknown_fields", "validate_on_init",
+    "omit_defaults", "forbid_unknown_fields", "check_types_on_init",
     "weakref", "dict", "cache_hash", "tag", "tag_field", "rename",
     NULL
 };
@@ -8797,10 +8797,10 @@ structmeta_apply_spec(StructMetaInfo *info, PyObject *spec) {
         if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`forbid_unknown_fields` must be a bool"); return -1; }
         info->forbid_unknown_fields = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
     }
-    v = PyDict_GetItemString(spec, "validate_on_init");
+    v = PyDict_GetItemString(spec, "check_types_on_init");
     if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`validate_on_init` must be a bool"); return -1; }
-        info->validate_on_init = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`check_types_on_init` must be a bool"); return -1; }
+        info->check_types_on_init = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
     }
     v = PyDict_GetItemString(spec, "weakref");
     if (v != NULL) {
@@ -8889,7 +8889,7 @@ StructMeta_new_inner(
         .rename = NULL,
         .omit_defaults = OPT_UNSET,
         .forbid_unknown_fields = OPT_UNSET,
-        .validate_on_init = OPT_UNSET,
+        .check_types_on_init = OPT_UNSET,
         .kw_only = OPT_UNSET,
         .frozen = OPT_UNSET,
         .eq = OPT_UNSET,
@@ -9051,7 +9051,7 @@ StructMeta_new_inner(
     cls->array_like = info.array_like;
     cls->omit_defaults = info.omit_defaults;
     cls->forbid_unknown_fields = info.forbid_unknown_fields;
-    cls->validate_on_init = info.validate_on_init;
+    cls->check_types_on_init = info.check_types_on_init;
     cls->kw_only = info.kw_only;
 
     ok = true;
@@ -9462,7 +9462,7 @@ structmeta_build_config_dict(StructMetaObject *st_type) {
     SET_BOOL("array_like", st_type->array_like == OPT_TRUE);
     SET_BOOL("omit_defaults", st_type->omit_defaults == OPT_TRUE);
     SET_BOOL("forbid_unknown_fields", st_type->forbid_unknown_fields == OPT_TRUE);
-    SET_BOOL("validate_on_init", st_type->validate_on_init == OPT_TRUE);
+    SET_BOOL("check_types_on_init", st_type->check_types_on_init == OPT_TRUE);
     SET_BOOL("weakref", ((PyTypeObject *)st_type)->tp_weaklistoffset != 0);
     SET_BOOL("dict", ((PyTypeObject *)st_type)->tp_dictoffset != 0);
     SET_BOOL("cache_hash", st_type->hash_offset != 0);
@@ -9853,7 +9853,7 @@ kw_found:
     if (is_gc && should_untrack && MS_IS_TRACKED(self))
         PyObject_GC_UnTrack(self);
 
-    if (st_type->validate_on_init == OPT_TRUE) {
+    if (st_type->check_types_on_init == OPT_TRUE) {
         StructspecState *mod = structtype_get_global_state();
         if (mod == NULL) goto error;
         if (struct_check_recursive(self, mod, NULL) < 0) goto error;
@@ -10460,19 +10460,21 @@ PyDoc_STRVAR(Struct_validate__doc__,
 "    A validated struct instance.\n"
 );
 
-PyDoc_STRVAR(Struct_validate_self__doc__,
-"struct_validate_self(self)\n"
+PyDoc_STRVAR(Struct_check_types__doc__,
+"struct_check_types(self)\n"
 "--\n"
 "\n"
-"Validate this struct's fields against their declared types.\n"
+"Check this struct's field values against their declared types and\n"
+"constraints.\n"
 "\n"
-"Raises a ``ValidationError`` if any field's value does not match its\n"
-"declared type.  No type conversion is performed: if the value is not\n"
-"already an instance of the declared custom type, the error is raised\n"
-"immediately (``Serializer.load`` and protocol fallbacks are skipped).\n"
-"Any annotated ``Validator`` is still called on correctly-typed values.\n"
+"This is a pure type-check: unlike ``struct_validate``, no conversion is\n"
+"performed.  Raises a ``ValidationError`` if any field's value does not\n"
+"match its declared type.  If the value is not already an instance of the\n"
+"declared custom type, the error is raised immediately (``Serializer.load``\n"
+"and protocol fallbacks are skipped).  Any annotated ``Constraint`` is still\n"
+"called on correctly-typed values.\n"
 "\n"
-"If ``validate_on_init=True`` was set on the struct class, this\n"
+"If ``check_types_on_init=True`` was set on the struct class, this\n"
 "check is also performed at construction time.\n"
 );
 
@@ -10485,7 +10487,7 @@ static PyMethodDef Struct_methods[] = {
     {"struct_validate_json", (PyCFunction) Struct_validate_json, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate_json__doc__},
     {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, Struct_dump__doc__},
     {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate__doc__},
-    {"struct_validate_self", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, Struct_validate_self__doc__},
+    {"struct_check_types", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, Struct_check_types__doc__},
     {NULL, NULL},
 };
 
@@ -10605,7 +10607,7 @@ PyDoc_STRVAR(Struct__doc__,
 "   once, and then cached on the instance for further reuse. For expensive\n"
 "   hash values this can improve performance at the cost of a small amount of\n"
 "   memory usage.\n"
-"validate_on_init: bool, default False\n"
+"check_types_on_init: bool, default False\n"
 "   If True, the generated ``__init__`` validates the field values against\n"
 "   their declared types and constraints when an instance is created, raising\n"
 "   a ``ValidationError`` if any value does not match. Default is False.\n"
@@ -12059,7 +12061,7 @@ ms_decode_int(int64_t x, TypeNode *type, PathNode *path) {
     return PyLong_FromLongLong(x);
 }
 
-/* Pure type-check path for struct_validate_self / validate_on_init:
+/* Pure type-check path for struct_check_types / check_types_on_init:
  * isinstance-checks the value against the custom type and raises on
  * mismatch.  No conversion (load, protocol, auto-coerce) is performed.
  * Any annotated user validator (MS_CONSTR_USER_VALIDATOR) is still called
@@ -20952,7 +20954,7 @@ struct_check_recurse_dict(
     return any;
 }
 
-/* Recursive helper for struct_validate_self — validates each field against its type
+/* Recursive helper for struct_check_types — validates each field against its type
  * annotation, recursing into nested struct fields without creating intermediate
  * objects (no dump roundtrip). */
 static int
@@ -21038,14 +21040,14 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
 {
     if (nargs > 0) {
         return PyErr_Format(PyExc_TypeError,
-            "struct_validate_self() takes no positional arguments (%zd given)", nargs);
+            "struct_check_types() takes no positional arguments (%zd given)", nargs);
     }
     if (kwnames != NULL) {
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
         if (nkwargs > 0) {
             PyObject *name = PyTuple_GET_ITEM(kwnames, 0);
             return PyErr_Format(PyExc_TypeError,
-                "struct_validate_self() got an unexpected keyword argument '%U'", name);
+                "struct_check_types() got an unexpected keyword argument '%U'", name);
         }
     }
 
@@ -21053,7 +21055,7 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
     if (mod == NULL) return NULL;
 
     if (!ms_is_struct_inst(self)) {
-        PyErr_SetString(PyExc_TypeError, "struct_validate_self() requires a Struct instance");
+        PyErr_SetString(PyExc_TypeError, "struct_check_types() requires a Struct instance");
         return NULL;
     }
 
@@ -21232,17 +21234,17 @@ PyInit__core(void)
         return NULL;
     if (PyType_Ready(&Serializer_Type) < 0)
         return NULL;
-    if (PyType_Ready(&Validator_Type) < 0)
+    if (PyType_Ready(&Constraint_Type) < 0)
         return NULL;
-    if (PyType_Ready(&NumericValidator_Type) < 0)
+    if (PyType_Ready(&NumericConstraint_Type) < 0)
         return NULL;
-    if (PyType_Ready(&StrValidator_Type) < 0)
+    if (PyType_Ready(&StrConstraint_Type) < 0)
         return NULL;
-    if (PyType_Ready(&BytesValidator_Type) < 0)
+    if (PyType_Ready(&BytesConstraint_Type) < 0)
         return NULL;
-    if (PyType_Ready(&CollectionValidator_Type) < 0)
+    if (PyType_Ready(&CollectionConstraint_Type) < 0)
         return NULL;
-    if (PyType_Ready(&TimezoneValidator_Type) < 0)
+    if (PyType_Ready(&TimezoneConstraint_Type) < 0)
         return NULL;
     if (PyType_Ready(&IntLookup_Type) < 0)
         return NULL;
@@ -21282,17 +21284,17 @@ PyInit__core(void)
         return NULL;
     if (PyModule_AddObjectRef(m, "Serializer", (PyObject *)&Serializer_Type) < 0)
         return NULL;
-    if (PyModule_AddObjectRef(m, "Validator", (PyObject *)&Validator_Type) < 0)
+    if (PyModule_AddObjectRef(m, "Constraint", (PyObject *)&Constraint_Type) < 0)
         return NULL;
-    if (PyModule_AddObjectRef(m, "NumericValidator", (PyObject *)&NumericValidator_Type) < 0)
+    if (PyModule_AddObjectRef(m, "NumericConstraint", (PyObject *)&NumericConstraint_Type) < 0)
         return NULL;
-    if (PyModule_AddObjectRef(m, "StrValidator", (PyObject *)&StrValidator_Type) < 0)
+    if (PyModule_AddObjectRef(m, "StrConstraint", (PyObject *)&StrConstraint_Type) < 0)
         return NULL;
-    if (PyModule_AddObjectRef(m, "BytesValidator", (PyObject *)&BytesValidator_Type) < 0)
+    if (PyModule_AddObjectRef(m, "BytesConstraint", (PyObject *)&BytesConstraint_Type) < 0)
         return NULL;
-    if (PyModule_AddObjectRef(m, "CollectionValidator", (PyObject *)&CollectionValidator_Type) < 0)
+    if (PyModule_AddObjectRef(m, "CollectionConstraint", (PyObject *)&CollectionConstraint_Type) < 0)
         return NULL;
-    if (PyModule_AddObjectRef(m, "TimezoneValidator", (PyObject *)&TimezoneValidator_Type) < 0)
+    if (PyModule_AddObjectRef(m, "TimezoneConstraint", (PyObject *)&TimezoneConstraint_Type) < 0)
         return NULL;
 
     if (PyModule_AddObjectRef(m, "Raw", (PyObject *)&Raw_Type) < 0)

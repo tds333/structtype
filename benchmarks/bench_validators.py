@@ -9,7 +9,7 @@
 # structtype = { path = "..", editable = true }
 # ///
 
-"""Benchmark structtype's Serializer + Validator annotations against pydantic.
+"""Benchmark structtype's Serializer + Constraint annotations against pydantic.
 
 Both libraries validate constrained fields (numeric/string/collection
 constraints) and convert a custom type (``PostalCode``) via a serializer
@@ -20,7 +20,7 @@ codec. Operations:
 - Load JSON (bytes -> object): ``struct_validate_json`` vs ``model_validate_json``
 - Dump JSON (object -> bytes): ``struct_dump_json`` vs ``model_dump_json``
 - Init: constructor-only cost. structtype validates on init only when
-  ``validate_on_init=True``; pydantic always validates on construction.
+  ``check_types_on_init=True``; pydantic always validates on construction.
 
 pydantic is optional — benchmarks that use it are skipped when not installed.
 """
@@ -41,12 +41,12 @@ except ImportError:
 
 import structtype
 from structtype import (
-    CollectionValidator,
-    NumericValidator,
+    CollectionConstraint,
+    NumericConstraint,
     Serializer,
     Struct,
     StructConfig,
-    StrValidator,
+    StrConstraint,
 )
 
 
@@ -83,20 +83,20 @@ def dump_zip(p: PostalCode) -> str:
 
 
 class Order_st(Struct):
-    id: Annotated[int, NumericValidator(gt=0, le=10**6)]
+    id: Annotated[int, NumericConstraint(gt=0, le=10**6)]
     customer: Annotated[
-        str, StrValidator(min_length=1, max_length=64, pattern="^[a-zA-Z ]+$")
+        str, StrConstraint(min_length=1, max_length=64, pattern="^[a-zA-Z ]+$")
     ]
-    amount: Annotated[float, NumericValidator(gt=0, le=10**5)]
-    quantity: Annotated[int, NumericValidator(ge=1, le=100)]
-    sku: Annotated[str, StrValidator(pattern="^[A-Z0-9-]+$")]
-    tags: Annotated[list[str], CollectionValidator(min_length=1, max_length=10)]
+    amount: Annotated[float, NumericConstraint(gt=0, le=10**5)]
+    quantity: Annotated[int, NumericConstraint(ge=1, le=100)]
+    sku: Annotated[str, StrConstraint(pattern="^[A-Z0-9-]+$")]
+    tags: Annotated[list[str], CollectionConstraint(min_length=1, max_length=10)]
     zip: Annotated[PostalCode, Serializer(dump=dump_zip, load=PostalCode)]
     note: str | None = None
 
 
 class Order_st_v(Order_st):
-    struct_config = StructConfig(validate_on_init=True)
+    struct_config = StructConfig(check_types_on_init=True)
 
 
 if HAS_PYDANTIC:
@@ -165,7 +165,7 @@ if HAS_PYDANTIC:
 else:
     json_pd = []
 
-# Constructor args with `zip` already a PostalCode instance (validate_on_init
+# Constructor args with `zip` already a PostalCode instance (check_types_on_init
 # is a pure type-check and does not apply Serializer.load).
 init_args = [{**d, "zip": PostalCode(d["zip"])} for d in raw_orders]
 
@@ -235,7 +235,7 @@ bench(
 )
 
 # Init (constructor only). structtype validates on init only with
-# validate_on_init=True; pydantic always validates on construction.
+# check_types_on_init=True; pydantic always validates on construction.
 bench(
     "Init (no validation)",
     lambda data: [Order_st(**d) for d in data],

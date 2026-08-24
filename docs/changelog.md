@@ -2,7 +2,44 @@
 
 ## Unreleased
 
-- Fix: `struct_validate_self()` and `validate_on_init=True` now recursively
+- **Breaking:** rename the `Validator` annotation family to `Constraint`:
+  `Validator` → `Constraint`, `NumericValidator` → `NumericConstraint`,
+  `StrValidator` → `StrConstraint`, `BytesValidator` → `BytesConstraint`,
+  `CollectionValidator` → `CollectionConstraint`, and `TimezoneValidator` →
+  `TimezoneConstraint`. The new name matches how these mostly behave —
+  declarative constraints on field values (`ge`, `pattern`, `min_length`, ...)
+  — and aligns with the internal/JSON-Schema vocabulary. Behavior, constructor
+  parameters, and the one-constraint-per-annotation rule are unchanged.
+  Hard break with no deprecation shims.
+
+  Migration:
+
+  | Old | New |
+  |---|---|
+  | `Validator(f)` | `Constraint(f)` |
+  | `NumericValidator(gt=0)` | `NumericConstraint(gt=0)` |
+  | `StrValidator(pattern="...")` | `StrConstraint(pattern="...")` |
+  | `BytesValidator(min_length=1)` | `BytesConstraint(min_length=1)` |
+  | `CollectionValidator(max_length=3)` | `CollectionConstraint(max_length=3)` |
+  | `TimezoneValidator(tz=True)` | `TimezoneConstraint(tz=True)` |
+
+  Custom validators now subclass `Constraint` (or a fast subclass) instead of
+  `Validator`.
+
+- **Breaking:** rename `struct_validate_self()` to `struct_check_types()` and
+  the `validate_on_init` config option to `check_types_on_init`. The new names
+  signal how these differ from `struct_validate` / `struct_validate_json`:
+  they are pure type-checks on already-existing values, performing no
+  conversion. Hard break with no deprecation shims.
+
+  Migration:
+
+  | Old | New |
+  |---|---|
+  | `p.struct_validate_self()` | `p.struct_check_types()` |
+  | `StructConfig(validate_on_init=True)` | `StructConfig(check_types_on_init=True)` |
+
+- Fix: `struct_check_types()` and `check_types_on_init=True` now recursively
   validate nested `Struct` instances inside containers (`list`, `dict`,
   `tuple`, `set`, `frozenset`). Previously only direct nested Struct fields
   were checked; Structs nested inside containers were trusted as-is.

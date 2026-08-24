@@ -57,7 +57,7 @@ o = Ordered(1)
 # Struct methods
 j: bytes = p.struct_dump_json()
 d = p.struct_dump()
-p.struct_validate_self()
+p.struct_check_types()
 q: Point = Point.struct_validate_json(b'{"x":1}')
 r: Point = Point.struct_validate({"x": 1})
 

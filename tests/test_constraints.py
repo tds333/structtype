@@ -7,13 +7,13 @@ import pytest
 
 import structtype
 from structtype import (
-    BytesValidator,
-    CollectionValidator,
+    BytesConstraint,
+    CollectionConstraint,
     Field,
-    NumericValidator,
+    NumericConstraint,
     Serializer,
-    StrValidator,
-    TimezoneValidator,
+    StrConstraint,
+    TimezoneConstraint,
 )
 from structtype._core import JSONDecoder, JSONEncoder, _json_encode, _json_decode
 
@@ -153,46 +153,46 @@ class TestMetaObject:
             Field(validate=repr)
 
 
-class TestNumericValidatorMetaObject:
+class TestNumericConstraintMetaObject:
     def test_repr_empty(self):
-        assert repr(NumericValidator()) == "structtype.NumericValidator()"
+        assert repr(NumericConstraint()) == "structtype.NumericConstraint()"
 
     @pytest.mark.parametrize("field", NUMERIC_FIELDS)
     def test_repr_one_field(self, field):
-        c = NumericValidator(**{field: NUMERIC_FIELDS[field]})
-        assert repr(c) == f"structtype.NumericValidator({field}={NUMERIC_FIELDS[field]!r})"
+        c = NumericConstraint(**{field: NUMERIC_FIELDS[field]})
+        assert repr(c) == f"structtype.NumericConstraint({field}={NUMERIC_FIELDS[field]!r})"
 
     def test_repr_multiple_fields(self):
-        c = NumericValidator(gt=0, lt=1)
-        assert repr(c) == "structtype.NumericValidator(gt=0, lt=1)"
+        c = NumericConstraint(gt=0, lt=1)
+        assert repr(c) == "structtype.NumericConstraint(gt=0, lt=1)"
 
     def test_rich_repr_empty(self):
-        assert NumericValidator().__rich_repr__() == []
+        assert NumericConstraint().__rich_repr__() == []
 
     @pytest.mark.parametrize("field", NUMERIC_FIELDS)
     def test_rich_repr_one_field(self, field):
-        m = NumericValidator(**{field: NUMERIC_FIELDS[field]})
+        m = NumericConstraint(**{field: NUMERIC_FIELDS[field]})
         assert m.__rich_repr__() == [(field, NUMERIC_FIELDS[field])]
 
     def test_rich_repr_multiple_fields(self):
-        m = NumericValidator(gt=0, lt=1)
+        m = NumericConstraint(gt=0, lt=1)
         assert m.__rich_repr__() == [("gt", 0), ("lt", 1)]
 
     def test_equality(self):
-        assert_eq(NumericValidator(), NumericValidator())
-        assert_ne(NumericValidator(), None)
+        assert_eq(NumericConstraint(), NumericConstraint())
+        assert_ne(NumericConstraint(), None)
 
         with pytest.raises(TypeError):
-            NumericValidator() > NumericValidator()
+            NumericConstraint() > NumericConstraint()
         with pytest.raises(TypeError):
-            NumericValidator() > None
+            NumericConstraint() > None
 
     def test_hash(self):
         def samples():
             return [
-                NumericValidator(),
-                NumericValidator(ge=0),
-                NumericValidator(ge=1, le=2),
+                NumericConstraint(),
+                NumericConstraint(ge=0),
+                NumericConstraint(ge=1, le=2),
             ]
 
         lk = {k: k for k in samples()}
@@ -202,56 +202,56 @@ class TestNumericValidatorMetaObject:
 
     @pytest.mark.parametrize("field", ["gt", "ge", "lt", "le", "multiple_of"])
     def test_numeric_fields(self, field):
-        NumericValidator(**{field: 1})
-        NumericValidator(**{field: 2.5})
+        NumericConstraint(**{field: 1})
+        NumericConstraint(**{field: 2.5})
         with pytest.raises(
             TypeError, match=f"`{field}` must be an int or float, got str"
         ):
-            NumericValidator(**{field: "bad"})
+            NumericConstraint(**{field: "bad"})
 
         with pytest.raises(ValueError, match=f"`{field}` must be finite"):
-            NumericValidator(**{field: float("inf")})
+            NumericConstraint(**{field: float("inf")})
 
     @pytest.mark.parametrize("val", [0, 0.0])
     def test_multiple_of_bounds(self, val):
         with pytest.raises(ValueError, match=r"`multiple_of` must be > 0"):
-            NumericValidator(multiple_of=val)
+            NumericConstraint(multiple_of=val)
 
     def test_conflicting_bounds_errors(self):
         with pytest.raises(ValueError, match="both `gt` and `ge`"):
-            NumericValidator(gt=0, ge=1)
+            NumericConstraint(gt=0, ge=1)
 
         with pytest.raises(ValueError, match="both `lt` and `le`"):
-            NumericValidator(lt=0, le=1)
+            NumericConstraint(lt=0, le=1)
 
 
-class TestStrValidatorMetaObject:
+class TestStrConstraintMetaObject:
     @pytest.mark.parametrize("field", ["pattern"])
     def test_string_fields(self, field):
-        StrValidator(**{field: "good"})
+        StrConstraint(**{field: "good"})
         with pytest.raises(TypeError, match=f"`{field}` must be a str, got bytes"):
-            StrValidator(**{field: b"bad"})
+            StrConstraint(**{field: b"bad"})
 
     @pytest.mark.parametrize("field", ["min_length", "max_length"])
     def test_nonnegative_integer_fields(self, field):
-        StrValidator(**{field: 0})
-        StrValidator(**{field: 10})
+        StrConstraint(**{field: 0})
+        StrConstraint(**{field: 10})
         with pytest.raises(TypeError, match=f"`{field}` must be an int, got float"):
-            StrValidator(**{field: 1.5})
+            StrConstraint(**{field: 1.5})
         with pytest.raises(ValueError, match=f"{field}` must be >= 0, got -10"):
-            StrValidator(**{field: -10})
+            StrConstraint(**{field: -10})
 
     def test_invalid_pattern_errors(self):
         with pytest.raises(re.error):
-            StrValidator(pattern="[abc")
+            StrConstraint(pattern="[abc")
 
 
-class TestTimezoneValidatorMetaObject:
+class TestTimezoneConstraintMetaObject:
     def test_bool_field(self):
-        TimezoneValidator(tz=True)
-        TimezoneValidator(tz=False)
+        TimezoneConstraint(tz=True)
+        TimezoneConstraint(tz=False)
         with pytest.raises(TypeError, match="`tz` must be a bool, got float"):
-            TimezoneValidator(tz=1.5)
+            TimezoneConstraint(tz=1.5)
 
 
 class TestSerializerMetaObject:
@@ -299,7 +299,7 @@ class TestSerializerMetaObject:
 class TestInvalidConstraintAnnotations:
     """Constraint validity is applied in two places:
 
-    - Type checks on constraint values in the Validator constructors
+    - Type checks on constraint values in the Constraint constructors
     - Type checks on type & constraint annotations in Decoder constructors
 
     The tests here check the latter.
@@ -308,11 +308,11 @@ class TestInvalidConstraintAnnotations:
     @pytest.mark.parametrize("name", ["ge", "gt", "le", "lt", "multiple_of"])
     def test_invalid_numeric_constraints(self, name):
         with pytest.raises(TypeError, match=f"Can only set `{name}` on a numeric type"):
-            JSONDecoder(Annotated[str, NumericValidator(**{name: 1})])
+            JSONDecoder(Annotated[str, NumericConstraint(**{name: 1})])
 
     def test_invalid_pattern_constraint(self):
         with pytest.raises(TypeError, match="Can only set `pattern` on a str type"):
-            JSONDecoder(Annotated[int, StrValidator(pattern="ok")])
+            JSONDecoder(Annotated[int, StrConstraint(pattern="ok")])
 
     @pytest.mark.parametrize("name", ["min_length", "max_length"])
     def test_invalid_length_constraint(self, name):
@@ -320,14 +320,14 @@ class TestInvalidConstraintAnnotations:
             TypeError,
             match=f"Can only set `{name}` on a str type",
         ):
-            JSONDecoder(Annotated[int, StrValidator(**{name: 1})])
+            JSONDecoder(Annotated[int, StrConstraint(**{name: 1})])
 
     def test_invalid_tz_constraint(self):
         with pytest.raises(
             TypeError,
             match="Can only set `tz` on a datetime or time type",
         ):
-            JSONDecoder(Annotated[int, TimezoneValidator(tz=True)])
+            JSONDecoder(Annotated[int, TimezoneConstraint(tz=True)])
 
     @pytest.mark.parametrize(
         "name, val",
@@ -335,21 +335,21 @@ class TestInvalidConstraintAnnotations:
     )
     def test_invalid_integer_bounds(self, name, val):
         with pytest.raises(ValueError) as rec:
-            JSONDecoder(Annotated[int, NumericValidator(**{name: val})])
+            JSONDecoder(Annotated[int, NumericConstraint(**{name: val})])
         assert name in str(rec.value)
         assert "not supported" in str(rec.value)
 
     def test_invalid_multiple_validator_annotations_conflict(self):
-        with pytest.raises(TypeError, match="Multiple `Validator` annotations"):
-            JSONDecoder(Annotated[int, NumericValidator(ge=1), NumericValidator(ge=2)])
+        with pytest.raises(TypeError, match="Multiple `Constraint` annotations"):
+            JSONDecoder(Annotated[int, NumericConstraint(ge=1), NumericConstraint(ge=2)])
 
     def test_invalid_gt_and_ge_conflict(self):
         with pytest.raises(ValueError, match="Cannot specify both `gt` and `ge`"):
-            NumericValidator(gt=1, ge=2)
+            NumericConstraint(gt=1, ge=2)
 
     def test_invalid_lt_and_le_conflict(self):
         with pytest.raises(ValueError, match="Cannot specify both `lt` and `le`"):
-            NumericValidator(lt=2, le=1)
+            NumericConstraint(lt=2, le=1)
 
 
 class TestIntConstraints:
@@ -364,7 +364,7 @@ class TestIntConstraints:
     )
     def test_bounds(self, proto, name, bound, good, bad):
         class Ex(structtype.Struct):
-            x: Annotated[int, NumericValidator(**{name: bound})]
+            x: Annotated[int, NumericConstraint(**{name: bound})]
 
         dec = proto.Decoder(Ex)
 
@@ -383,7 +383,7 @@ class TestIntConstraints:
         bad = [1, -1, 2**63 + 1, 2**65 + 1]
 
         class Ex(structtype.Struct):
-            x: Annotated[int, NumericValidator(multiple_of=2)]
+            x: Annotated[int, NumericConstraint(multiple_of=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -398,11 +398,11 @@ class TestIntConstraints:
     @pytest.mark.parametrize(
         "meta, good, bad",
         [
-            (NumericValidator(ge=0, le=10, multiple_of=2), [0, 2, 10], [-1, 1, 11]),
-            (NumericValidator(ge=0, multiple_of=2), [0, 2**63 + 2], [-2, 2**63 + 1]),
-            (NumericValidator(le=0, multiple_of=2), [0, -(2**63)], [-1, 2, 2**63]),
-            (NumericValidator(ge=0, le=10), [0, 10], [-1, 11]),
-            (NumericValidator(gt=0, lt=10), [1, 2, 9], [-1, 0, 10]),
+            (NumericConstraint(ge=0, le=10, multiple_of=2), [0, 2, 10], [-1, 1, 11]),
+            (NumericConstraint(ge=0, multiple_of=2), [0, 2**63 + 2], [-2, 2**63 + 1]),
+            (NumericConstraint(le=0, multiple_of=2), [0, -(2**63)], [-1, 2, 2**63]),
+            (NumericConstraint(ge=0, le=10), [0, 10], [-1, 11]),
+            (NumericConstraint(gt=0, lt=10), [1, 2, 9], [-1, 0, 10]),
         ],
     )
     def test_combinations(self, proto, meta, good, bad):
@@ -422,7 +422,7 @@ class TestIntConstraints:
 class TestFloatConstraints:
     @pytest.mark.parametrize("name", ["ge", "gt", "le", "lt"])
     def test_bound_constraint_uint64_valid_for_floats(self, name):
-        typ = Annotated[float, NumericValidator(**{name: 2**63})]
+        typ = Annotated[float, NumericConstraint(**{name: 2**63})]
         JSONDecoder(typ)
 
     def get_bounds_cases(self, name, bound):
@@ -460,7 +460,7 @@ class TestFloatConstraints:
     @pytest.mark.parametrize("bound", [1.5, -1.5, 10.0])
     def test_bounds(self, proto, name, bound):
         class Ex(structtype.Struct):
-            x: Annotated[float, NumericValidator(**{name: bound})]
+            x: Annotated[float, NumericConstraint(**{name: bound})]
 
         dec = proto.Decoder(Ex)
 
@@ -481,7 +481,7 @@ class TestFloatConstraints:
         info."""
 
         class Ex(structtype.Struct):
-            x: Annotated[float, NumericValidator(multiple_of=0.1)]
+            x: Annotated[float, NumericConstraint(multiple_of=0.1)]
 
         dec = proto.Decoder(Ex)
 
@@ -496,10 +496,10 @@ class TestFloatConstraints:
     @pytest.mark.parametrize(
         "meta, good, bad",
         [
-            (NumericValidator(ge=0.0, le=10.0, multiple_of=2.0), [0, 2.0, 10], [-2, 11, 3]),
-            (NumericValidator(ge=0.0, multiple_of=2.0), [0, 2, 10.0], [-2, 3]),
-            (NumericValidator(le=10.0, multiple_of=2.0), [-2.0, 10.0], [11.0, 3.0]),
-            (NumericValidator(ge=0.0, le=10.0), [0.0, 2.0, 10.0], [-1.0, 11.5, 11]),
+            (NumericConstraint(ge=0.0, le=10.0, multiple_of=2.0), [0, 2.0, 10], [-2, 11, 3]),
+            (NumericConstraint(ge=0.0, multiple_of=2.0), [0, 2, 10.0], [-2, 3]),
+            (NumericConstraint(le=10.0, multiple_of=2.0), [-2.0, 10.0], [11.0, 3.0]),
+            (NumericConstraint(ge=0.0, le=10.0), [0.0, 2.0, 10.0], [-1.0, 11.5, 11]),
         ],
     )
     def test_combinations(self, proto, meta, good, bad):
@@ -519,7 +519,7 @@ class TestFloatConstraints:
 class TestStrConstraints:
     def test_min_length(self, proto):
         class Ex(structtype.Struct):
-            x: Annotated[str, StrValidator(min_length=2)]
+            x: Annotated[str, StrConstraint(min_length=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -533,7 +533,7 @@ class TestStrConstraints:
 
     def test_max_length(self, proto):
         class Ex(structtype.Struct):
-            x: Annotated[str, StrValidator(max_length=2)]
+            x: Annotated[str, StrConstraint(max_length=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -555,7 +555,7 @@ class TestStrConstraints:
     )
     def test_pattern(self, proto, pattern, good, bad):
         class Ex(structtype.Struct):
-            x: Annotated[str, StrValidator(pattern=pattern)]
+            x: Annotated[str, StrConstraint(pattern=pattern)]
 
         dec = proto.Decoder(Ex)
 
@@ -572,13 +572,13 @@ class TestStrConstraints:
         "meta, good, bad",
         [
             (
-                StrValidator(min_length=2, max_length=3, pattern="x"),
+                StrConstraint(min_length=2, max_length=3, pattern="x"),
                 ["xy", "xyz"],
                 ["x", "yy", "wxyz"],
             ),
-            (StrValidator(min_length=2, max_length=4), ["xx", "xxxx"], ["x", "xxxxx"]),
-            (StrValidator(min_length=2, pattern="x"), ["xy", "wxyz"], ["x", "bad"]),
-            (StrValidator(max_length=3, pattern="x"), ["xy", "xyz"], ["y", "wxyz"]),
+            (StrConstraint(min_length=2, max_length=4), ["xx", "xxxx"], ["x", "xxxxx"]),
+            (StrConstraint(min_length=2, pattern="x"), ["xy", "wxyz"], ["x", "bad"]),
+            (StrConstraint(max_length=3, pattern="x"), ["xy", "xyz"], ["y", "wxyz"]),
         ],
     )
     def test_combinations(self, proto, meta, good, bad):
@@ -597,8 +597,8 @@ class TestStrConstraints:
     @pytest.mark.parametrize(
         "meta, good, bad",
         [
-            (StrValidator(min_length=2), ["xy", "𝄞xy"], ["", "𝄞"]),
-            (StrValidator(pattern="as"), ["as", "pass", "𝄞as"], ["", "nope", "𝄞"]),
+            (StrConstraint(min_length=2), ["xy", "𝄞xy"], ["", "𝄞"]),
+            (StrConstraint(pattern="as"), ["as", "pass", "𝄞as"], ["", "nope", "𝄞"]),
         ],
     )
     def test_str_constraints_on_dict_keys(self, proto, meta, good, bad):
@@ -636,7 +636,7 @@ class TestDateTimeConstraints:
     @pytest.mark.parametrize("as_str", [True, False])
     def test_tz_false(self, proto, as_str):
         class Ex(structtype.Struct):
-            x: Annotated[datetime.datetime, TimezoneValidator(tz=False)]
+            x: Annotated[datetime.datetime, TimezoneConstraint(tz=False)]
 
         self.roundtrip(proto, Ex, False, as_str)
 
@@ -648,7 +648,7 @@ class TestDateTimeConstraints:
     @pytest.mark.parametrize("as_str", [True, False])
     def test_tz_true(self, proto, as_str):
         class Ex(structtype.Struct):
-            x: Annotated[datetime.datetime, TimezoneValidator(tz=True)]
+            x: Annotated[datetime.datetime, TimezoneConstraint(tz=True)]
 
         self.roundtrip(proto, Ex, True, as_str)
 
@@ -682,7 +682,7 @@ class TestTimeConstraints:
     @pytest.mark.parametrize("as_str", [True, False])
     def test_tz_false(self, proto, as_str):
         class Ex(structtype.Struct):
-            x: Annotated[datetime.time, TimezoneValidator(tz=False)]
+            x: Annotated[datetime.time, TimezoneConstraint(tz=False)]
 
         self.roundtrip(proto, Ex, False, as_str)
 
@@ -694,7 +694,7 @@ class TestTimeConstraints:
     @pytest.mark.parametrize("as_str", [True, False])
     def test_tz_true(self, proto, as_str):
         class Ex(structtype.Struct):
-            x: Annotated[datetime.time, TimezoneValidator(tz=True)]
+            x: Annotated[datetime.time, TimezoneConstraint(tz=True)]
 
         self.roundtrip(proto, Ex, True, as_str)
 
@@ -708,7 +708,7 @@ class TestBytesConstraints:
     @pytest.mark.parametrize("typ", [bytes, bytearray, memoryview])
     def test_min_length(self, proto, typ):
         class Ex(structtype.Struct):
-            x: Annotated[typ, BytesValidator(min_length=2)]
+            x: Annotated[typ, BytesConstraint(min_length=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -723,7 +723,7 @@ class TestBytesConstraints:
     @pytest.mark.parametrize("typ", [bytes, bytearray, memoryview])
     def test_max_length(self, proto, typ):
         class Ex(structtype.Struct):
-            x: Annotated[typ, BytesValidator(max_length=2)]
+            x: Annotated[typ, BytesConstraint(max_length=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -737,7 +737,7 @@ class TestBytesConstraints:
     @pytest.mark.parametrize("typ", [bytes, bytearray, memoryview])
     def test_combinations(self, proto, typ):
         class Ex(structtype.Struct):
-            x: Annotated[typ, BytesValidator(min_length=2, max_length=4)]
+            x: Annotated[typ, BytesConstraint(min_length=2, max_length=4)]
 
         dec = proto.Decoder(Ex)
 
@@ -753,7 +753,7 @@ class TestArrayConstraints:
     @pytest.mark.parametrize("typ", [list, tuple, set, frozenset])
     def test_min_length(self, proto, typ):
         class Ex(structtype.Struct):
-            x: Annotated[typ, CollectionValidator(min_length=2)]
+            x: Annotated[typ, CollectionConstraint(min_length=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -770,7 +770,7 @@ class TestArrayConstraints:
     @pytest.mark.parametrize("typ", [list, tuple, set, frozenset])
     def test_max_length(self, proto, typ):
         class Ex(structtype.Struct):
-            x: Annotated[typ, CollectionValidator(max_length=2)]
+            x: Annotated[typ, CollectionConstraint(max_length=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -785,7 +785,7 @@ class TestArrayConstraints:
     @pytest.mark.parametrize("typ", [list, tuple, set, frozenset])
     def test_combinations(self, proto, typ):
         class Ex(structtype.Struct):
-            x: Annotated[typ, CollectionValidator(min_length=2, max_length=4)]
+            x: Annotated[typ, CollectionConstraint(min_length=2, max_length=4)]
 
         dec = proto.Decoder(Ex)
 
@@ -802,7 +802,7 @@ class TestArrayConstraints:
 class TestMapConstraints:
     def test_min_length(self, proto):
         class Ex(structtype.Struct):
-            x: Annotated[dict[str, int], CollectionValidator(min_length=2)]
+            x: Annotated[dict[str, int], CollectionConstraint(min_length=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -818,7 +818,7 @@ class TestMapConstraints:
 
     def test_max_length(self, proto):
         class Ex(structtype.Struct):
-            x: Annotated[dict[str, int], CollectionValidator(max_length=2)]
+            x: Annotated[dict[str, int], CollectionConstraint(max_length=2)]
 
         dec = proto.Decoder(Ex)
 
@@ -833,7 +833,7 @@ class TestMapConstraints:
 
     def test_combinations(self, proto):
         class Ex(structtype.Struct):
-            x: Annotated[dict[str, int], CollectionValidator(min_length=2, max_length=4)]
+            x: Annotated[dict[str, int], CollectionConstraint(min_length=2, max_length=4)]
 
         dec = proto.Decoder(Ex)
 
@@ -851,8 +851,8 @@ class TestUnionConstraints:
     def test_mix_float_and_int(self, proto):
         class Ex(structtype.Struct):
             x: (
-                Annotated[int, NumericValidator(ge=0, le=10)]
-                | Annotated[float, NumericValidator(ge=1000, le=2000)]
+                Annotated[int, NumericConstraint(ge=0, le=10)]
+                | Annotated[float, NumericConstraint(ge=1000, le=2000)]
             )
 
         dec = proto.Decoder(Ex)
@@ -867,9 +867,9 @@ class TestUnionConstraints:
     def test_mix_length_constraints(self, proto):
         class Ex(structtype.Struct):
             x: (
-                Annotated[dict[str, int], CollectionValidator(min_length=1, max_length=2)]
-                | Annotated[list[int], CollectionValidator(min_length=3, max_length=4)]
-                | Annotated[str, StrValidator(min_length=5, max_length=6)]
+                Annotated[dict[str, int], CollectionConstraint(min_length=1, max_length=2)]
+                | Annotated[list[int], CollectionConstraint(min_length=3, max_length=4)]
+                | Annotated[str, StrConstraint(min_length=5, max_length=6)]
             )
 
         dec = proto.Decoder(Ex)

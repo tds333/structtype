@@ -10,7 +10,7 @@ import structtype
 from structtype import (
     ALL_BUILTIN_TYPES,
     Field,
-    NumericValidator,
+    NumericConstraint,
     Serializer,
     Struct,
     StructAdapter,
@@ -30,7 +30,7 @@ def test_validate_json_generic():
 
 
 def test_validate_json_constrained():
-    ta = StructAdapter(Annotated[int, NumericValidator(ge=0)])
+    ta = StructAdapter(Annotated[int, NumericConstraint(ge=0)])
     assert ta.struct_validate_json(b"42") == 42
 
 
@@ -85,7 +85,7 @@ def test_validate_python_generic():
 
 
 def test_validate_python_constrained():
-    ta = StructAdapter(Annotated[int, NumericValidator(ge=0)])
+    ta = StructAdapter(Annotated[int, NumericConstraint(ge=0)])
     assert ta.struct_validate(5) == 5
 
 
@@ -166,7 +166,7 @@ def test_json_schema():
 
 
 def test_json_schema_constrained():
-    assert structtype.json_schema(Annotated[int, NumericValidator(ge=0)]) == {
+    assert structtype.json_schema(Annotated[int, NumericConstraint(ge=0)]) == {
         "type": "integer",
         "minimum": 0,
     }
@@ -322,7 +322,7 @@ def test_adapter_rejects_type_alias_wrapped_codec():
 
 
 def test_adapter_newtype_constraint_only_accepted():
-    NT = NewType("NT", Annotated[int, NumericValidator(gt=0)])
+    NT = NewType("NT", Annotated[int, NumericConstraint(gt=0)])
     ta = StructAdapter(NT)
     assert ta.struct_validate_json(b"42") == 42
 

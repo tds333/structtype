@@ -691,7 +691,7 @@ def test_struct_meta_pattern_ref_leak():
     # use a random string to create a pattern, to ensure there can never be an overlap
     # with any cached pattern
     pattern_string = secrets.token_hex()
-    structtype.StrValidator(pattern=pattern_string)
+    structtype.StrConstraint(pattern=pattern_string)
     # purge cache and gc again
     re.purge()
     gc.collect()
@@ -712,7 +712,7 @@ def test_struct_config_spec_constructor_and_unsets():
     assert cfg["kw_only"] is True
     assert cfg["rename"] == "camel"
     assert "eq" not in cfg
-    assert "validate_on_init" not in cfg
+    assert "check_types_on_init" not in cfg
     assert "forbid_unknown_fields" not in cfg
     assert "omit_defaults" not in cfg
     assert "repr_omit_defaults" not in cfg

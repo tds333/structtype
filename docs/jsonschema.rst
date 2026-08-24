@@ -22,14 +22,14 @@ Example
 .. code-block:: python
 
     from structtype import json_schema, json_schema_dump
-    from structtype import Struct, NumericValidator
+    from structtype import Struct, NumericConstraint
     from typing import Annotated
 
 
     class Dimensions(Struct):
-        length: Annotated[float, NumericValidator(gt=0)]
-        width: Annotated[float, NumericValidator(gt=0)]
-        height: Annotated[float, NumericValidator(gt=0)]
+        length: Annotated[float, NumericConstraint(gt=0)]
+        width: Annotated[float, NumericConstraint(gt=0)]
+        height: Annotated[float, NumericConstraint(gt=0)]
 
 
     class Product(Struct):
@@ -134,7 +134,7 @@ Customizing the Schema
 
 You can enrich the generated JSON Schema using several ``Field`` parameters
 (``title``, ``description``, ``examples``, ``deprecated``, ``json_schema_extra``)
-and validation via ``NumericValidator``.
+and validation via ``NumericConstraint``.
 These are covered on the :doc:`Field Annotations <annotation>` page.
 
 .. _JSON Schema: https://json-schema.org/

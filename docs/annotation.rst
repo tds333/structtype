@@ -25,22 +25,22 @@ the *values* (rather than the *types*) found in the message.
 
 Constraints and field metadata in ``structtype`` are specified by wrapping a
 type with `typing.Annotated`, and adding a `structtype.Field` or
-`structtype.Validator` annotation. The ``Annotated`` wrapper attaches arbitrary
+`structtype.Constraint` annotation. The ``Annotated`` wrapper attaches arbitrary
 metadata to a type without changing its runtime behavior; ``structtype`` reads
-the ``Field`` and ``Validator`` instances it contains.
+the ``Field`` and ``Constraint`` instances it contains.
 
 .. note::
 
     ``from __future__ import annotations`` is fully supported — lazy string
     annotations are resolved at class creation, so ``Field`` metadata,
-    ``Validator`` constraints, and ``Serializer`` codecs work exactly as with
+    ``Constraint`` constraints, and ``Serializer`` codecs work exactly as with
     eager annotations. Forward references that can't be resolved at class
     creation (e.g. self-referential types) are left for the decode-time
     resolver.
 
 **Constraint options** (``gt``, ``ge``, ``lt``, ``le``, ``multiple_of``,
 ``min_length``, ``max_length``, ``pattern``, ``tz``) restrict the *values* a
-field may take, and are specified via `structtype.Validator` subclasses.
+field may take, and are specified via `structtype.Constraint` subclasses.
 **Metadata options** (``alias``, ``title``, ``description``,
 ``examples``, ``json_schema_extra``) affect encoding names and generated
 :doc:`JSON Schemas <jsonschema>`, and are specified via `structtype.Field`.
@@ -51,9 +51,9 @@ use of the ``gt`` (greater-than) constraint:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import NumericValidator, Struct
+    >>> from structtype import NumericConstraint, Struct
 
-    >>> PositiveInt = Annotated[int, NumericValidator(gt=0)]
+    >>> PositiveInt = Annotated[int, NumericConstraint(gt=0)]
 
     >>> class PosList(Struct):
     ...     items: list[PositiveInt]
@@ -81,36 +81,36 @@ complete example enforcing the following constraints on a ``User`` struct:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, Field, StrValidator, NumericValidator
+    >>> from structtype import Struct, Field, StrConstraint, NumericConstraint
 
     >>> UnixName = Annotated[
-    ...     str, StrValidator(min_length=1, max_length=32, pattern="^[a-z_][a-z0-9_-]*$")
+    ...     str, StrConstraint(min_length=1, max_length=32, pattern="^[a-z_][a-z0-9_-]*$")
     ... ]
 
     >>> class User(Struct):
     ...     name: UnixName
-    ...     groups: Annotated[set[UnixName], CollectionValidator(max_length=16)] = set()
-    ...     cpu_limit: Annotated[float, NumericValidator(ge=0.1, le=8)] = 1
-    ...     mem_limit: Annotated[int, NumericValidator(ge=256, le=8192)] = 1024
+    ...     groups: Annotated[set[UnixName], CollectionConstraint(max_length=16)] = set()
+    ...     cpu_limit: Annotated[float, NumericConstraint(ge=0.1, le=8)] = 1
+    ...     mem_limit: Annotated[int, NumericConstraint(ge=256, le=8192)] = 1024
 
 As shown above, ``Annotated`` types can applied inline, or used to create type
 aliases and then reused elsewhere (as done with ``UnixName``).
 
 ``Annotated`` metadata can also be layered. A type alias may carry one kind of
-annotation (e.g. a ``Validator``), and the alias can then be wrapped again with
+annotation (e.g. a ``Constraint``), and the alias can then be wrapped again with
 another kind (e.g. a ``Field``) where it's used:
 
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, Field, Validator
+    >>> from structtype import Struct, Field, Constraint
 
     >>> def non_negative(value):
     ...     if value < 0:
     ...         raise ValueError("must be non-negative")
     ...     return value
 
-    >>> NonNegativeInt = Annotated[int, Validator(non_negative)]
+    >>> NonNegativeInt = Annotated[int, Constraint(non_negative)]
 
     >>> class S(Struct):
     ...     xyz: Annotated[NonNegativeInt, Field(alias="z")]
@@ -122,7 +122,7 @@ another kind (e.g. a ``Field``) where it's used:
       ...
     structtype.ValidationError: must be non-negative - at `$.z`
 
-At most one ``Field``, one ``Serializer``, and one ``Validator`` may apply to a
+At most one ``Field``, one ``Serializer``, and one ``Constraint`` may apply to a
 single field, across all nesting levels. Using two of the same kind (e.g. two
 ``Field`` wrappers) raises a ``TypeError``.
 
@@ -142,10 +142,10 @@ These constraints are valid on `int` or `float` types:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, NumericValidator
+    >>> from structtype import Struct, NumericConstraint
 
     >>> class Value(Struct):
-    ...     val: Annotated[int, NumericValidator(ge=0)]
+    ...     val: Annotated[int, NumericConstraint(ge=0)]
 
     >>> Value.struct_validate_json(b'{"val": -1}')
     Traceback (most recent call last):
@@ -178,10 +178,10 @@ These constraints are valid on `str` types:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, StrValidator
+    >>> from structtype import Struct, StrConstraint
 
     >>> class UserName(Struct):
-    ...     name: Annotated[str, StrValidator(pattern="^[a-z0-9_]*$")]
+    ...     name: Annotated[str, StrConstraint(pattern="^[a-z0-9_]*$")]
 
     >>> UserName.struct_validate_json(
     ...     b'{"name": "invalid username"}',
@@ -205,12 +205,12 @@ These constraints are valid on `datetime.datetime` and `datetime.time` types:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, TimezoneValidator
+    >>> from structtype import Struct, TimezoneConstraint
 
     >>> from datetime import datetime
 
     >>> class EventTZ(Struct):
-    ...     at: Annotated[datetime, TimezoneValidator(tz=True)]
+    ...     at: Annotated[datetime, TimezoneConstraint(tz=True)]
 
     >>> EventTZ.struct_validate_json(
     ...     b'{"at": "2022-04-02T18:18:10"}',
@@ -220,7 +220,7 @@ These constraints are valid on `datetime.datetime` and `datetime.time` types:
     structtype.ValidationError: Expected `datetime` with a timezone component - at `$.at`
 
     >>> class EventNaive(Struct):
-    ...     at: Annotated[datetime, TimezoneValidator(tz=False)]
+    ...     at: Annotated[datetime, TimezoneConstraint(tz=False)]
 
     >>> EventNaive.struct_validate_json(
     ...     b'{"at": "2022-04-02T18:18:10-06:00"}',
@@ -240,10 +240,10 @@ These constraints are valid on `bytes` and `bytearray` types:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, BytesValidator
+    >>> from structtype import Struct, BytesConstraint
 
     >>> class Payload(Struct):
-    ...     data: Annotated[bytes, BytesValidator(min_length=10)]
+    ...     data: Annotated[bytes, BytesConstraint(min_length=10)]
 
     >>> Payload.struct_validate_json(
     ...     b'{"data": "ZXhhbXBsZQ=="}',
@@ -263,10 +263,10 @@ These constraints are valid on `list`, `tuple`, `set`, and `frozenset` types:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, CollectionValidator
+    >>> from structtype import Struct, CollectionConstraint
 
     >>> class SmallList(Struct):
-    ...     items: Annotated[list[int], CollectionValidator(max_length=3)]
+    ...     items: Annotated[list[int], CollectionConstraint(max_length=3)]
 
     >>> SmallList.struct_validate_json(
     ...     b'{"items": [1, 2, 3, 4]}',
@@ -286,10 +286,10 @@ These constraints are valid on `dict` types:
 .. code-block:: python
 
     >>> from typing import Annotated
-    >>> from structtype import Struct, CollectionValidator
+    >>> from structtype import Struct, CollectionConstraint
 
     >>> class SmallDict(Struct):
-    ...     items: Annotated[dict[str, int], CollectionValidator(max_length=3)]
+    ...     items: Annotated[dict[str, int], CollectionConstraint(max_length=3)]
 
     >>> SmallDict.struct_validate_json(
     ...     b'{"items": {"a": 1, "b": 2, "c": 3, "d": 4}}',

@@ -131,14 +131,14 @@ instance with some fields replaced. This is similar to `dataclasses.replace`.
 The ``__replace__`` method works on frozen structs as well, since it creates a
 new instance rather than modifying the existing one.
 
-.. _struct-validate-on-init:
+.. _struct-check-types-on-init:
 
-``validate_on_init``
---------------------
+``check_types_on_init``
+-----------------------
 
 By default, struct instances are not type-checked on creation. Type
 validation only occurs when decoding a message (e.g. via
-``struct_validate_json``). Setting ``validate_on_init=True`` on a struct
+``struct_validate_json``). Setting ``check_types_on_init=True`` on a struct
 definition enables type and constraint checking during ``__init__``:
 
 .. code-block:: python
@@ -146,7 +146,7 @@ definition enables type and constraint checking during ``__init__``:
     >>> from structtype import Struct, StructConfig
 
     >>> class Point(Struct):
-    ...     struct_config = StructConfig(validate_on_init=True)
+    ...     struct_config = StructConfig(check_types_on_init=True)
     ...     x: float
     ...     y: float
 
@@ -167,8 +167,8 @@ definition enables type and constraint checking during ``__init__``:
     ``struct_validate_json`` instead.
 
 While convenient, this adds overhead to every ``__init__`` call. Prefer static
-type checking with mypy_/pyright_ when possible, and use ``struct_validate_self`` for
-explicit runtime validation.
+type checking with mypy_/pyright_ when possible, and use ``struct_check_types``
+for explicit runtime validation.
 
 ``repr_omit_defaults``
 ----------------------

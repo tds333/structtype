@@ -17,7 +17,7 @@ class StructConfig(TypedDict, total=False):
     array_like: bool
     omit_defaults: bool
     forbid_unknown_fields: bool
-    validate_on_init: bool
+    check_types_on_init: bool
     weakref: bool
     dict: bool
     cache_hash: bool

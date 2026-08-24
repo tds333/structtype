@@ -37,7 +37,7 @@ class StructConfig(TypedDict, total=False):
     repr_omit_defaults: bool
     omit_defaults: bool
     forbid_unknown_fields: bool
-    validate_on_init: bool
+    check_types_on_init: bool
     weakref: bool
     dict: bool
     cache_hash: bool
@@ -94,7 +94,7 @@ class Struct(metaclass=StructMeta):
         str_keys: bool = False,
         builtin_types: Iterable[type] | None = None,
     ) -> dict[str, Any] | list[Any]: ...
-    def struct_validate_self(self) -> None: ...
+    def struct_check_types(self) -> None: ...
     @classmethod
     def struct_validate_json(
         cls,
@@ -160,12 +160,12 @@ class Serializer:
     load: Final[Callable[[Any], Any] | None]
     dump: Final[Callable[[Any], Any] | None]
 
-class Validator:
+class Constraint:
     def __init__(self, fn: Callable[[Any], Any] | None = None) -> None: ...
     def __call__(self, value: Any) -> None: ...
 
 @final
-class NumericValidator(Validator):
+class NumericConstraint(Constraint):
     def __init__(
         self,
         *,
@@ -182,7 +182,7 @@ class NumericValidator(Validator):
     multiple_of: Final[int | float | None]
 
 @final
-class StrValidator(Validator):
+class StrConstraint(Constraint):
     def __init__(
         self,
         *,
@@ -195,7 +195,7 @@ class StrValidator(Validator):
     max_length: Final[int | None]
 
 @final
-class BytesValidator(Validator):
+class BytesConstraint(Constraint):
     def __init__(
         self,
         *,
@@ -206,7 +206,7 @@ class BytesValidator(Validator):
     max_length: Final[int | None]
 
 @final
-class CollectionValidator(Validator):
+class CollectionConstraint(Constraint):
     def __init__(
         self,
         *,
@@ -217,7 +217,7 @@ class CollectionValidator(Validator):
     max_length: Final[int | None]
 
 @final
-class TimezoneValidator(Validator):
+class TimezoneConstraint(Constraint):
     def __init__(self, *, tz: bool) -> None: ...
     tz: Final[bool]
 
