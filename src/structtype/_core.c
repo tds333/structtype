@@ -4733,15 +4733,6 @@ typedef struct {
 } TypeNodeSimple;
 
 typedef struct {
-    PyObject_HEAD
-    PyObject *int_lookup;
-    PyObject *str_lookup;
-    bool literal_none;
-    bool literal_bool_true;
-    bool literal_bool_false;
-} LiteralInfo;
-
-typedef struct {
     PyObject *key;
     TypeNode *type;
 } TypedDictField;
@@ -4829,7 +4820,6 @@ typedef struct StructInfo {
     TypeNode *types[];
 } StructInfo;
 
-static PyTypeObject LiteralInfo_Type;
 static PyTypeObject TypedDictInfo_Type;
 static PyTypeObject DataclassInfo_Type;
 static PyTypeObject NamedTupleInfo_Type;
@@ -10636,41 +10626,6 @@ PyDoc_STRVAR(Struct__doc__,
 ">>> {Point(1.5, 2.0): 1}  # frozen structs are hashable\n"
 "{Point(x=1.5, y=2.0): 1}"
 );
-
-static int
-LiteralInfo_traverse(LiteralInfo *self, visitproc visit, void *arg)
-{
-    Py_VISIT(self->str_lookup);
-    Py_VISIT(self->int_lookup);
-    return 0;
-}
-
-static int
-LiteralInfo_clear(LiteralInfo *self)
-{
-    Py_CLEAR(self->str_lookup);
-    Py_CLEAR(self->int_lookup);
-    return 0;
-}
-
-static void
-LiteralInfo_dealloc(LiteralInfo *self)
-{
-    PyObject_GC_UnTrack(self);
-    LiteralInfo_clear(self);
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-static PyTypeObject LiteralInfo_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype._core.LiteralInfo",
-    .tp_basicsize = sizeof(LiteralInfo),
-    .tp_itemsize = 0,
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-    .tp_clear = (inquiry)LiteralInfo_clear,
-    .tp_traverse = (traverseproc)LiteralInfo_traverse,
-    .tp_dealloc = (destructor)LiteralInfo_dealloc,
-};
 
 static PyObject *
 TypedDictInfo_Convert_lock_held(PyObject *obj) {
@@ -21249,8 +21204,6 @@ PyInit__core(void)
     if (PyType_Ready(&IntLookup_Type) < 0)
         return NULL;
     if (PyType_Ready(&StrLookup_Type) < 0)
-        return NULL;
-    if (PyType_Ready(&LiteralInfo_Type) < 0)
         return NULL;
     if (PyType_Ready(&TypedDictInfo_Type) < 0)
         return NULL;

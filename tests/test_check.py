@@ -783,3 +783,16 @@ def test_validator_top_level_struct_union_from_plain_object():
     out = adapter.struct_validate(ObjU2(), from_attributes=True)
     assert isinstance(out, U2)
     assert out == U2("hi")
+
+
+def test_validator_float_constraint_checked():
+    class RangedF(Struct):
+        x: Annotated[float, NumericConstraint(gt=0)]
+
+    assert RangedF.struct_validate({"x": 1.5}).x == 1.5
+    with pytest.raises(
+        structtype.ValidationError, match=r"Expected `float` > 0\.0"
+    ):
+        RangedF.struct_validate({"x": -1.0})
+    with pytest.raises(structtype.ValidationError):
+        RangedF.struct_validate({"x": 0.0})

@@ -18,9 +18,11 @@ All commands go through `make`.
 
 | Task | Command |
 |---|---|
-| Unit tests (reinstall + last-failed) | `make test-lf` |
+| Unit tests (reinstall + full suite) | `make test` |
 | Targeted tests | `uv run --reinstall pytest tests/test_json.py -k test_something` |
-| Coverage | `make test-cov` |
+| Coverage (Python) | `make test-cov` |
+| Coverage (Python + C) | `make test-cov-c` |
+| Tests in all supported Pythons | `make test-all` |
 | Build docs | `make docs` |
 | Format | `make format` |
 | Lint | `make ruff-check` |
@@ -63,7 +65,8 @@ Struct instances support the mapping protocol:
 
 ## Gotchas
 
-- `make test-cov` reinstalls the C extension before running (last-failed first)
+- `make test-cov` reinstalls the C extension before running. `make test-cov-c` builds an `-O0 --coverage` instrumented extension **in place**; afterwards any reinstalling target (`make test`, `make test-cov`) restores the optimized build.
+- C coverage requires `lcov`/`genhtml`; report lands in `htmlcov-c/`.
 - Validation matches keys by the **alias** name only, except `struct_validate(obj, from_attributes=True)` on a **non-dict object**, which matches by both the python field name and the alias. Dict/JSON input (even with `from_attributes=True`) and all dump/serialization use only the alias name.
 
 ## graphify

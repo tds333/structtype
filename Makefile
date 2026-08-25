@@ -36,9 +36,9 @@ test-cov-c: ## Run tests with Python + C coverage (lcov report in htmlcov-c/)
 	lcov --summary coverage-c.info
 	genhtml coverage-c.info --output-directory htmlcov-c >/dev/null
 
-.PHONY: test-lf
-test-lf: ## Run tests in current Python
-	uv run --reinstall pytest --lf
+.PHONY: test
+test: ## Run tests in current Python
+	uv run --reinstall pytest
 
 .PHONY: test-doc
 test-doc: ## Run doctests
