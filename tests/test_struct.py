@@ -94,6 +94,7 @@ def test_field_repr_roundtrip():
 def test_factory():
     f = structtype.Factory(list)
     assert f.factory is list
+    assert repr(f) == "<factory>"
 
     with pytest.raises(TypeError, match="factory must be callable"):
         structtype.Factory(1)
@@ -2012,9 +2013,37 @@ class TestRename:
 
     def test_field_name_no_change(self):
         class Test(Struct):
-            x: Annotated[int, Field(alias="x")]
+            x: int
 
         assert Test.__struct_fields__ is Test.__struct_alias_fields__
+
+    def test_rename_mapping(self):
+        class Test(Struct):
+            struct_config = StructConfig(rename={"x": "ex", "y": None})
+            x: int
+            y: int
+
+        assert Test.__struct_alias_fields__ == ("ex", "y")
+
+    def test_rename_mapping_dump(self):
+        class Test(Struct):
+            struct_config = StructConfig(rename={"my_field": "mf", "keep": None})
+            my_field: int = 0
+            keep: str = "s"
+
+        p = Test(2)
+        assert p.struct_dump() == {"mf": 2, "keep": "s"}
+        assert p.struct_dump_json() == b'{"mf":2,"keep":"s"}'
+
+    def test_rename_mapping_invalid_value_errors(self):
+        with pytest.raises(
+            TypeError,
+            match=r"Expected `rename\[field\]` to return a `str` or `None`, got `int`",
+        ):
+
+            class Bad(Struct):
+                struct_config = StructConfig(rename={"x": 42})
+                x: int
 
     def test_field_name_none(self):
         class Test(Struct):
@@ -2606,3 +2635,62 @@ class TestPostInit:
         x2 = x1.__copy__()
         assert x1 == x2
         assert count == 1
+
+
+class TestIterProtocol:
+    def test_iter_yields_declaration_order_pairs(self):
+        class Example(Struct):
+            a: int
+            b: str
+            c: float = 3.0
+
+        p = Example(1, "x")
+        assert list(p) == [("a", 1), ("b", "x"), ("c", 3.0)]
+        assert [t for t in p] == [("a", 1), ("b", "x"), ("c", 3.0)]
+
+    def test_iter_matches_dict_protocol(self):
+        class Example(Struct):
+            a: int
+            b: str = "x"
+
+        p = Example(1)
+        assert dict(p) == {"a": 1, "b": "x"}
+
+    def test_iter_two_tuple_unpacking(self):
+        class Example(Struct):
+            a: int
+            b: str
+
+        p = Example(1, "x")
+        names = []
+        values = []
+        for name, value in p:
+            names.append(name)
+            values.append(value)
+        assert names == ["a", "b"]
+        assert values == [1, "x"]
+
+    def test_iter_empty_struct(self):
+        class Example(Struct):
+            pass
+
+        assert list(Example()) == []
+        assert dict(Example()) == {}
+
+    def test_iter_frozen_struct(self):
+        class Example(Struct):
+            struct_config = StructConfig(frozen=True)
+            a: int
+            b: str = "y"
+
+        p = Example(1)
+        assert list(p) == [("a", 1), ("b", "y")]
+
+    def test_iter_kw_only_struct(self):
+        class Example(Struct):
+            struct_config = StructConfig(kw_only=True)
+            a: int
+            b: str
+
+        p = Example(a=1, b="x")
+        assert list(p) == [("a", 1), ("b", "x")]

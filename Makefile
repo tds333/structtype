@@ -26,6 +26,16 @@ wheels: ## build wheels
 test-cov: ## Run tests with coverage
 	uv run --reinstall-package structtype pytest --cov-report=term-missing --cov-config=pyproject.toml --cov=structtype
 
+.PHONY: test-cov-c
+test-cov-c: ## Run tests with Python + C coverage (lcov report in htmlcov-c/)
+	rm -rf build coverage-c.info coverage-c.info.* htmlcov-c
+	STRUCTTYPE_COVERAGE=1 uv run --with setuptools python setup.py build_ext --inplace --force
+	./.venv/bin/python -m pytest --cov-report=term-missing --cov-config=pyproject.toml --cov=structtype
+	lcov --capture --directory build --output-file coverage-c.info
+	lcov --extract coverage-c.info "*/src/structtype/*" --output-file coverage-c.info
+	lcov --summary coverage-c.info
+	genhtml coverage-c.info --output-directory htmlcov-c >/dev/null
+
 .PHONY: test-lf
 test-lf: ## Run tests in current Python
 	uv run --reinstall pytest --lf
@@ -110,7 +120,9 @@ clean: ## Delete all temporary files
 	rm -rf **/__pycache__
 	rm -rf build
 	rm -rf dist
+	rm -rf htmlcov-c
 	rm -f .coverage
+	rm -f coverage-c.info coverage-c.info.*
 
 .PHONY: install
 install: install-uv ## Install virtual environment

@@ -32,6 +32,11 @@ uv.lock
 .pytest/
 .pytest_cache/
 htmlcov/
+htmlcov-c/
+coverage-c.info
+coverage-c.info.*
+*.gcno
+*.gcda
 
 # Ruff Cache
 .ruff_cache/

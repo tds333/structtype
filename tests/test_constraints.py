@@ -9,6 +9,7 @@ import structtype
 from structtype import (
     BytesConstraint,
     CollectionConstraint,
+    Constraint,
     Field,
     NumericConstraint,
     Serializer,
@@ -245,6 +246,58 @@ class TestStrConstraintMetaObject:
         with pytest.raises(re.error):
             StrConstraint(pattern="[abc")
 
+    def test_rich_repr_empty(self):
+        assert StrConstraint().__rich_repr__() == []
+
+    def test_rich_repr_fields(self):
+        m = StrConstraint(min_length=2, max_length=5)
+        assert m.__rich_repr__() == [("min_length", 2), ("max_length", 5)]
+
+
+class TestBytesConstraintMetaObject:
+    def test_repr_empty(self):
+        assert repr(BytesConstraint()) == "structtype.BytesConstraint()"
+
+    def test_repr_multiple_fields(self):
+        c = BytesConstraint(min_length=1, max_length=5)
+        assert repr(c) == "structtype.BytesConstraint(min_length=1, max_length=5)"
+
+    def test_rich_repr_empty(self):
+        assert BytesConstraint().__rich_repr__() == []
+
+    def test_rich_repr_multiple_fields(self):
+        m = BytesConstraint(min_length=1, max_length=5)
+        assert m.__rich_repr__() == [("min_length", 1), ("max_length", 5)]
+
+    def test_equality(self):
+        assert_eq(BytesConstraint(max_length=5), BytesConstraint(max_length=5))
+        assert_ne(BytesConstraint(max_length=5), BytesConstraint(max_length=6))
+        assert_ne(BytesConstraint(), None)
+
+
+class TestCollectionConstraintMetaObject:
+    def test_repr_empty(self):
+        assert repr(CollectionConstraint()) == "structtype.CollectionConstraint()"
+
+    def test_repr_multiple_fields(self):
+        c = CollectionConstraint(min_length=1, max_length=5)
+        assert (
+            repr(c) == "structtype.CollectionConstraint(min_length=1, max_length=5)"
+        )
+
+    def test_rich_repr_empty(self):
+        assert CollectionConstraint().__rich_repr__() == []
+
+    def test_rich_repr_multiple_fields(self):
+        m = CollectionConstraint(min_length=1, max_length=5)
+        assert m.__rich_repr__() == [("min_length", 1), ("max_length", 5)]
+
+    def test_equality(self):
+        assert_eq(
+            CollectionConstraint(min_length=1), CollectionConstraint(min_length=1)
+        )
+        assert_ne(CollectionConstraint(min_length=1), "not a constraint")
+
 
 class TestTimezoneConstraintMetaObject:
     def test_bool_field(self):
@@ -252,6 +305,25 @@ class TestTimezoneConstraintMetaObject:
         TimezoneConstraint(tz=False)
         with pytest.raises(TypeError, match="`tz` must be a bool, got float"):
             TimezoneConstraint(tz=1.5)
+
+    def test_rich_repr_field(self):
+        m = TimezoneConstraint(tz=False)
+        assert m.__rich_repr__() == [("tz", False)]
+
+
+class TestConstraintBaseMetaObject:
+    def test_repr_empty(self):
+        assert repr(Constraint()) == "structtype.Constraint()"
+
+    def test_rich_repr_empty(self):
+        assert Constraint().__rich_repr__() == []
+
+    def test_default_fn_is_none(self):
+        assert Constraint().fn is None
+
+    def test_equality(self):
+        assert_eq(Constraint(), Constraint())
+        assert_ne(Constraint(), None)
 
 
 class TestSerializerMetaObject:
@@ -289,11 +361,32 @@ class TestSerializerMetaObject:
         r = repr(s)
         assert "dump=" in r and "load=" in r
 
+    def test_repr_only_dump(self):
+        assert repr(Serializer(dump=str)) == "structtype.Serializer(dump=<class 'str'>)"
+
+    def test_repr_only_load(self):
+        assert (
+            repr(Serializer(load=int)) == "structtype.Serializer(load=<class 'int'>)"
+        )
+
+    def test_rich_repr_only_dump(self):
+        s = Serializer(dump=str)
+        assert s.__rich_repr__() == [("dump", str)]
+
     def test_equality(self):
         a = Serializer(dump=repr)
         b = Serializer(dump=repr)
         assert a == b
         assert hash(a) == hash(b)
+
+    def test_inequality(self):
+        assert_ne(Serializer(dump=str), Serializer(load=int))
+        assert_ne(Serializer(dump=str), None)
+
+
+class TestJSONDecoderMetaObject:
+    def test_repr(self):
+        assert repr(JSONDecoder()) == "structtype.json.Decoder(typing.Any)"
 
 
 class TestInvalidConstraintAnnotations:

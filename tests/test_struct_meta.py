@@ -10,6 +10,8 @@ import pytest
 import structtype
 from structtype import Struct, StructMeta
 from structtype._core import _json_decode, _json_encode
+
+from .utils import temp_module
 from structtype import StructConfig
 
 
@@ -753,3 +755,49 @@ def test_struct_config_view_exposes_rename():
 
     cfg = S.__struct_config__
     assert cfg["rename"] == "camel"
+
+
+
+
+def test_many_literal_types_collect_cleanly():
+    """Hammering distinct Literal[...] annotations forces type-node cache
+    churn; creation and collection must not leak or crash the GC."""
+    import gc
+
+    from typing import Literal as Lit  # noqa: F401  (used via generated source)
+
+    for i in range(300):
+        src = (
+            "from typing import Literal\n"
+            "from structtype import Struct\n"
+            f"class L{i}(Struct):\n"
+            f"    v: Literal[{i}, 'x{i}'] = {i}\n"
+        )
+        with temp_module(src) as mod:
+            cls = getattr(mod, f"L{i}")
+            assert cls(v=i).v == i
+            del cls
+        if i % 50 == 0:
+            gc.collect()
+    gc.collect()
+
+
+def test_tag_field_conflicts_with_real_field():
+    from structtype import StructConfig as _SC
+
+    with pytest.raises(ValueError, match="conflicts with an existing field"):
+
+        class Conflict(structtype.Struct):
+            struct_config = _SC(tag=True, tag_field="a")
+            a: int
+
+
+def test_float_valued_enum_rejected_at_decode():
+    import enum as _enum
+
+    class FloatEnum(_enum.Enum):
+        X = 1.5
+
+    cls = type("UsesFloatEnum", (structtype.Struct,), {"__annotations__": {"v": FloatEnum}})
+    with pytest.raises(TypeError, match="all str or all int values"):
+        cls.struct_validate_json(b'{"v": 1.5}')

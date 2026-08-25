@@ -3094,3 +3094,348 @@ class TestHooksRemovedFromStruct:
         assert Msg(1).struct_dump(sort_keys=True) == {"x": 1}
         assert Msg.struct_validate_json(b'{"x":1}', strict=False).x == 1
         assert Msg.struct_validate({"x": 1}, strict=False, from_attributes=True).x == 1
+
+
+class TestLaxDecoding:
+    """`strict=False` accepts numeric/string coercions that strict decoding
+    rejects."""
+
+    def _struct(self, ann):
+        return type(
+            "Lax_" + getattr(ann, "__name__", "T"), (Struct,), {"__annotations__": {"v": ann}}
+        )
+
+    def test_datetime_from_epoch_int(self):
+        cls = self._struct(datetime.datetime)
+        msg = b'{"v": 1600000000}'
+        with pytest.raises(structtype.ValidationError):
+            cls.struct_validate_json(msg)
+        out = cls.struct_validate_json(msg, strict=False)
+        assert out.v == datetime.datetime(2020, 9, 13, 12, 26, 40, tzinfo=datetime.timezone.utc)
+
+    def test_datetime_from_epoch_float(self):
+        cls = self._struct(datetime.datetime)
+        out = cls.struct_validate_json(b'{"v": 1600000000.25}', strict=False)
+        assert out.v == datetime.datetime(
+            2020, 9, 13, 12, 26, 40, 250000, tzinfo=datetime.timezone.utc
+        )
+
+    def test_datetime_from_negative_float_fraction(self):
+        cls = self._struct(datetime.datetime)
+        out = cls.struct_validate_json(b'{"v": -0.5}', strict=False)
+        assert out.v == datetime.datetime(1969, 12, 31, 23, 59, 59, 500000, tzinfo=datetime.timezone.utc)
+
+    def test_datetime_uint64_overflow_errors(self):
+        cls = self._struct(datetime.datetime)
+        with pytest.raises(structtype.ValidationError, match="Timestamp is out of range"):
+            cls.struct_validate_json(b'{"v": 18446744073709551615}', strict=False)
+
+    def test_timedelta_from_int_and_float(self):
+        cls = self._struct(datetime.timedelta)
+        assert cls.struct_validate_json(b'{"v": 1000}', strict=False).v == datetime.timedelta(seconds=1000)
+        assert cls.struct_validate_json(b'{"v": 1.5}', strict=False).v == datetime.timedelta(seconds=1, microseconds=500000)
+
+    def test_bool_coercions_lax_only(self):
+        cls = self._struct(bool)
+        with pytest.raises(structtype.ValidationError):
+            cls.struct_validate_json(b'{"v": 1}')
+        assert cls.struct_validate_json(b'{"v": 1}', strict=False).v is True
+        assert cls.struct_validate_json(b'{"v": 0}', strict=False).v is False
+        assert cls.struct_validate_json(b'{"v": "true"}', strict=False).v is True
+
+    def test_int_from_string_lax_only(self):
+        cls = self._struct(int)
+        with pytest.raises(structtype.ValidationError):
+            cls.struct_validate_json(b'{"v": "5"}')
+        assert cls.struct_validate_json(b'{"v": "5"}', strict=False).v == 5
+
+    @pytest.mark.parametrize(
+        "literal,expected",
+        [(b'"NaN"', float("nan")), (b'"inf"', float("inf")), (b'"-Infinity"', float("-inf"))],
+    )
+    def test_nonfinite_number_strings_lax(self, literal, expected):
+        cls = self._struct(float)
+        with pytest.raises(structtype.ValidationError):
+            cls.struct_validate_json(b'{"v": ' + literal + b"}")
+        out = cls.struct_validate_json(b'{"v": ' + literal + b"}", strict=False)
+        if math.isnan(expected):
+            assert math.isnan(out.v)
+        else:
+            assert out.v == expected
+
+    def test_bigint_beyond_int64(self):
+        cls = self._struct(int)
+        big = 123456789012345678901234567890
+        out = cls.struct_validate_json(str(big).encode().join([b'{"v": ', b"}"]), strict=False)
+        assert out.v == big
+
+    def test_integral_float_coerces_to_int_lax(self):
+        cls = self._struct(int)
+        with pytest.raises(structtype.ValidationError):
+            cls.struct_validate_json(b'{"v": 3.5}', strict=False)
+        assert cls.struct_validate_json(b'{"v": 3.0}', strict=False).v == 3
+
+    def test_decimal_from_float_and_str(self):
+        cls = self._struct(decimal.Decimal)
+        assert cls.struct_validate_json(b'{"v": 1.75}', strict=False).v == Decimal("1.75")
+        assert cls.struct_validate_json(b'{"v": "1.75"}', strict=False).v == Decimal("1.75")
+
+
+class TestDumpGenericObjects:
+    def test_dataclass_field_dump(self):
+        @dataclass
+        class DC:
+            x: int
+            y: str
+
+        class Holder(Struct):
+            v: Any
+
+        p = Holder(DC(1, "a"))
+        assert p.struct_dump() == {"v": {"x": 1, "y": "a"}}
+        assert Holder(p.v).struct_dump_json() == b'{"v":{"x":1,"y":"a"}}'
+
+    def test_json_encode_dataclass_directly(self):
+        @dataclass
+        class DC:
+            x: int
+
+        msg = JSONEncoder().encode(DC(7))
+        assert json.loads(msg) == {"x": 7}
+
+    def test_attrs_instance_dump(self):
+        attr = pytest.importorskip("attr")
+
+        @attr.s
+        class AC:
+            x = attr.ib(type=int)
+
+        class Holder(Struct):
+            v: Any
+
+        p = Holder(AC(3))
+        assert p.struct_dump() == {"v": {"x": 3}}
+
+    def test_json_encode_attrs_object(self):
+        attr = pytest.importorskip("attr")
+
+        @attr.s
+        class AC:
+            x = attr.ib()
+
+        assert json.loads(JSONEncoder().encode(AC(4))) == {"x": 4}
+
+
+class TestEncoderAttributeGetters:
+    def test_sort_keys_getter(self):
+        enc = JSONEncoder(sort_keys=True)
+        assert enc.sort_keys is True
+        assert JSONEncoder().sort_keys is False
+
+    def test_decimal_format_getter(self):
+        assert JSONEncoder(decimal_format="number").decimal_format == "number"
+
+    def test_uuid_format_getter(self):
+        assert JSONEncoder(uuid_format="canonical").uuid_format == "canonical"
+
+
+class TestBufferAndSkipResilience:
+    def test_large_payload_roundtrip_grows_buffers(self):
+        class Big(Struct):
+            s: str
+            xs: list[int]
+
+        long_str = "x" * 200_001
+        many = list(range(5000))
+        big = Big(long_str, many)
+        buf = big.struct_dump_json()
+        out = Big.struct_validate_json(buf)
+        assert out.s == long_str and out.xs == many
+
+    def test_unknown_fields_skip_torture(self):
+        class Msg(Struct):
+            v: int
+
+        js = (
+            b'{"pad1": {"a": [1, {"b": "esc\\"aped\\u00e9"}], "c": null},'
+            b' "pad2": [[[[1]]]], "pad3": "tab\\there",'
+            b' "v": 9}'
+        )
+        assert Msg.struct_validate_json(js).v == 9
+
+
+class TestRemainingCPaths:
+    def test_datetime_from_negative_epoch_int(self):
+        cls = type(
+            "LaxNegDT", (Struct,), {"__annotations__": {"v": datetime.datetime}}
+        )
+        out = cls.struct_validate_json(b'{"v": -1600000000}', strict=False)
+        assert out.v == datetime.datetime(1919, 4, 20, 11, 33, 20, tzinfo=datetime.timezone.utc)
+
+    def test_timedelta_from_negative_int(self):
+        cls = type("LaxNegTD", (Struct,), {"__annotations__": {"v": datetime.timedelta}})
+        out = cls.struct_validate_json(b'{"v": -1000}', strict=False)
+        assert out.v == datetime.timedelta(days=-1, seconds=85400)
+
+    def test_float_constraint_checked_on_json_decode(self):
+        from typing import Annotated as A
+
+        from structtype import NumericConstraint
+
+        class Ranged(Struct):
+            x: A[float, NumericConstraint(gt=0)]
+
+        assert Ranged.struct_validate_json(b'{"x": 1.5}').x == 1.5
+        with pytest.raises(structtype.ValidationError, match="> 0"):
+            Ranged.struct_validate_json(b'{"x": -1.0}')
+
+    def test_struct_dump_sort_keys_sorts_dict_fields(self):
+        class WithDict(Struct):
+            d: dict[str, int]
+
+        p = WithDict({"b": 1, "a": 2})
+        assert p.struct_dump(sort_keys=True) == {"d": {"a": 2, "b": 1}}
+
+    def test_decimal_format_callable_returning_decimal_errors(self):
+        enc = JSONEncoder(decimal_format=lambda d: {"wrapped": d})
+        with pytest.raises(TypeError, match="containing a Decimal"):
+            enc.encode({"a": Decimal("1.5")})
+
+
+class TestSubMicrosecondRounding:
+    def test_time_7_digit_fraction_rounds_up(self):
+        cls = type("RT", (Struct,), {"__annotations__": {"v": datetime.time}})
+        out = cls.struct_validate_json(b'{"v": "01:02:03.1234567"}', strict=False)
+        assert out.v == datetime.time(1, 2, 3, 123457)
+
+    def test_datetime_7_digit_fraction_rounds_up(self):
+        cls = type("RDT", (Struct,), {"__annotations__": {"v": datetime.datetime}})
+        out = cls.struct_validate_json(
+            b'{"v": "2020-01-01T00:00:00.1234567"}', strict=False
+        )
+        assert out.v == datetime.datetime(2020, 1, 1, 0, 0, 0, 123457)
+
+
+class TestGcTraversal:
+    def test_encoder_traversed_by_gc(self):
+        calls = []
+        enc = JSONEncoder(decimal_format=lambda d: calls.append(d) or str(d))
+        enc.encode(Decimal("1.5"))
+        gc.collect()
+        assert enc.decimal_format is not None  # encoder still functional
+
+    def test_literal_structs_alive_across_gc(self):
+        from typing import Literal as Lit
+
+        class LitHold(Struct):
+            v: Lit["a", "b"] = "a"
+
+        keep = [LitHold(), LitHold("b")]
+        for _ in range(3):
+            gc.collect()
+        assert keep[1].v == "b"
+
+
+def test_bool_from_negative_int_lax_hits_int64_path():
+    cls = type("LaxNegBool", (Struct,), {"__annotations__": {"v": bool}})
+    with pytest.raises(structtype.ValidationError, match="Expected `bool`"):
+        cls.struct_validate_json(b'{"v": -1}', strict=False)
+
+
+def test_literal_info_shutdown_teardown_subprocess():
+    """A child interpreter creating Literal-backed structs then exiting merges
+    its shutdown-time teardown into the same coverage data."""
+    import subprocess
+    import sys
+
+    code = (
+        "from typing import Literal\n"
+        "from structtype import Struct\n"
+        "class L(Struct):\n"
+        "    v: Literal['a', 'b'] = 'a'\n"
+        "assert L().v == 'a'\n"
+        "import gc; gc.collect()\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+
+
+class TestEncoderOptionValidation:
+    def test_invalid_uuid_format(self):
+        with pytest.raises(ValueError, match="`uuid_format` must be 'canonical' or 'hex'"):
+            JSONEncoder(uuid_format="bogus")
+
+    def test_invalid_decimal_format(self):
+        with pytest.raises(
+            ValueError,
+            match="`decimal_format` must be 'string', 'number', or a callable",
+        ):
+            JSONEncoder(decimal_format=42)
+
+    def test_sort_keys_is_truthy_checked(self):
+        # non-bool values are accepted and normalized by truthiness
+        assert JSONEncoder(sort_keys="yes").sort_keys is True
+
+    def test_encode_unsupported_object(self):
+        with pytest.raises(TypeError, match="Encoding objects of type object"):
+            JSONEncoder().encode(object())
+
+    def test_encode_set_of_frozensets(self):
+        assert JSONEncoder().encode({frozenset([1])}) == b"[[1]]"
+
+
+class TestCustomCodecErrorPaths:
+    def _struct(self, serializer):
+        return type(
+            "CodecT",
+            (Struct,),
+            {
+                "__annotations__": {
+                    "t": Annotated[self._target(), serializer]
+                }
+            },
+        )
+
+    def _target(self):
+        class T:
+            def __init__(self, v):
+                self.v = v
+
+        return T
+
+    def test_load_exception_propagates(self):
+        import structtype as st
+
+        target = self._target()
+
+        def bad_load(v):
+            raise RuntimeError("boom")
+
+        ser = st.Serializer(load=bad_load, dump=lambda t: t.v)
+        cls = self._struct(ser)
+        with pytest.raises(RuntimeError, match="boom"):
+            cls.struct_validate_json(b'{"t": 5}')
+
+    def test_load_return_value_trusted(self):
+        import structtype as st
+
+        ser = st.Serializer(load=lambda v: 42, dump=int)
+        cls = self._struct(ser)
+        out = cls.struct_validate_json(b'{"t": 5}')
+        assert out.t == 42
+
+
+class TestMalformedTemporalStrings:
+    @pytest.mark.parametrize("bad", [b'"PT"', b'"1S"', b'"P999999999999DT23H"'])
+    def test_invalid_durations(self, bad):
+        cls = type("TDm", (Struct,), {"__annotations__": {"v": datetime.timedelta}})
+        with pytest.raises(structtype.ValidationError):
+            cls.struct_validate_json(b'{"v": ' + bad + b"}")
+
+    @pytest.mark.parametrize("bad", [b'"nonsense"', b'""'])
+    def test_invalid_datetimes(self, bad):
+        cls = type("DTm", (Struct,), {"__annotations__": {"v": datetime.datetime}})
+        with pytest.raises(
+            structtype.ValidationError, match="Invalid RFC3339 encoded datetime"
+        ):
+            cls.struct_validate_json(b'{"v": ' + bad + b"}")
