@@ -33,7 +33,7 @@ the ``Field`` and ``Constraint`` instances it contains.
 
     ``from __future__ import annotations`` is fully supported — lazy string
     annotations are resolved at class creation, so ``Field`` metadata,
-    ``Constraint`` constraints, and ``Serializer`` codecs work exactly as with
+    ``Constraint`` constraints and ``Serializer`` objects work exactly as with
     eager annotations. Forward references that can't be resolved at class
     creation (e.g. self-referential types) are left for the decode-time
     resolver.

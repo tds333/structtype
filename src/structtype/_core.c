@@ -2348,7 +2348,7 @@ static PyTypeObject Serializer_Type;
 
 typedef struct {
     PyObject_HEAD
-    /* Codec callables: serializable <-> custom conversion */
+    /* Serializer callables: custom <-> serializable conversion */
     PyObject *load;  /* serializable value -> custom object */
     PyObject *dump;  /* custom object -> serializable value */
 } Serializer;
@@ -2623,7 +2623,7 @@ Constraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     return (PyObject *)self;
 }
 
-/* Calling a validator invokes its stored callable with the value (the
+/* Calling a constraint invokes its stored callable with the value (the
  * return value is ignored); without one it is a no-op */
 static PyObject *
 Constraint_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
@@ -2725,7 +2725,7 @@ Constraint_hash(Constraint *self) {
     Py_ssize_t nfields = 0;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
 
-    /* Fold the exact type into the hash so different validator types hash
+    /* Fold the exact type into the hash so different constraint types hash
      * differently — prevents Python 3.10's typing.Annotated cache from
      * collapsing Annotated[int, Constraint()] and Annotated[int, Subclass()]. */
     Py_uhash_t type_lane = (Py_uhash_t)(Py_TYPE(self));
@@ -4924,16 +4924,17 @@ TypeNode_get_custom(TypeNode *type) {
 
 static MS_INLINE PyObject *
 TypeNode_get_codec(TypeNode *type) {
-    /* Codecs are only valid on custom types, which occupy the first detail
-     * slot; the codec (a Serializer*) is therefore always the next one.
-     * A user validator may follow it (details[2]), but never precede it. */
+    /* Serializers are only valid on custom types, which occupy the first
+     * detail slot; the Serializer is therefore always the next one.
+     * A user-defined Constraint may follow it (details[2]), but never
+     * precede it. */
     return type->details[1].pointer;
 }
 
 static MS_INLINE PyObject *
 TypeNode_get_user_validator(TypeNode *type) {
-    /* The validator packs after the object details (SLOT_00..SLOT_04) and an
-     * optional codec, but BEFORE regex/dict/array/scalar constraint details,
+    /* The Constraint packs after the object details (SLOT_00..SLOT_04) and an
+     * optional Serializer, but BEFORE regex/dict/array/scalar constraint details,
      * so only those preceding slots may be counted here. */
     Py_ssize_t i = ms_popcount(
         type->types & (
@@ -5521,7 +5522,7 @@ typenode_collect_constraints(
     if (constraints == NULL) return 0;
     if (constraints_is_empty(constraints)) return 0;
 
-    /* Serializers (codecs) are only supported on custom (non-native) types */
+    /* Serializers are only supported on custom (non-native) types */
     if (constraints->serializer != NULL) {
         bool is_custom = (
             state->custom_obj != NULL &&
@@ -5530,7 +5531,7 @@ typenode_collect_constraints(
         if (!is_custom) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`Serializer(load=...)`/`Serializer(dump=...)` codecs can only be "
+                "`Serializer(load=...)`/`Serializer(dump=...)` can only be "
                 "used on custom types - type `%R` is invalid",
                 obj
             );
@@ -5542,7 +5543,7 @@ typenode_collect_constraints(
     }
 
     /* Fast `Constraint` subclasses lower into the same constraint machinery as
-     * constraints via `Constraint` subclasses; base/user-defined validators are kept
+     * constraints via `Constraint` subclasses; user-defined constraints are kept
      * as instances for the decode path. */
     if (constraints->validator != NULL) {
         Constraint *validator = (Constraint *)constraints->validator;
@@ -6570,8 +6571,8 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
  *   applied to work around differences in type spelling (List vs list) and
  *   python version.
  * - `args`: `__args__` on `t` (if present)
- * - `constraints`: Any constraints from `Constraint` objects and the codec
- *   (`Serializer`) / validator (`Constraint`) annotated on the type
+ * - `constraints`: Any constraints from `Constraint` objects and the
+ *   `Serializer` / `Constraint` annotated on the type
  */
 static PyObject *
 typenode_origin_args_metadata(
@@ -6616,7 +6617,7 @@ typenode_origin_args_metadata(
                     PyObject *annot = PyTuple_GET_ITEM(metadata, i);
                     if (Py_TYPE(annot) == &Serializer_Type) {
                         Serializer *ser = (Serializer *)annot;
-                        /* An empty Serializer carries no codecs - ignore it,
+                        /* An empty Serializer carries no dump - ignore it,
                          * matching the old inert `Field()` behavior. */
                         if (ser->load == NULL && ser->dump == NULL) continue;
                         if (constraints->serializer != NULL) {
@@ -7489,7 +7490,7 @@ typedef struct {
     Py_ssize_t hash_offset;
     bool has_non_slots_bases;
     PyObject *resolved_annotations;
-    PyObject *codec_maps;  /* tuple of per-field codec dicts, or NULL */
+    PyObject *codec_maps;  /* tuple of per-field Serializer dicts, or NULL */
 } StructMetaInfo;
 
 static int
@@ -7897,7 +7898,7 @@ done:
     return out;
 }
 
-/* Add `dump` for `base_type` to a per-field codec map, erroring when the same
+/* Add `dump` for `base_type` to a per-field Serializer map, erroring when the same
  * base type is registered with a different `dump` within one field. */
 static int
 codec_map_set(PyObject *codecs, PyObject *base_type, PyObject *dump, PyObject *ctx) {
@@ -7917,7 +7918,7 @@ codec_map_set(PyObject *codecs, PyObject *base_type, PyObject *dump, PyObject *c
     return PyDict_SetItem(codecs, base_type, dump);
 }
 
-/* Classify a resolved type into its constraint kind for validator-applicability
+/* Classify a resolved type into its constraint kind for constraint-applicability
  * checks at class creation time.  Returns CK_OTHER for types whose kind cannot
  * be determined statically (unions, forward refs, unknown generics) so the
  * caller can defer to the lazy decoder-build check. */
@@ -8018,7 +8019,7 @@ validate_fast_validator_kind(
 /* Recursively walk an annotation, enforcing composition rules (at most one
  * Field, Serializer, and Constraint per Annotated position), validating
  * Constraint-vs-type-kind applicability, and collecting Serializer.dump
- * codecs into a per-field codec map. */
+ * Serializers into a per-field Serializer map. */
 static int
 codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyObject *ctx) {
     PyObject *t = ann;
@@ -8032,7 +8033,7 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
     PyObject *validator_obj = NULL;
 
     /* Strip Annotated wrappers, enforcing composition rules and collecting
-     * Serializers/codecs at each level. */
+     * Serializers at each level. */
     while (Py_TYPE(t) == (PyTypeObject *)(mod->typing_annotated_alias)) {
         PyObject *origin = PyObject_GetAttr(t, mod->str___origin__);
         if (origin == NULL) goto error;
@@ -8170,7 +8171,7 @@ error:
     return out;
 }
 
-/* Build per-field codec maps ({base_type: dump}) from field annotations.
+/* Build per-field Serializer maps ({base_type: dump}) from field annotations.
  * Delegates per-position work to the unified codec_walk_annotation which now
  * also enforces composition rules and Constraint applicability.  Fields
  * inherited from struct base classes keep their base codec maps. */

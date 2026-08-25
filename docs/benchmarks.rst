@@ -177,7 +177,7 @@ on every field, comparing against an equivalent ``pydantic`` schema using
 ``Field(gt=, le=, min_length=, max_length=, pattern=)`` plus
 ``@field_validator`` / ``@field_serializer``.
 
-Each field carries either a constraint check or a custom-type codec:
+Each field carries either a constraint check or a custom-type Serializer:
 
 - numeric constraints (``NumericConstraint`` ↔ ``Field(gt=, le=)``)
 - string constraints (``StrConstraint`` ↔ ``Field(min_length=, pattern=)``)
@@ -189,7 +189,7 @@ Operations measured, all over 500 orders:
 
 - ``Load`` — ``struct_validate`` vs ``model_validate`` (validators on input)
 - ``Dump`` — ``struct_dump`` vs ``model_dump`` (dump serializers)
-- ``Load JSON`` / ``Dump JSON`` — the same via the JSON codecs
+- ``Load JSON`` / ``Dump JSON`` — the same via JSON serialization
 - ``Init (no validation)`` — constructor only. structtype does **not**
   validate on ``__init__`` by default; pydantic always does.
 - ``Init (with validation)`` — the same with ``check_types_on_init=True`` on the
@@ -232,7 +232,7 @@ Run it with ``make bench-validators``.
       structtype            474.1 μs   (1.00x)
       pydantic              897.9 μs   (1.89x)
 
-With every field doing validation or codec conversion work, structtype is
+With every field doing validation or Serializer conversion work, structtype is
 ~1.9–6x faster than pydantic on load/dump operations. The largest gap is
 construction: structtype's default (no init validation) is ~8.7x faster, and
 even with ``check_types_on_init=True`` it is still ~1.9x faster than pydantic's

@@ -211,7 +211,7 @@ Serializer
 
         A callable converting a custom-type value into a value composed of
         :doc:`natively supported <supported-types>` types. Used during
-        encoding. Only valid for custom types; attaching a ``dump`` codec to a
+        encoding. Only valid for custom types; attaching a ``dump=`` Serializer to a
         natively supported type or a union (including optional types such as
         ``Annotated[complex | None, ...]``) raises a ``TypeError`` — at
         class creation time for ``Struct``, at construction for
@@ -228,7 +228,7 @@ Serializer
         ``struct_check_types`` / ``check_types_on_init``, if the field value is
         not already an instance of the custom type, a ``ValidationError`` is
         raised instead — ``load`` is **not** called. Only valid for custom
-        types; attaching a ``load`` codec to a natively supported type or a
+        types; attaching a ``load=`` Serializer to a natively supported type or a
         union (including optional types such as
         ``Annotated[complex | None, ...]``) raises a ``TypeError`` — at
         class creation time for ``Struct``, at construction for

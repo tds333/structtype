@@ -1280,7 +1280,7 @@ several configuration options:
 Custom types — types other than those :doc:`natively supported
 <supported-types>` — are handled by implementing the ``struct_dump`` /
 ``struct_validate`` protocol methods on the type, or by attaching a
-``Serializer(dump=..., load=...)`` codec to the field annotation. See
+``Serializer(dump=..., load=...)`` to the field annotation. See
 :doc:`extending`.
 
 Mapping Protocol
@@ -1348,7 +1348,7 @@ String-constructible custom types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For a *custom* type that is constructed from a single string argument
-(``IPv4Address``, ``HttpUrl``, ...), attach :class:`Serializer` codecs:
+(``IPv4Address``, ``HttpUrl``, ...), attach a :class:`Serializer`:
 
 .. code-block:: python
 
@@ -1364,7 +1364,7 @@ For a *custom* type that is constructed from a single string argument
 
 The field stores the ``IPv4Address`` object: ``dump=str`` serializes it to a
 string and ``load=IPv4Address`` parses it back. See :doc:`extending` for
-details on per-field codecs.
+details on per-field Serializers.
 
 
 .. _type annotations: https://docs.python.org/3/library/typing.html

@@ -8,8 +8,8 @@ To encode and decode types other than those :doc:`natively supported
   ``struct_validate`` methods. Pydantic's ``model_dump`` / ``model_validate``
   are also recognized. This is the primary mechanism: it works for any custom
   type and nests automatically.
-- **Per-field codecs** — an ``Annotated[X, Serializer(dump=..., load=...)]``
-  attaches codecs to a single field. This is the escape hatch for types that
+- **Per-field Serializers** — an ``Annotated[X, Serializer(dump=..., load=...)]``
+  attaches a Serializer to a single field. This is the escape hatch for types that
   can't declare methods, such as builtins or third-party types you don't
   control.
 
@@ -108,8 +108,8 @@ Annotation escape hatch
 -----------------------
 
 Some types can't implement the protocol. This includes builtins like
-`complex` and third-party types you don't control. For these, attach codecs
-to the field itself with :class:`Serializer`:
+`complex` and third-party types you don't control. For these, attach a
+:class:`Serializer` to the field itself:
 
 .. code-block:: python
 
@@ -140,8 +140,9 @@ to the field itself with :class:`Serializer`:
 - A ``load``-only serializer controls decoding; encoding falls back to the
   protocol, or fails with a ``TypeError``.
 
-Codecs are per-field. Different fields may use different codecs for the same
-type, and a field's codec applies wherever the annotated type appears within
+Serializers are per-field. Different fields may use different Serializers for
+the same type, and a field's Serializer applies wherever the annotated type
+appears within
 that field — including nested inside lists, dicts, and tuples:
 
 .. code-block:: python
@@ -151,7 +152,7 @@ that field — including nested inside lists, dicts, and tuples:
         b: Annotated[complex, Serializer(dump=dump_real)]        # -> real
         values: list[Annotated[complex, Serializer(dump=dump_pair)]]
 
-Codecs may only be attached to a *custom* type. ``structtype`` validates
+Serializers may only be attached to a *custom* type. ``structtype`` validates
 this when the class is created, raising a ``TypeError`` when:
 
 - the type is :doc:`natively supported <supported-types>` — this covers the
@@ -165,14 +166,14 @@ this when the class is created, raising a ``TypeError`` when:
 - the type is a union — including optional types such as
   ``Annotated[complex | None, Serializer(dump=...)]``
   (``Annotated[int | str, Serializer(dump=...)]``),
-- two different ``dump`` codecs apply within a single field, e.g.
+- two different ``dump=`` Serializers apply within a single field, e.g.
   ``tuple[Annotated[complex, Serializer(dump=a)], Annotated[complex, Serializer(dump=b)]]``.
 
 *Subclasses* of natively supported types are classified as custom types, so
-codecs attach fine to them — see :ref:`native-subclass-formats` below for the
+Serializers attach fine to them — see :ref:`native-subclass-formats` below for the
 recommended pattern.
 
-Codecs are only supported on :class:`Struct` fields.
+Serializers are only supported on :class:`Struct` fields.
 :class:`StructAdapter` rejects annotations containing a ``Serializer`` —
 use the protocol methods on the type there, or a :class:`Struct`:
 
@@ -235,11 +236,11 @@ project. These are the common Python stdlib types that ``structtype`` doesn't
 
 These aliases nest (``list[Complex]``, ``dict[str, Fraction]``), and the
 ``dump`` / ``load`` callables must map to :doc:`natively supported
-<supported-types>` values. Codec aliases are supported on :class:`Struct`
+<supported-types>` values. Serializer aliases are supported on :class:`Struct`
 fields only — :class:`StructAdapter` rejects them (see above). For types you
 control, prefer the ``struct_dump`` / ``struct_validate`` protocol methods.
 Single-argument string-constructible types such as ``IPv4Address`` may also use
-``Annotated[T, Serializer(dump=str, load=T)]`` codecs.
+``Annotated[T, Serializer(dump=str, load=T)]`` directly.
 
 .. _native-subclass-formats:
 
@@ -342,7 +343,7 @@ A reusable helper:
                                        load=ta.validate_python)]
 
 Like the stdlib recipes above, this applies to :class:`Struct` fields only
-(``StructAdapter`` rejects codec'd annotations). pydantic ``BaseModel`` types
+(``StructAdapter`` rejects Serializer annotations). pydantic ``BaseModel`` types
 themselves are handled automatically via the ``model_dump`` /
 ``model_validate`` protocol described above.
 
