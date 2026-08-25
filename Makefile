@@ -23,8 +23,8 @@ wheels: ## build wheels
 
 ##@ Quality
 .PHONY: test-cov
-test-cov: build ## Run tests with coverage
-	uv run pytest --cov-report=term-missing --cov-config=pyproject.toml --cov=structtype
+test-cov: ## Run tests with coverage
+	uv run --reinstall-package structtype pytest --cov-report=term-missing --cov-config=pyproject.toml --cov=structtype
 
 .PHONY: test-lf
 test-lf: ## Run tests in current Python
