@@ -1,11 +1,15 @@
 import base64
 import datetime
+import decimal
+import enum
 import re
 import sys
-from typing import Annotated, Optional, Union
+import uuid
+from typing import Annotated, Any, Literal, Optional, Union
 
 import pytest
 
+import structtype
 from structtype import (
     BytesConstraint,
     CollectionConstraint,
@@ -1786,3 +1790,244 @@ class TestConstraintApplicability:
         with pytest.raises(TypeError, match="NumericConstraint.*numeric"):
             class Bad(Struct):
                 x: list[Annotated[str, NumericConstraint(ge=0)]]
+
+
+
+
+class TestNativeSubclassCodecs:
+    """Subclasses of natively supported types count as custom types, so they
+    accept per-field ``Serializer`` codecs (docs/extending.rst,
+    "Custom formats for natively supported types")."""
+
+    FMT = "%d/%m/%Y %H:%M"
+
+    def test_datetime_subclass_roundtrip(self):
+        class EuroDT(datetime.datetime):
+            @classmethod
+            def parse(cls, value):
+                if isinstance(value, EuroDT):
+                    return value
+                return cls.strptime(value, self.FMT)
+
+        ser = Serializer(dump=lambda d: d.strftime(self.FMT), load=EuroDT.parse)
+
+        class Event(Struct):
+            when: Annotated[EuroDT, ser]
+
+        msg = Event.struct_validate_json(b'{"when": "05/06/2020 14:30"}')
+        assert isinstance(msg.when, datetime.datetime)
+        assert msg.when.year == 2020 and msg.when.hour == 14
+        assert msg.struct_dump_json() == b'{"when":"05/06/2020 14:30"}'
+        assert Event.struct_validate_json(msg.struct_dump_json()) == msg
+
+    def test_str_subclass_normalizes_on_both_paths(self):
+        class Lower(str):
+            @classmethod
+            def parse(cls, value):
+                if isinstance(value, Lower):
+                    return value
+                return cls(str(value).lower())
+
+        ser = Serializer(dump=str, load=Lower.parse)
+
+        class User(Struct):
+            name: Annotated[Lower, ser]
+
+        assert User.struct_validate_json(b'{"name": "ALICE"}').name == "alice"
+        assert User.struct_validate({"name": "BOB"}).name == "bob"
+
+    def test_int_and_bytes_subclass_codecs(self):
+        class Milli(int):
+            @classmethod
+            def parse(cls, value):
+                return cls(int(value))
+
+        class Hex(bytes):
+            pass
+
+        class Item(Struct):
+            cents: Annotated[
+                Milli,
+                Serializer(dump=lambda m: str(int(m)), load=Milli.parse),
+            ]
+            blob: Annotated[
+                Hex,
+                Serializer(dump=lambda b: b.hex().upper(), load=lambda s: Hex.fromhex(s)),
+            ]
+
+        out = Item.struct_validate_json(b'{"cents": "1999", "blob": "00ff10"}')
+        assert out.cents == 1999 and isinstance(out.cents, int)
+        assert out.cents + 1 == 2000
+        assert out.blob == bytes.fromhex("00ff10")
+        assert out.struct_dump_json() == b'{"cents":"1999","blob":"00FF10"}'
+
+    def test_instance_passthrough_skips_load(self):
+        calls = []
+
+        class Marker(str):
+            pass
+
+        def load(value):
+            calls.append(value)
+            return Marker(value)
+
+        class Holder(Struct):
+            name: Annotated[Marker, Serializer(dump=str, load=load)]
+
+        marker = Marker("already")
+        assert Holder.struct_validate({"name": marker}).name is marker
+        assert calls == []  # already an instance: load skipped
+
+        Holder.struct_validate({"name": "raw"})
+        assert len(calls) == 1
+
+    def test_base_instance_routed_through_load_and_wraps_errors(self):
+        class EuroDT(datetime.datetime):
+            @classmethod
+            def parse(cls, value):
+                return cls.strptime(value, "%d/%m/%Y")  # rejects non-str
+
+        class Holder(Struct):
+            when: Annotated[EuroDT, Serializer(dump=str, load=EuroDT.parse)]
+
+        # base-class instances are not the subclass, so load() runs on them
+        with pytest.raises(ValidationError, match="strptime"):
+            Holder.struct_validate({"when": datetime.datetime(2020, 1, 1)})
+
+    def test_optional_and_nested_containers(self):
+        class Lower(str):
+            @classmethod
+            def parse(cls, value):
+                if isinstance(value, Lower):
+                    return value
+                return cls(str(value).lower())
+
+        ser = Serializer(dump=str, load=Lower.parse)
+
+        class Batch(Struct):
+            primary: Optional[Annotated[Lower, ser]] = None
+            tags: list[Annotated[Lower, ser]] = []
+
+        out = Batch.struct_validate_json(b'{"primary": null, "tags": ["A", "B"]}')
+        assert out.primary is None
+        assert all(isinstance(t, Lower) for t in out.tags)
+        assert [str(t) for t in out.tags] == ["a", "b"]
+        assert out.struct_dump_json() == b'{"primary":null,"tags":["a","b"]}'
+
+    def test_bare_subclass_without_codec_needs_protocol(self):
+        class Plain(datetime.datetime):
+            pass
+
+        class NoCodec(Struct):
+            when: Plain
+
+        # no native fallback for custom-classified subclasses
+        with pytest.raises(structtype.ValidationError):
+            NoCodec.struct_validate_json(b'{"when": "2020-01-01T00:00:00"}')
+        with pytest.raises(TypeError):
+            NoCodec(Plain(2020, 1, 1)).struct_dump_json()
+
+        # protocol methods make it work without any annotation
+        class WithProtocol(datetime.datetime):
+            def struct_dump(self):
+                return self.isoformat()
+
+            @classmethod
+            def struct_validate(cls, obj):
+                if isinstance(obj, WithProtocol):
+                    return obj
+                return cls.fromisoformat(obj)
+
+        class Ok(Struct):
+            when: WithProtocol
+
+        ok = Ok.struct_validate_json(b'{"when": "2020-01-01T12:00:00"}')
+        assert isinstance(ok.when, WithProtocol)
+        assert ok.struct_dump_json() == b'{"when":"2020-01-01T12:00:00"}'
+
+
+class _Point(Struct):
+    x: int
+
+
+
+
+class _Point(Struct):
+    x: int
+
+
+class _Color(enum.Enum):
+    R = "r"
+
+
+def _ser():
+    return Serializer(load=int, dump=str)
+
+
+@pytest.mark.parametrize(
+    "ann_factory",
+    [
+        lambda: Annotated[bool, _ser()],
+        lambda: Annotated[int, _ser()],
+        lambda: Annotated[float, _ser()],
+        lambda: Annotated[str, _ser()],
+        lambda: Annotated[bytes, _ser()],
+        lambda: Annotated[bytearray, _ser()],
+        lambda: Annotated[memoryview, _ser()],
+        lambda: Annotated[datetime.datetime, _ser()],
+        lambda: Annotated[datetime.date, _ser()],
+        lambda: Annotated[datetime.time, _ser()],
+        lambda: Annotated[datetime.timedelta, _ser()],
+        lambda: Annotated[uuid.UUID, _ser()],
+        lambda: Annotated[decimal.Decimal, _ser()],
+        lambda: Annotated[Any, _ser()],
+        lambda: Annotated[type(None), _ser()],
+        lambda: Annotated[Literal["x"], _ser()],
+        lambda: Annotated[list[int], _ser()],
+        lambda: Annotated[list, _ser()],
+        lambda: Annotated[dict[str, int], _ser()],
+        lambda: Annotated[tuple[int, ...], _ser()],
+        lambda: Annotated[set[int], _ser()],
+        lambda: Annotated[frozenset[int], _ser()],
+        lambda: Annotated[int | str, _ser()],
+        lambda: Annotated[Optional[int], _ser()],
+        lambda: Annotated[_Color, _ser()],
+        lambda: Annotated[structtype.Raw, _ser()],
+        lambda: Annotated[_Point, _ser()],
+    ],
+    ids=[
+        "bool", "int", "float", "str", "bytes", "bytearray", "memoryview",
+        "datetime", "date", "time", "timedelta", "uuid", "decimal",
+        "any", "none", "literal", "list", "bare-list", "dict", "tuple",
+        "set", "frozenset", "union", "optional", "enum", "raw",
+        "nested-struct",
+    ],
+)
+def test_native_types_reject_serializer(ann_factory):
+    with pytest.raises(TypeError, match="only be used on custom types"):
+        type(
+            f"Reject_{abs(hash(str(ann_factory)))}",
+            (Struct,),
+            {"__annotations__": {"v": ann_factory()}},
+        )
+
+
+def test_subclasses_of_natives_accept_serializer():
+    class SubInt(int):
+        pass
+
+    class SubStr(str):
+        pass
+
+    class SubDT(datetime.datetime):
+        pass
+
+    class SubBytes(bytes):
+        pass
+
+    for sub in (SubInt, SubStr, SubDT, SubBytes):
+        type(
+            f"Accept_{sub.__name__}",
+            (Struct,),
+            {"__annotations__": {"v": Annotated[sub, _ser()]}},
+        )

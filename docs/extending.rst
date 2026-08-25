@@ -154,12 +154,23 @@ that field — including nested inside lists, dicts, and tuples:
 Codecs may only be attached to a *custom* type. ``structtype`` validates
 this when the class is created, raising a ``TypeError`` when:
 
-- the type is natively supported — ``Annotated[int, Serializer(dump=...)]``,
+- the type is :doc:`natively supported <supported-types>` — this covers the
+  scalars (``bool``, ``int``, ``float``, ``str``, ``bytes``, ``bytearray``,
+  ``memoryview``), the ``datetime`` family, ``uuid.UUID``,
+  ``decimal.Decimal``, ``structtype.Raw``, enums, ``Literal`` values,
+  containers (``list``, ``dict``, ``tuple``, ``set``, ``frozenset`` —
+  parameterized or not), unions (including ``Optional[...]``), and nested
+  ``Struct`` / ``TypedDict`` / ``dataclass`` / ``NamedTuple`` types — e.g.
+  ``Annotated[int, Serializer(dump=...)]``,
 - the type is a union — including optional types such as
   ``Annotated[complex | None, Serializer(dump=...)]``
   (``Annotated[int | str, Serializer(dump=...)]``),
 - two different ``dump`` codecs apply within a single field, e.g.
   ``tuple[Annotated[complex, Serializer(dump=a)], Annotated[complex, Serializer(dump=b)]]``.
+
+*Subclasses* of natively supported types are classified as custom types, so
+codecs attach fine to them — see :ref:`native-subclass-formats` below for the
+recommended pattern.
 
 Codecs are only supported on :class:`Struct` fields.
 :class:`StructAdapter` rejects annotations containing a ``Serializer`` —
@@ -229,6 +240,61 @@ fields only — :class:`StructAdapter` rejects them (see above). For types you
 control, prefer the ``struct_dump`` / ``struct_validate`` protocol methods.
 Single-argument string-constructible types such as ``IPv4Address`` may also use
 ``Annotated[T, Serializer(dump=str, load=T)]`` codecs.
+
+.. _native-subclass-formats:
+
+Custom formats for natively supported types
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The restriction above can be lifted cleanly by *subclassing*: any subclass of a
+natively supported type counts as a custom type, so it accepts a
+``Serializer`` — while still behaving like the native type (``isinstance``
+holds, and operators/methods keep working):
+
+.. code-block:: python
+
+    import datetime
+    from typing import Annotated
+    from structtype import Serializer, Struct
+
+    FMT = "%d/%m/%Y %H:%M"
+
+    class EuroDT(datetime.datetime):
+        @classmethod
+        def parse(cls, value):
+            if isinstance(value, EuroDT):
+                return value
+            return cls.strptime(value, FMT)
+
+    Euro = Annotated[EuroDT, Serializer(dump=lambda d: d.strftime(FMT),
+                                        load=EuroDT.parse)]
+
+    class Event(Struct):
+        when: Euro
+
+    msg = Event.struct_validate_json(b'{"when": "05/06/2020 14:30"}')
+    assert isinstance(msg.when, datetime.datetime)   # full datetime API
+    assert msg.struct_dump_json() == b'{"when":"05/06/2020 14:30"}'
+
+The same works for other natives — ``class Lower(str)`` (normalizing text),
+``class Milli(int)`` (fixed-unit integers), ``class Hex(bytes)`` (custom
+string encodings).
+
+How values are converted:
+
+- Whenever a field value is **not already an instance of the subclass**, your
+  ``load`` callable runs — on both ``struct_validate_json`` decoding and
+  in-memory ``struct_validate``. Base-class instances (a plain ``str`` or
+  ``datetime``) therefore pass through your ``load``, so make it accept them
+  or fail cleanly.
+- Values that **are already instances** of the subclass skip ``load``
+  entirely — constructing the instance yourself is always safe.
+
+If you don't need per-field formats, prefer implementing the
+``struct_dump`` / ``struct_validate`` protocol methods on the subclass
+directly; then no annotation is required anywhere. A bare subclass *without*
+either mechanism cannot be serialized or decoded (there is no fallback to the
+native encoding).
 
 Pydantic custom types
 ~~~~~~~~~~~~~~~~~~~~~

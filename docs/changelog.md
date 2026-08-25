@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Internal improvement, cleanup, more tests. 
+
 ## 0.9.0 (2026-08-24)
 
 - **Breaking:** rename the `Validator` annotation family to `Constraint`:
