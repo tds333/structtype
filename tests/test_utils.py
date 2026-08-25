@@ -4,7 +4,7 @@ from typing import Generic, TypeVar
 
 import pytest
 
-from structtype._utils import get_class_annotations
+from structtype._utils import get_class_annotations, resolve_annotations_dict
 
 from .utils import temp_module
 
@@ -208,3 +208,16 @@ class TestGetClassAnnotations:
             x: int | None = None
 
         assert get_class_annotations(Ex) == {"x": int | None}
+
+
+class TestResolveAnnotationsDict:
+    @pytest.mark.parametrize("value", [None, "None"])
+    def test_none_to_nonetype(self, value):
+        assert resolve_annotations_dict({"x": value}, {}, {}) == {"x": type(None)}
+
+    def test_unresolvable_kept_as_string(self):
+        # A forward reference to the not-yet-defined class is kept as-is
+        assert resolve_annotations_dict({"x": "Ex"}, {}, {}) == {"x": "Ex"}
+
+    def test_passthrough_and_none_object(self):
+        assert resolve_annotations_dict({"x": int}, {}, {}) == {"x": int}

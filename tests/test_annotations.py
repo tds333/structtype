@@ -957,6 +957,24 @@ class TestFutureAnnotations:
             assert n.child is not None
             assert n.items == []
 
+    def test_none_annotation(self):
+        """A ``None`` annotation under lazy strings resolves to ``NoneType`` at
+        class creation, matching the eager-annotation behavior."""
+        from tests.utils import temp_module
+
+        source = """
+        from __future__ import annotations
+        from structtype import Struct
+
+        class Msg(Struct):
+            x: None = None
+        """
+        with temp_module(source) as mod:
+            assert mod.Msg.__struct_fields__ == ("x",)
+            out = mod.Msg.struct_validate({})
+            assert out.x is None
+            assert out.struct_dump_json() == b'{"x":null}'
+
 
 class TestStructAdapterSerializerRejection:
     def test_rejects_load(self):
