@@ -465,8 +465,22 @@ class _SchemaGenerator:
                     required.append(field.alias)
                 elif field.default is not NODEFAULT:
                     field_schema["default"] = _dump(field.default, str_keys=True)
-                elif field.default_factory in (list, dict, set, bytearray):
-                    field_schema["default"] = field.default_factory()
+                elif field.default_factory in (
+                    list,
+                    dict,
+                    set,
+                    frozenset,
+                    tuple,
+                    bytearray,
+                ):
+                    default = field.default_factory()
+                    if isinstance(default, bytearray):
+                        # bytes-like values encode as base64 strings
+                        default = ""
+                    elif not isinstance(default, dict):
+                        # set/frozenset/tuple all serialize as JSON arrays
+                        default = list(default)
+                    field_schema["default"] = default
                 names.append(field.alias)
                 fields.append(field_schema)
 

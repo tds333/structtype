@@ -1,6 +1,7 @@
 import datetime
 import decimal
 import enum
+import json
 import sys
 import typing
 import uuid
@@ -31,6 +32,7 @@ import structtype
 from structtype import (
     BytesConstraint,
     CollectionConstraint,
+    Factory,
     Field,
     NumericConstraint,
     StrConstraint,
@@ -375,6 +377,39 @@ def test_struct_object():
             },
         },
     }
+
+
+@pytest.mark.parametrize(
+    "annotation, factory, expected_default",
+    [
+        (list, list, []),
+        (dict, dict, {}),
+        (set, set, []),
+        (frozenset, frozenset, []),
+        (tuple, tuple, []),
+        (bytearray, bytearray, ""),
+    ],
+)
+def test_struct_factory_defaults(annotation, factory, expected_default):
+    class Example(structtype.Struct):
+        a: annotation = Factory(factory)
+
+    schema = make_schema(Example)
+    assert schema["$defs"]["Example"]["properties"]["a"]["default"] == expected_default
+    # The returned schema must be encodable by the stdlib json module
+    assert json.loads(json.dumps(schema)) == json.loads(
+        structtype.json_schema_dump(Example).decode()
+    )
+
+
+def test_struct_mutable_literal_default_normalized():
+    class Example(structtype.Struct):
+        tags: Set[str] = set()
+
+    schema = make_schema(Example)
+    assert schema["$defs"]["Example"]["properties"]["tags"]["default"] == []
+    assert isinstance(schema["$defs"]["Example"]["properties"]["tags"]["default"], list)
+    json.dumps(schema)  # stdlib round-trip must not raise
 
 
 @pytest.mark.parametrize("forbid_unknown_fields", [False, True])
