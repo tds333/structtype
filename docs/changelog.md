@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Internal improvement, cleanup, more tests. 
+- Enum dump performance improvement.
 
 ## 0.9.0 (2026-08-24)
 
