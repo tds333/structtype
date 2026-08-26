@@ -14685,18 +14685,16 @@ static int json_encode_dict_key_noinline(EncoderState *, PyObject *);
 static PyObject *
 dump_enum_value(StructspecState *mod, PyObject *obj)
 {
-    PyObject *dict = PyObject_GenericGetDict(obj, NULL);
-    if (dict != NULL) {
-        PyObject *value = PyDict_GetItemWithError(dict, mod->str__value_);
-        Py_DECREF(dict);
+    /* `_value_` lives in the instance `__dict__`; read it via the dict slot
+     * pointer to skip GenericGetDict's descriptor-call machinery. */
+    PyObject **dictptr = _PyObject_GetDictPtr(obj);
+    if (dictptr != NULL && *dictptr != NULL) {
+        PyObject *value = PyDict_GetItemWithError(*dictptr, mod->str__value_);
         if (value != NULL) {
             Py_INCREF(value);
             return value;
         }
         if (PyErr_Occurred()) return NULL;
-    }
-    else {
-        PyErr_Clear();
     }
     return PyObject_GetAttr(obj, mod->str__value_);
 }
