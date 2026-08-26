@@ -7,6 +7,7 @@ import itertools
 import json
 import math
 import string
+import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ from structtype._core import (
 import structtype
 from structtype import Serializer, Struct, StructConfig
 
-from .utils import emscripten_stack_limited
+from .utils import emscripten_stack_limited, requires_subprocess
 
 UTC = datetime.timezone.utc
 
@@ -3342,10 +3343,10 @@ def test_bool_from_negative_int_lax_hits_int64_path():
         cls.struct_validate_json(b'{"v": -1}', strict=False)
 
 
+@requires_subprocess
 def test_literal_info_shutdown_teardown_subprocess():
     """A child interpreter creating Literal-backed structs then exiting merges
     its shutdown-time teardown into the same coverage data."""
-    import subprocess
     import sys
 
     code = (

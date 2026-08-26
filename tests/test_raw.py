@@ -8,10 +8,7 @@ import pytest
 
 import structtype
 
-requires_subprocess = pytest.mark.skipif(
-    not getattr(subprocess, "_can_fork_exec", True),
-    reason="subprocess support required",
-)
+from .utils import requires_subprocess
 
 
 def test_raw_noargs():

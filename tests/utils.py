@@ -1,4 +1,5 @@
 import inspect
+import subprocess
 import sys
 import textwrap
 import types
@@ -10,6 +11,11 @@ import pytest
 emscripten_stack_limited = pytest.mark.skipif(
     sys.platform == "emscripten",
     reason="Pyodide can overflow the JS/Wasm stack before raising RecursionError",
+)
+
+requires_subprocess = pytest.mark.skipif(
+    not getattr(subprocess, "_can_fork_exec", True),
+    reason="subprocess support required",
 )
 
 py315_or_later_only = pytest.mark.skipif(
