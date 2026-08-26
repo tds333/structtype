@@ -483,6 +483,14 @@ typedef struct {
     PyObject *str___constraints__;
     PyObject *str_int;
     PyObject *str_is_safe;
+    PyObject *str_struct_dump;
+    PyObject *str_model_dump;
+    PyObject *str___struct_fields__;
+    PyObject *str___struct_defaults__;
+    PyObject *str_struct_validate;
+    PyObject *str_model_validate;
+    PyObject *str_search;
+    PyObject *str_pattern;
     PyObject *UUIDType;
     PyObject *uuid_safeuuid_unknown;
     PyObject *DecimalType;
@@ -3389,12 +3397,15 @@ StrConstraint_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
     }
     if (self->regex != NULL) {
         /* Unanchored match, same as the decode path */
-        PyObject *res = PyObject_CallMethod(self->regex, "search", "O", value);
+        StructspecState *st = structtype_get_global_state();
+        PyObject *res = PyObject_CallMethodObjArgs(
+            self->regex, st->str_search, value, NULL
+        );
         if (res == NULL) return NULL;
         bool ok = (res != Py_None);
         Py_DECREF(res);
         if (!ok) {
-            PyObject *pattern = PyObject_GetAttrString(self->regex, "pattern");
+            PyObject *pattern = PyObject_GetAttr(self->regex, st->str_pattern);
             if (pattern == NULL) return NULL;
             PyErr_Format(
                 PyExc_ValueError,
@@ -11789,10 +11800,11 @@ ms_decode_custom_struct(PyObject *cls, PyObject *dict, PathNode *path) {
     /* Construct an external struct (e.g. msgspec.Struct) from a Python dict.
      * Uses keyword construction cls(**kwargs) which works for both
      * kw_only and non-kw_only structs. */
-    PyObject *fields = PyObject_GetAttrString(cls, "__struct_fields__");
+    StructspecState *st = structtype_get_global_state();
+    PyObject *fields = PyObject_GetAttr(cls, st->str___struct_fields__);
     if (fields == NULL) return NULL;
 
-    PyObject *defaults = PyObject_GetAttrString(cls, "__struct_defaults__");
+    PyObject *defaults = PyObject_GetAttr(cls, st->str___struct_defaults__);
     if (defaults == NULL) { Py_DECREF(fields); return NULL; }
 
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
@@ -11885,15 +11897,26 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
         }
     }
 
+    /* Cached interned names avoid per-call string creation in
+     * HasAttr/GetAttr lookups. */
+    StructspecState *st = structtype_get_global_state();
+
     /* Custom type — struct_validate(dict) */
-    if (PyObject_HasAttrString(custom_cls, "struct_validate") && out != Py_None) {
+    if (PyObject_HasAttr(custom_cls, st->str_struct_validate) && out != Py_None) {
         int is_inst = PyObject_IsInstance(out, custom_cls);
         if (is_inst < 0) {
             Py_DECREF(out);
             return NULL;
         }
         if (!is_inst) {
-            PyObject *temp = PyObject_CallMethod(custom_cls, "struct_validate", "O", out);
+            PyObject *fn = PyObject_GetAttr(custom_cls, st->str_struct_validate);
+            if (fn == NULL) {
+                Py_DECREF(out);
+                ms_maybe_wrap_validation_error(path);
+                return NULL;
+            }
+            PyObject *temp = PyObject_CallOneArg(fn, out);
+            Py_DECREF(fn);
             if (temp == NULL) {
                 Py_DECREF(out);
                 ms_maybe_wrap_validation_error(path);
@@ -11905,14 +11928,21 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
     }
 
     /* Pydantic BaseModel — model_validate(dict) */
-    if (PyObject_HasAttrString(custom_cls, "model_validate") && out != Py_None) {
+    if (PyObject_HasAttr(custom_cls, st->str_model_validate) && out != Py_None) {
         int is_inst = PyObject_IsInstance(out, custom_cls);
         if (is_inst < 0) {
             Py_DECREF(out);
             return NULL;
         }
         if (!is_inst) {
-            PyObject *temp = PyObject_CallMethod(custom_cls, "model_validate", "O", out);
+            PyObject *fn = PyObject_GetAttr(custom_cls, st->str_model_validate);
+            if (fn == NULL) {
+                Py_DECREF(out);
+                ms_maybe_wrap_validation_error(path);
+                return NULL;
+            }
+            PyObject *temp = PyObject_CallOneArg(fn, out);
+            Py_DECREF(fn);
             if (temp == NULL) {
                 Py_DECREF(out);
                 ms_maybe_wrap_validation_error(path);
@@ -11924,7 +11954,7 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
     }
 
     /* External struct type (e.g. msgspec) — construct from dict */
-    else if (PyDict_CheckExact(out) && PyObject_HasAttrString(custom_cls, "__struct_fields__")) {
+    else if (PyDict_CheckExact(out) && PyObject_HasAttr(custom_cls, st->str___struct_fields__)) {
         PyObject *temp = ms_decode_custom_struct(custom_cls, out, path);
         if (temp == NULL) { Py_DECREF(out); return NULL; }
         Py_DECREF(out);
@@ -12393,13 +12423,16 @@ _ms_check_str_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
         }
     }
     if (type->types & MS_CONSTR_STR_REGEX) {
+        StructspecState *st = structtype_get_global_state();
         PyObject *regex = TypeNode_get_constr_str_regex(type);
-        PyObject *res = PyObject_CallMethod(regex, "search", "O", obj);
+        PyObject *res = PyObject_CallMethodObjArgs(
+            regex, st->str_search, obj, NULL
+        );
         if (res == NULL) goto error;
         bool ok = (res != Py_None);
         Py_DECREF(res);
         if (!ok) {
-            PyObject *pattern = PyObject_GetAttrString(regex, "pattern");
+            PyObject *pattern = PyObject_GetAttr(regex, st->str_pattern);
             if (pattern == NULL) goto error;
             ms_raise_validation_error(
                 path, "Expected `str` matching regex %R%U", pattern
@@ -15380,25 +15413,31 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
             return status;
         }
     }
-    if (PyObject_HasAttrString(obj, "struct_dump")) {
+    if (PyObject_HasAttr(obj, self->mod->str_struct_dump)) {
         /* Custom type — struct_dump() to a base type, then re-encode */
-        PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
+        PyObject *dump = PyObject_GetAttr(obj, self->mod->str_struct_dump);
+        if (dump == NULL) return -1;
+        PyObject *dumped = PyObject_CallNoArgs(dump);
+        Py_DECREF(dump);
         if (dumped == NULL) return -1;
         int status = json_encode_inline(self, dumped);
         Py_DECREF(dumped);
         return status;
     }
-    else if (PyObject_HasAttrString(obj, "model_dump")) {
+    else if (PyObject_HasAttr(obj, self->mod->str_model_dump)) {
         /* Pydantic BaseModel — model_dump() to dict, then encode */
-        PyObject *dict = PyObject_CallMethod(obj, "model_dump", NULL);
+        PyObject *dump = PyObject_GetAttr(obj, self->mod->str_model_dump);
+        if (dump == NULL) return -1;
+        PyObject *dict = PyObject_CallNoArgs(dump);
+        Py_DECREF(dump);
         if (dict == NULL) return -1;
         int status = json_encode_dict(self, dict);
         Py_DECREF(dict);
         return status;
     }
-    else if (!ms_is_struct_inst(obj) && PyObject_HasAttrString(obj, "__struct_fields__")) {
+    else if (!ms_is_struct_inst(obj) && PyObject_HasAttr(obj, self->mod->str___struct_fields__)) {
         /* External struct type (e.g. msgspec) — iterate fields and encode as JSON object */
-        PyObject *fields = PyObject_GetAttrString(obj, "__struct_fields__");
+        PyObject *fields = PyObject_GetAttr(obj, self->mod->str___struct_fields__);
         if (fields == NULL) return -1;
         if (!PyTuple_CheckExact(fields)) { Py_DECREF(fields); return -1; }
 
@@ -18556,7 +18595,9 @@ static PyObject *
 dump_external_struct(DumpState *self, PyObject *obj) {
     /* External struct type (e.g. msgspec.Struct) — convert fields to dict
      * using Python-level attribute access (no C offset assumptions). */
-    PyObject *fields = PyObject_GetAttrString(obj, "__struct_fields__");
+    PyObject *fields = PyObject_GetAttr(
+        obj, self->mod->str___struct_fields__
+    );
     if (fields == NULL) return NULL;
 
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
@@ -18781,7 +18822,7 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
     else if (ms_is_struct_type(type)) {
         return dump_struct(self, obj, is_key);
     }
-    else if (!ms_is_struct_inst(obj) && PyObject_HasAttrString(obj, "__struct_fields__")) {
+    else if (!ms_is_struct_inst(obj) && PyObject_HasAttr(obj, self->mod->str___struct_fields__)) {
         /* External struct type (e.g. msgspec) — use Python-level attribute access */
         return dump_external_struct(self, obj);
     }
@@ -18809,17 +18850,23 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
             return result;
         }
     }
-    if (PyObject_HasAttrString(obj, "struct_dump")) {
+    if (PyObject_HasAttr(obj, self->mod->str_struct_dump)) {
         /* Custom type — struct_dump() to a base type, then re-process */
-        PyObject *dumped = PyObject_CallMethod(obj, "struct_dump", NULL);
+        PyObject *dump = PyObject_GetAttr(obj, self->mod->str_struct_dump);
+        if (dump == NULL) return NULL;
+        PyObject *dumped = PyObject_CallNoArgs(dump);
+        Py_DECREF(dump);
         if (dumped == NULL) return NULL;
         PyObject *result = dump_obj(self, dumped, is_key);
         Py_DECREF(dumped);
         return result;
     }
-    else if (PyObject_HasAttrString(obj, "model_dump")) {
+    else if (PyObject_HasAttr(obj, self->mod->str_model_dump)) {
         /* Pydantic BaseModel — model_dump() to dict, then process */
-        PyObject *dict = PyObject_CallMethod(obj, "model_dump", NULL);
+        PyObject *dump = PyObject_GetAttr(obj, self->mod->str_model_dump);
+        if (dump == NULL) return NULL;
+        PyObject *dict = PyObject_CallNoArgs(dump);
+        Py_DECREF(dump);
         if (dict == NULL) return NULL;
         PyObject *result = dump_dict(self, dict);
         Py_DECREF(dict);
@@ -21076,6 +21123,14 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->str___constraints__);
     Py_CLEAR(st->str_int);
     Py_CLEAR(st->str_is_safe);
+    Py_CLEAR(st->str_struct_dump);
+    Py_CLEAR(st->str_model_dump);
+    Py_CLEAR(st->str___struct_fields__);
+    Py_CLEAR(st->str___struct_defaults__);
+    Py_CLEAR(st->str_struct_validate);
+    Py_CLEAR(st->str_model_validate);
+    Py_CLEAR(st->str_search);
+    Py_CLEAR(st->str_pattern);
     Py_CLEAR(st->UUIDType);
     Py_CLEAR(st->uuid_safeuuid_unknown);
     Py_CLEAR(st->DecimalType);
@@ -21499,6 +21554,14 @@ PyInit__core(void)
     CACHED_STRING(str___constraints__, "__constraints__");
     CACHED_STRING(str_int, "int");
     CACHED_STRING(str_is_safe, "is_safe");
+    CACHED_STRING(str_struct_dump, "struct_dump");
+    CACHED_STRING(str_model_dump, "model_dump");
+    CACHED_STRING(str___struct_fields__, "__struct_fields__");
+    CACHED_STRING(str___struct_defaults__, "__struct_defaults__");
+    CACHED_STRING(str_struct_validate, "struct_validate");
+    CACHED_STRING(str_model_validate, "model_validate");
+    CACHED_STRING(str_search, "search");
+    CACHED_STRING(str_pattern, "pattern");
 
     /* Initialize the Struct Type */
     PyState_AddModule(m, &structtypemodule);
