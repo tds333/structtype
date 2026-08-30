@@ -2,8 +2,12 @@
 
 ## Unreleased
 
-- Internal improvement, cleanup, more tests. 
-- Enum dump performance improvement.
+- **Performance:** enum dump improvement.
+- **Performance:** string interning improvement for field names during
+  encoding/decoding.
+- Fix JSON schema generation for edge cases.
+- Document `StructAdapter(Any)` as a generic JSON codec in the usage guide.
+- Internal improvement, cleanup, more tests.
 
 ## 0.9.0 (2026-08-24)
 

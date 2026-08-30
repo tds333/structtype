@@ -3,6 +3,7 @@ import decimal
 import enum
 import sys
 import uuid
+from typing import Annotated, Any, Final, NewType
 
 import pytest
 
@@ -16,7 +17,6 @@ from structtype import (
     StructAdapter,
     StructConfig,
 )
-from typing import Annotated, Any, Final, NewType
 
 
 def test_validate_json_simple():
@@ -181,6 +181,7 @@ def test_roundtrip_json():
     class Cat(Struct):
         struct_config = StructConfig(tag="cat", tag_field="type")
         meow: str
+
     class Dog(Struct):
         struct_config = StructConfig(tag="dog", tag_field="type")
         bark: str
@@ -362,7 +363,8 @@ def test_adapter_protocol_roundtrip():
 # ------------------------------------------------------------------
 # Coverage: dataclass with InitVar field → TypeError
 # ------------------------------------------------------------------
-from dataclasses import InitVar, dataclass as _dc
+from dataclasses import InitVar
+from dataclasses import dataclass as _dc
 
 
 @_dc
@@ -473,7 +475,9 @@ class TestStructAdapterAny:
 
     def test_dump_json_nested(self):
         codec = StructAdapter(Any)
-        assert codec.struct_dump_json([1, [2, 3], {"a": True}]) == b'[1,[2,3],{"a":true}]'
+        assert (
+            codec.struct_dump_json([1, [2, 3], {"a": True}]) == b'[1,[2,3],{"a":true}]'
+        )
 
     def test_validate_json_any(self):
         codec = StructAdapter(Any)
@@ -481,14 +485,14 @@ class TestStructAdapterAny:
 
     def test_validate_json_list(self):
         codec = StructAdapter(Any)
-        assert codec.struct_validate_json(b'[1, 2, 3]') == [1, 2, 3]
+        assert codec.struct_validate_json(b"[1, 2, 3]") == [1, 2, 3]
 
     def test_validate_json_primitives(self):
         codec = StructAdapter(Any)
         assert codec.struct_validate_json(b'"hello"') == "hello"
-        assert codec.struct_validate_json(b'42') == 42
-        assert codec.struct_validate_json(b'true') is True
-        assert codec.struct_validate_json(b'null') is None
+        assert codec.struct_validate_json(b"42") == 42
+        assert codec.struct_validate_json(b"true") is True
+        assert codec.struct_validate_json(b"null") is None
 
     def test_roundtrip_any(self):
         codec = StructAdapter(Any)
