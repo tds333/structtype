@@ -16,7 +16,7 @@ from structtype import (
     StructAdapter,
     StructConfig,
 )
-from typing import Annotated, Final, NewType
+from typing import Annotated, Any, Final, NewType
 
 
 def test_validate_json_simple():
@@ -464,3 +464,39 @@ def test_typeddict_total_false_info():
     ti = type_info(TDRRequired)
     assert "x" in {f.name for f in ti.fields}
     assert "y" in {f.name for f in ti.fields}
+
+
+class TestStructAdapterAny:
+    def test_dump_json_any(self):
+        codec = StructAdapter(Any)
+        assert codec.struct_dump_json({"a": 1}) == b'{"a":1}'
+
+    def test_dump_json_nested(self):
+        codec = StructAdapter(Any)
+        assert codec.struct_dump_json([1, [2, 3], {"a": True}]) == b'[1,[2,3],{"a":true}]'
+
+    def test_validate_json_any(self):
+        codec = StructAdapter(Any)
+        assert codec.struct_validate_json(b'{"a": 1}') == {"a": 1}
+
+    def test_validate_json_list(self):
+        codec = StructAdapter(Any)
+        assert codec.struct_validate_json(b'[1, 2, 3]') == [1, 2, 3]
+
+    def test_validate_json_primitives(self):
+        codec = StructAdapter(Any)
+        assert codec.struct_validate_json(b'"hello"') == "hello"
+        assert codec.struct_validate_json(b'42') == 42
+        assert codec.struct_validate_json(b'true') is True
+        assert codec.struct_validate_json(b'null') is None
+
+    def test_roundtrip_any(self):
+        codec = StructAdapter(Any)
+        obj = {"key": [1, None, True], "nested": {"x": "y"}}
+        encoded = codec.struct_dump_json(obj)
+        assert codec.struct_validate_json(encoded) == obj
+
+    def test_dump_json_sort_keys(self):
+        codec = StructAdapter(Any)
+        result = codec.struct_dump_json({"b": 2, "a": 1}, sort_keys=True)
+        assert result == b'{"a":1,"b":2}'

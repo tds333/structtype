@@ -1323,9 +1323,22 @@ subclass, use :class:`StructAdapter`. It wraps any supported type and
 provides `struct_dump_json`, `struct_validate_json`,
 `struct_dump`, and `struct_validate` methods:
 
+**Generic JSON** — construct with ``Any`` for a type-agnostic codec:
+
 .. code-block:: python
 
+    >>> import typing
     >>> from structtype import StructAdapter
+
+    >>> codec = StructAdapter(typing.Any)
+    >>> codec.struct_dump_json({"users": [{"id": 1}, {"id": 2}]})
+    b'{"users":[{"id":1},{"id":2}]}'
+    >>> codec.struct_validate_json(b'[1, "hello", true, null]')
+    [1, 'hello', True, None]
+
+**Typed** — pass a specific type for validated decoding:
+
+.. code-block:: python
 
     >>> adapter = StructAdapter(list[int])
     >>> adapter.struct_validate_json(b"[1, 2, 3]")
