@@ -81,26 +81,35 @@ ABCs.
 Inspecting Configuration
 ------------------------
 
-Every struct type and instance exposes its configuration through the read-only
-``__struct_config__`` attribute, which returns a :class:`structtype.StructConfig`
-(a :class:`typing.TypedDict`, so a plain ``dict`` at runtime):
+Every struct type and instance exposes its configuration through two
+attributes:
+
+- ``struct_config``: the original ``StructConfig`` dict as specified in the
+  class body (sparse — only the keys the user explicitly set).
+- ``__struct_config__``: the fully-resolved dict with all 15 keys, including
+  inherited values and defaults.
 
 .. code-block:: python
 
     >>> from structtype import Struct, StructConfig
 
-    >>> class User(Struct):
-    ...     struct_config = StructConfig(frozen=True, tag="user")
+    >>> class Base(Struct):
+    ...     struct_config = StructConfig(frozen=True, tag="base")
     ...     name: str
-    ...     groups: set[str] = set()
     ...
 
-    >>> User.__struct_config__["frozen"]
+    >>> class Child(Base):
+    ...     struct_config = StructConfig(eq=False)
+    ...
+
+    >>> Child.struct_config
+    {'eq': False}
+    >>> Child.__struct_config__['frozen']
     True
-    >>> User.__struct_config__["tag"]
-    'user'
-    >>> User("alice").__struct_config__["tag"]
-    'user'
+    >>> Child.__struct_config__['tag']
+    'base'
+    >>> Child.__struct_config__['eq']
+    False
 
 The exposed keys mirror the struct configuration parameters of the same
 name described in the :class:`structtype.Struct` docstring, including ``kw_only``

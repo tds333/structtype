@@ -7,6 +7,7 @@ class StructConfig(TypedDict, total=False):
 
     Used as a class-body ``struct_config`` attribute. Keys not present inherit
     from the base class; ``__struct_config__`` returns the fully-resolved dict.
+    ``struct_config`` returns exactly what the user wrote (sparse dict).
     """
 
     frozen: bool

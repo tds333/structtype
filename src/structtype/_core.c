@@ -8917,10 +8917,7 @@ StructMeta_new_inner(
     info.namespace = PyDict_Copy(namespace);
     if (info.namespace == NULL) goto cleanup;
 
-    /* Remove struct_config from namespace copy so it doesn't become a class attr */
-    if (PyDict_GetItemString(info.namespace, "struct_config") != NULL) {
-        if (PyDict_DelItemString(info.namespace, "struct_config") < 0) goto cleanup;
-    }
+
 
     info.renamed_fields = PyDict_New();
     if (info.renamed_fields == NULL) goto cleanup;
@@ -9508,7 +9505,6 @@ static PyMemberDef StructMeta_members[] = {
 static PyGetSetDef StructMeta_getset[] = {
     {"__signature__", (getter) StructMeta_signature, NULL, NULL, NULL},
     {"__struct_config__", (getter) StructMeta_config, NULL, "Struct configuration", NULL},
-    {"struct_config", (getter) StructMeta_config, NULL, "Struct configuration", NULL},
     {NULL},
 };
 
@@ -10504,9 +10500,6 @@ static PyGetSetDef StructMixin_getset[] = {
         "A tuple of default values for each field, in declaration order",
         NULL},
     {"__struct_config__", (getter) StructMixin_config, NULL,
-        "The StructConfig for this struct type",
-        NULL},
-    {"struct_config", (getter) StructMixin_config, NULL,
         "The StructConfig for this struct type",
         NULL},
     {NULL},

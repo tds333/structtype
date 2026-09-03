@@ -36,9 +36,12 @@ def test_struct_config_merge_inheritance():
     class Child(Base):
         struct_config = StructConfig(eq=False)
 
-    assert Child.struct_config["frozen"] is True
-    assert Child.struct_config["tag"] == "base"
-    assert Child.struct_config["eq"] is False
+    # struct_config returns only what the user explicitly wrote
+    assert Child.struct_config == {"eq": False}
+    # __struct_config__ returns the fully-resolved config with inherited values
+    assert Child.__struct_config__["frozen"] is True
+    assert Child.__struct_config__["tag"] == "base"
+    assert Child.__struct_config__["eq"] is False
 
 
 def test_kw_only_inherits_to_new_fields():
@@ -66,7 +69,10 @@ def test_empty_struct_config_is_noop():
     class Child(Base):
         struct_config = StructConfig()
 
-    assert Child.struct_config["frozen"] is True
+    # struct_config returns only what the user explicitly wrote (empty dict)
+    assert Child.struct_config == {}
+    # __struct_config__ returns the fully-resolved config with inherited values
+    assert Child.__struct_config__["frozen"] is True
 
 
 def test_class_kwargs_pass_to_init_subclass():
@@ -742,10 +748,12 @@ def test_struct_config_class_attribute_matches_view():
         struct_config = StructConfig(frozen=True)
         x: int
 
+    # struct_config returns the original dict the user wrote
     assert isinstance(S.struct_config, dict)
-    assert S.struct_config["frozen"] is True
-    assert S(1).struct_config["frozen"] is True
+    assert S.struct_config == {"frozen": True}
+    # Instance access returns the same dict (via type)
     assert isinstance(S(1).struct_config, dict)
+    assert S(1).struct_config == {"frozen": True}
 
 
 def test_struct_config_view_exposes_rename():

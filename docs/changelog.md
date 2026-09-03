@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **Breaking:** `struct_config` now returns exactly what the user specified in
+  the class body (the sparse `StructConfig` dict), not the fully-resolved
+  config. `__struct_config__` continues to return the fully-resolved dict with
+  all 15 keys and defaults applied.
+
+  Previously `struct_config` and `__struct_config__` were aliases — both
+  returned the fully-resolved dict. Now they serve different purposes:
+
+  | Accessor | Content |
+  |----------|---------|
+  | `cls.struct_config` | Original sparse dict (what user wrote) |
+  | `cls.__struct_config__` | Fully-resolved dict (all 15 keys, defaults + inherited) |
+
+  Migration:
+
+  | Old | New |
+  |---|---|
+  | `cls.struct_config["frozen"]` (inherited) | `cls.__struct_config__["frozen"]` |
+  | `cls.struct_config` (fully resolved) | `cls.__struct_config__` |
+
+  Example:
+
+  ```python
+  class Base(Struct):
+      struct_config = StructConfig(frozen=True, tag="base")
+
+  class Child(Base):
+      struct_config = StructConfig(eq=False)
+
+  # Before: both returned {'frozen': True, 'tag': 'base', 'eq': False, ...}
+  # After:
+  Child.struct_config         # {'eq': False}
+  Child.__struct_config__     # {'frozen': True, 'tag': 'base', 'eq': False, ...}
+  ```
+
 - **Performance:** enum dump improvement.
 - **Performance:** string interning improvement for field names during
   encoding/decoding.
