@@ -1,11 +1,13 @@
 from typing import Any, get_args
 
-from ._core import (  # type: ignore
+from ._core import (
+    JSONDecoder as _JSONDecoder,
+)
+from ._core import (
     Serializer as _Serializer,
 )
 from ._core import (  # type: ignore
     _dump,
-    _json_decode,
     _json_encode,
     _validate,
 )
@@ -46,7 +48,7 @@ class StructAdapter:
     [1, 2, 3]
     """
 
-    __slots__ = ("_type",)
+    __slots__ = ("_decoder_loose", "_decoder_strict", "_type")
 
     def __init__(self, type: Any):
         if _has_serializer(type):
@@ -57,6 +59,8 @@ class StructAdapter:
                 "`Struct` instead"
             )
         self._type = type
+        self._decoder_loose = None
+        self._decoder_strict = None
 
     def struct_validate_json(self, buf, *, strict=True):
         """Validate JSON bytes and decode into the adapter's type.
@@ -68,7 +72,17 @@ class StructAdapter:
         strict : bool, optional
             If True (default), unmatched fields cause an error.
         """
-        return _json_decode(buf, type=self._type, strict=strict)
+        if strict:
+            decoder = self._decoder_strict
+            if decoder is None:
+                decoder = _JSONDecoder(self._type, strict=True)
+                self._decoder_strict = decoder
+        else:
+            decoder = self._decoder_loose
+            if decoder is None:
+                decoder = _JSONDecoder(self._type, strict=False)
+                self._decoder_loose = decoder
+        return decoder.decode(buf)
 
     def struct_dump_json(
         self,

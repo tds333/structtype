@@ -504,3 +504,115 @@ class TestStructAdapterAny:
         codec = StructAdapter(Any)
         result = codec.struct_dump_json({"b": 2, "a": 1}, sort_keys=True)
         assert result == b'{"a":1,"b":2}'
+
+
+# ------------------------------------------------------------------
+# Decoder caching tests
+# ------------------------------------------------------------------
+
+
+class TestDecoderCaching:
+    def test_decoder_cached_across_calls(self):
+        from structtype._adapter import _JSONDecoder
+
+        call_count = 0
+        OriginalDecoder = _JSONDecoder
+
+        class CountingDecoder:
+            def __init__(self, *args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                self._inner = OriginalDecoder(*args, **kwargs)
+
+            def decode(self, buf):
+                return self._inner.decode(buf)
+
+        import structtype._adapter as mod
+
+        orig = mod._JSONDecoder
+        mod._JSONDecoder = CountingDecoder
+        try:
+            ta = StructAdapter(list[int])
+            assert call_count == 0
+            ta.struct_validate_json(b"[1, 2]")
+            assert call_count == 1
+            ta.struct_validate_json(b"[3, 4]")
+            assert call_count == 1
+            ta.struct_validate_json(b"[5]", strict=True)
+            assert call_count == 1
+        finally:
+            mod._JSONDecoder = orig
+
+    def test_strict_modes_cached_independently(self):
+        from structtype._adapter import _JSONDecoder
+
+        call_count = 0
+        OriginalDecoder = _JSONDecoder
+
+        class CountingDecoder:
+            def __init__(self, *args, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                self._inner = OriginalDecoder(*args, **kwargs)
+
+            def decode(self, buf):
+                return self._inner.decode(buf)
+
+        import structtype._adapter as mod
+
+        orig = mod._JSONDecoder
+        mod._JSONDecoder = CountingDecoder
+        try:
+            ta = StructAdapter(int)
+            ta.struct_validate_json(b"1", strict=True)
+            assert call_count == 1
+            ta.struct_validate_json(b'"2"', strict=False)
+            assert call_count == 2
+            ta.struct_validate_json(b"3", strict=True)
+            assert call_count == 2
+            ta.struct_validate_json(b'"4"', strict=False)
+            assert call_count == 2
+        finally:
+            mod._JSONDecoder = orig
+
+    def test_cached_decoder_gives_same_results(self):
+        ta = StructAdapter(list[int])
+        assert ta.struct_validate_json(b"[1, 2, 3]") == [1, 2, 3]
+        assert ta.struct_validate_json(b"[4, 5, 6]") == [4, 5, 6]
+
+    def test_cached_decoder_coercion_loose(self):
+        ta = StructAdapter(int)
+        assert ta.struct_validate_json(b'"5"', strict=False) == 5
+        assert ta.struct_validate_json(b"5", strict=True) == 5
+
+    def test_cached_decoder_constraint_enforced(self):
+        ta = StructAdapter(Annotated[int, NumericConstraint(ge=0)])
+        assert ta.struct_validate_json(b"5") == 5
+        with pytest.raises(structtype.ValidationError):
+            ta.struct_validate_json(b"-1")
+
+    def test_struct_adapter_subclass_works(self):
+        class MyAdapter(StructAdapter):
+            pass
+
+        ta = MyAdapter(list[int])
+        assert ta.struct_validate_json(b"[1, 2]") == [1, 2]
+        assert hasattr(ta, "_decoder_strict")
+        assert hasattr(ta, "_decoder_loose")
+        assert ta._decoder_strict is not None
+        assert ta._decoder_loose is None
+
+    def test_no_slot_conflict_with_subclass(self):
+        class MyAdapter(StructAdapter):
+            pass
+
+        ta = MyAdapter(int)
+        assert ta.struct_validate_json(b"1") == 1
+        assert ta.struct_validate_json(b'"2"', strict=False) == 2
+
+    def test_any_type_cached(self):
+        ta = StructAdapter(Any)
+        assert ta.struct_validate_json(b'{"a": 1}') == {"a": 1}
+        assert ta.struct_validate_json(b"[1, 2]") == [1, 2]
+        assert ta._decoder_strict is not None
+        assert ta._decoder_loose is None
