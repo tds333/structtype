@@ -1401,7 +1401,7 @@ class TestDecimal:
     specific behaviors"""
 
     def test_decimal_to_number_keeps_precision(self):
-        enc = JSONEncoder(decimal_format="number")
+        enc = JSONEncoder(decimal_as_number=True)
         msg = enc.encode(Decimal("1.3000"))
         assert msg == b"1.3000"
 
@@ -3233,8 +3233,9 @@ class TestEncoderAttributeGetters:
         assert enc.sort_keys is True
         assert JSONEncoder().sort_keys is False
 
-    def test_decimal_format_getter(self):
-        assert JSONEncoder(decimal_format="number").decimal_format == "number"
+    def test_decimal_as_number_getter(self):
+        assert JSONEncoder(decimal_as_number=True).decimal_as_number is True
+        assert JSONEncoder().decimal_as_number is False
 
     def test_uuid_format_getter(self):
         assert JSONEncoder(uuid_format="canonical").uuid_format == "canonical"
@@ -3297,10 +3298,13 @@ class TestRemainingCPaths:
         p = WithDict({"b": 1, "a": 2})
         assert p.struct_dump(sort_keys=True) == {"d": {"a": 2, "b": 1}}
 
-    def test_decimal_format_callable_returning_decimal_errors(self):
-        enc = JSONEncoder(decimal_format=lambda d: {"wrapped": d})
-        with pytest.raises(TypeError, match="containing a Decimal"):
-            enc.encode({"a": Decimal("1.5")})
+    def test_decimal_as_number_struct_dump_json(self):
+        class WithDecimal(Struct):
+            v: Decimal
+
+        obj = WithDecimal(Decimal("1.5"))
+        assert obj.struct_dump_json() == b'{"v":"1.5"}'
+        assert obj.struct_dump_json(decimal_as_number=True) == b'{"v":1.5}'
 
 
 class TestSubMicrosecondRounding:
@@ -3318,13 +3322,6 @@ class TestSubMicrosecondRounding:
 
 
 class TestGcTraversal:
-    def test_encoder_traversed_by_gc(self):
-        calls = []
-        enc = JSONEncoder(decimal_format=lambda d: calls.append(d) or str(d))
-        enc.encode(Decimal("1.5"))
-        gc.collect()
-        assert enc.decimal_format is not None  # encoder still functional
-
     def test_literal_structs_alive_across_gc(self):
         from typing import Literal as Lit
 
@@ -3366,12 +3363,10 @@ class TestEncoderOptionValidation:
         with pytest.raises(ValueError, match="`uuid_format` must be 'canonical' or 'hex'"):
             JSONEncoder(uuid_format="bogus")
 
-    def test_invalid_decimal_format(self):
-        with pytest.raises(
-            ValueError,
-            match="`decimal_format` must be 'string', 'number', or a callable",
-        ):
-            JSONEncoder(decimal_format=42)
+    def test_decimal_as_number_is_truthy_checked(self):
+        # non-bool values are accepted and normalized by truthiness
+        assert JSONEncoder(decimal_as_number=1).decimal_as_number is True
+        assert JSONEncoder(decimal_as_number=None).decimal_as_number is False
 
     def test_sort_keys_is_truthy_checked(self):
         # non-bool values are accepted and normalized by truthiness
@@ -3442,40 +3437,40 @@ class TestMalformedTemporalStrings:
             cls.struct_validate_json(b'{"v": ' + bad + b"}")
 
 
-class _ConstDecimal:
-    """Callable for custom ``Decimal`` formatting, with a stable refcount."""
+class _RaisingBool:
+    """Object whose truthiness test fails."""
 
-    def __call__(self, v):
-        return 42
+    def __bool__(self):
+        raise RuntimeError("boom")
 
 
 class TestReinitReferenceLifecycle:
-    """Re-initializing an Encoder/Decoder must not leak the state held by a
-    previous initialization (upstream msgspec gh-1040 class of bug)."""
-
-    def test_encoder_reinit_no_leak(self):
-        f = _ConstDecimal()
-        base = sys.getrefcount(f)
-
-        enc = JSONEncoder(decimal_format=f)
-        assert sys.getrefcount(f) == base + 1
-
-        # Re-initializing with the same callable must not accumulate refs
-        enc.__init__(decimal_format=f)
-        enc.__init__(decimal_format=f)
-        assert sys.getrefcount(f) == base + 1
-
-        # Switching away drops the reference
-        enc.__init__(decimal_format="number")
-        assert sys.getrefcount(f) == base
-        assert enc.encode(Decimal("1.5")) == b"1.5"
+    """Re-initializing a Decoder must not leak the state held by a previous
+    initialization (upstream msgspec gh-1040 class of bug)."""
 
     def test_encoder_failed_reinit_preserves_config(self):
-        enc = JSONEncoder(decimal_format="number")
-        with pytest.raises(ValueError, match="decimal_format"):
-            enc.__init__(decimal_format="bogus")
+        enc = JSONEncoder(decimal_as_number=True)
+        with pytest.raises(RuntimeError, match="boom"):
+            enc.__init__(decimal_as_number=_RaisingBool())
         # The encoder keeps its previous configuration and stays usable
+        assert enc.decimal_as_number is True
         assert enc.encode(Decimal("1.5")) == b"1.5"
+
+    def test_removed_decimal_format_kwarg_rejected(self):
+        enc = JSONEncoder()
+        with pytest.raises(TypeError, match="takes no keyword arguments"):
+            enc.encode(Decimal("1.5"), decimal_format="number")
+
+        class WithDecimal(Struct):
+            v: Decimal
+
+        obj = WithDecimal(Decimal("1.5"))
+        with pytest.raises(TypeError):
+            obj.struct_dump_json(decimal_format="number")
+        with pytest.raises(TypeError):
+            structtype.StructAdapter(Decimal).struct_dump_json(
+                Decimal("1.5"), decimal_format="number"
+            )
 
     def test_decoder_reinit_no_leak(self):
         t = list[list[int]]

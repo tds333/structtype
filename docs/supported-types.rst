@@ -567,42 +567,12 @@ would happen with a float representation.
     structtype.ValidationError: Invalid decimal string
 
 For JSON you may instead encode decimal values the same as numbers by passing
-``decimal_format="number"`` to ``struct_dump_json``:
+``decimal_as_number=True`` to ``struct_dump_json``:
 
 .. code-block:: python
 
-    >>> StructAdapter(decimal.Decimal).struct_dump_json(x, decimal_format="number")
+    >>> StructAdapter(decimal.Decimal).struct_dump_json(x, decimal_as_number=True)
     b'1.2345'
-
-For JSON you may also pass a callable to ``decimal_format`` to
-customize how decimals are encoded. The callable will be called with the
-`decimal.Decimal` instance as the only argument, and must return a JSON-serializable
-value (but **not** another `decimal.Decimal` or a nested structure containing
-`decimal.Decimal`). This is useful for custom rounding, formatting, or transforming
-decimal values before encoding.
-
-.. code-block:: python
-
-    >>> import decimal
-    >>> from structtype import Struct
-
-    >>> class Price(Struct):
-    ...     amount: decimal.Decimal
-    ...     currency: str
-
-    >>> Price(amount=decimal.Decimal("10.123456"), currency="USD").struct_dump_json(
-    ...     decimal_format=lambda d: str(d.quantize(decimal.Decimal("0.01")))
-    ... )
-    b'{"amount":"10.12","currency":"USD"}'
-
-.. warning::
-
-    The callable passed to ``decimal_format`` must **not** return a
-    `decimal.Decimal` instance or any nested structure (list, dict, tuple, set)
-    containing `decimal.Decimal`, as this would cause infinite recursion. The
-    callable should return a `str`, `int`, `float`, or other JSON-serializable
-    type. If the callable returns a value containing a `decimal.Decimal`, a
-    `TypeError` will be raised.
 
 JSON will also decode `decimal.Decimal` values from ``int`` or
 ``float`` inputs. For JSON the value is parsed directly from the serialized

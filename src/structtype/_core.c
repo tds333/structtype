@@ -462,7 +462,7 @@ typedef struct {
     PyObject *str_type;
     PyObject *str_strict;
     PyObject *str_sort_keys;
-    PyObject *str_decimal_format;
+    PyObject *str_decimal_as_number;
     PyObject *str_uuid_format;
     PyObject *str_utcoffset;
     PyObject *str___origin__;
@@ -543,13 +543,6 @@ static int
 ms_err_truncated(void)
 {
     PyErr_SetString(structtype_get_global_state()->DecodeError, "Input data was truncated");
-    return -1;
-}
-
-static int
-ms_decimal_format_error(void)
-{
-    PyErr_SetString(PyExc_TypeError, "callable returned a value containing a Decimal");
     return -1;
 }
 
@@ -4384,12 +4377,12 @@ static PyTypeObject TimezoneConstraint_Type = {
  *************************************************************************/
 
 static int
-parse_sort_keys_arg(PyObject *sort_keys, bool *out) {
-    if (sort_keys == NULL || sort_keys == Py_None) {
+parse_bool_arg(PyObject *obj, bool *out) {
+    if (obj == NULL || obj == Py_None) {
         *out = false;
         return 0;
     }
-    int truth = PyObject_IsTrue(sort_keys);
+    int truth = PyObject_IsTrue(obj);
     if (truth < 0) {
         return -1;
     }
@@ -10335,18 +10328,17 @@ PyDoc_STRVAR(Struct_rich_repr__doc__,
 );
 
 PyDoc_STRVAR(Struct_dump_json__doc__,
-"struct_dump_json(self, *, decimal_format=None, uuid_format=None, sort_keys=False)\n"
+"struct_dump_json(self, *, decimal_as_number=False, uuid_format=None, sort_keys=False)\n"
 "--\n"
 "\n"
 "Serialize this struct to JSON bytes.\n"
 "\n"
 "Parameters\n"
 "----------\n"
-"decimal_format : str or callable, optional\n"
-"    Controls how ``decimal.Decimal`` values are encoded. If ``\"string\"``\n"
-"    (default), encodes as JSON strings. If ``\"number\"``, encodes as JSON\n"
-"    numbers. A callable is called with each decimal value and should return\n"
-"    an encodable type.\n"
+"decimal_as_number : bool, optional\n"
+"    Controls how ``decimal.Decimal`` values are encoded. If ``False``\n"
+"    (default), encodes as JSON strings. If ``True``, encodes as JSON\n"
+"    numbers (may lose precision when decoded by some libraries).\n"
 "uuid_format : str, optional\n"
 "    Controls how ``uuid.UUID`` values are encoded. If ``\"canonical\"``\n"
 "    (default), encodes in canonical form (``xxxxxxxx-xxxx-xxxx-xxxx-\n"
@@ -11316,12 +11308,6 @@ found_val:
 #define ENC_INIT_BUFSIZE 256
 #define ENC_LINES_INIT_BUFSIZE 1024
 
-enum decimal_format {
-    DECIMAL_FORMAT_STRING = 0,
-    DECIMAL_FORMAT_NUMBER = 1,
-    DECIMAL_FORMAT_CALLABLE = 2,
-};
-
 enum uuid_format {
     UUID_FORMAT_CANONICAL = 0,
     UUID_FORMAT_HEX = 1,
@@ -11330,12 +11316,10 @@ enum uuid_format {
 typedef struct EncoderState {
     StructspecState *mod;          /* module reference */
     PyObject *codecs;           /* current per-field {type: dump} map, or NULL */
-    PyObject *decimal_callable; /* `decimal_format` callable */
-    enum decimal_format decimal_format;
+    bool decimal_as_number;     /* encode Decimal as JSON number instead of string */
     enum uuid_format uuid_format;
     bool sort_keys;
     char* (*resize_buffer)(PyObject**, Py_ssize_t);  /* callback for resizing buffer */
-    bool in_decimal_callable;
 
     char *output_buffer_raw;    /* raw pointer to output_buffer internal buffer */
     Py_ssize_t output_len;      /* Length of output_buffer */
@@ -11345,9 +11329,8 @@ typedef struct EncoderState {
 
 typedef struct Encoder {
     PyObject_HEAD
-    PyObject *decimal_callable;
     StructspecState *mod;
-    enum decimal_format decimal_format;
+    bool decimal_as_number;
     enum uuid_format uuid_format;
     bool sort_keys;
 } Encoder;
@@ -11410,52 +11393,23 @@ ms_write(EncoderState *self, const char *s, Py_ssize_t n)
 static int
 Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
 {
-    char *kwlist[] = {"decimal_format", "uuid_format", "sort_keys", NULL};
-    PyObject *decimal_format = NULL, *uuid_format = NULL, *sort_keys = NULL;
+    char *kwlist[] = {"decimal_as_number", "uuid_format", "sort_keys", NULL};
+    PyObject *decimal_as_number = NULL, *uuid_format = NULL, *sort_keys = NULL;
 
     if (
         !PyArg_ParseTupleAndKeywords(
             args, kwds, "|$OOO", kwlist,
-            &decimal_format, &uuid_format, &sort_keys
+            &decimal_as_number, &uuid_format, &sort_keys
         )
     ) {
         return -1;
     }
 
-    /* Process decimal format. Validation happens on locals, with the
+    /* Process decimal_as_number. Validation happens on locals, with the
      * result only applied to `self` at the end of init, so that a
-     * re-initialization never loses a reference held by a previous
-     * initialization (or on a failed one). */
-    int dec_fmt = DECIMAL_FORMAT_STRING;
-    PyObject *dec_callable = NULL;
-    if (decimal_format == NULL) {
-        dec_fmt = DECIMAL_FORMAT_STRING;
-    }
-    else if (PyCallable_Check(decimal_format)) {
-        dec_fmt = DECIMAL_FORMAT_CALLABLE;
-        dec_callable = decimal_format;
-    }
-    else {
-        bool ok = false;
-        if (PyUnicode_CheckExact(decimal_format)) {
-            if (PyUnicode_CompareWithASCIIString(decimal_format, "string") == 0) {
-                dec_fmt = DECIMAL_FORMAT_STRING;
-                ok = true;
-            }
-            else if (PyUnicode_CompareWithASCIIString(decimal_format, "number") == 0) {
-                dec_fmt = DECIMAL_FORMAT_NUMBER;
-                ok = true;
-            }
-        }
-        if (!ok) {
-            PyErr_Format(
-                PyExc_ValueError,
-                "`decimal_format` must be 'string', 'number', or a callable, got %R",
-                decimal_format
-            );
-            return -1;
-        }
-    }
+     * re-initialization never loses configuration on a failed one. */
+    bool dec_as_number = false;
+    if (parse_bool_arg(decimal_as_number, &dec_as_number) < 0) return -1;
 
     /* Process uuid format */
     if (uuid_format == NULL) {
@@ -11484,38 +11438,17 @@ Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
     }
 
     /* Process sort_keys */
-    if (parse_sort_keys_arg(sort_keys, &self->sort_keys) < 0) return -1;
+    if (parse_bool_arg(sort_keys, &self->sort_keys) < 0) return -1;
 
     /* All arguments validated, apply the new configuration */
-    Py_CLEAR(self->decimal_callable);
-    self->decimal_format = dec_fmt;
-    if (dec_callable != NULL) {
-        Py_INCREF(dec_callable);
-        self->decimal_callable = dec_callable;
-    }
+    self->decimal_as_number = dec_as_number;
     self->mod = structtype_get_global_state();
-    return 0;
-}
-
-static int
-Encoder_traverse(Encoder *self, visitproc visit, void *arg)
-{
-    Py_VISIT(self->decimal_callable);
-    return 0;
-}
-
-static int
-Encoder_clear(Encoder *self)
-{
-    Py_CLEAR(self->decimal_callable);
     return 0;
 }
 
 static void
 Encoder_dealloc(Encoder *self)
 {
-    PyObject_GC_UnTrack(self);
-    Encoder_clear(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -11548,9 +11481,7 @@ encoder_encode_common(
     EncoderState state = {
         .mod = self->mod,
         .codecs = NULL,
-        .decimal_format = self->decimal_format,
-        .decimal_callable = self->decimal_callable,
-        .in_decimal_callable = false,
+        .decimal_as_number = self->decimal_as_number,
         .uuid_format = self->uuid_format,
         .sort_keys = self->sort_keys,
         .output_len = 0,
@@ -11578,7 +11509,7 @@ encode_common(
     int(*encode)(EncoderState*, PyObject*)
 )
 {
-    PyObject *sort_keys = NULL, *decimal_format = NULL, *uuid_format = NULL;
+    PyObject *sort_keys = NULL, *decimal_as_number = NULL, *uuid_format = NULL;
     StructspecState *mod = structtype_get_state(module);
 
     /* Parse arguments */
@@ -11586,7 +11517,7 @@ encode_common(
     if (kwnames != NULL) {
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
         if ((sort_keys = find_keyword(kwnames, args + nargs, mod->str_sort_keys)) != NULL) nkwargs--;
-        if ((decimal_format = find_keyword(kwnames, args + nargs, mod->str_decimal_format)) != NULL) nkwargs--;
+        if ((decimal_as_number = find_keyword(kwnames, args + nargs, mod->str_decimal_as_number)) != NULL) nkwargs--;
         if ((uuid_format = find_keyword(kwnames, args + nargs, mod->str_uuid_format)) != NULL) nkwargs--;
         if (nkwargs > 0) {
             PyErr_SetString(
@@ -11597,38 +11528,9 @@ encode_common(
         }
     }
 
-    /* Process decimal format */
-    int dec_fmt = DECIMAL_FORMAT_STRING;
-    PyObject *dec_callable = NULL;
-    if (decimal_format == Py_None) { decimal_format = NULL; }
-    if (decimal_format != NULL) {
-        if (PyCallable_Check(decimal_format)) {
-            dec_fmt = DECIMAL_FORMAT_CALLABLE;
-            dec_callable = decimal_format;
-        }
-        else if (PyUnicode_CheckExact(decimal_format)) {
-            if (PyUnicode_CompareWithASCIIString(decimal_format, "string") == 0) {
-                dec_fmt = DECIMAL_FORMAT_STRING;
-            }
-            else if (PyUnicode_CompareWithASCIIString(decimal_format, "number") == 0) {
-                dec_fmt = DECIMAL_FORMAT_NUMBER;
-            }
-            else {
-                PyErr_Format(PyExc_ValueError,
-                    "`decimal_format` must be 'string', 'number', or a callable, got %R",
-                    decimal_format
-                );
-                return NULL;
-            }
-        }
-        else {
-            PyErr_Format(PyExc_ValueError,
-                "`decimal_format` must be 'string', 'number', or a callable, got %R",
-                decimal_format
-            );
-            return NULL;
-        }
-    }
+    /* Process decimal_as_number */
+    bool dec_as_number = false;
+    if (parse_bool_arg(decimal_as_number, &dec_as_number) < 0) return NULL;
 
     /* Process uuid format */
     int uuid_fmt = UUID_FORMAT_CANONICAL;
@@ -11661,16 +11563,14 @@ encode_common(
     EncoderState state = {
         .mod = mod,
         .codecs = NULL,
-        .decimal_format = dec_fmt,
-        .decimal_callable = dec_callable,
-        .in_decimal_callable = false,
+        .decimal_as_number = dec_as_number,
         .uuid_format = uuid_fmt,
         .output_len = 0,
         .max_output_len = ENC_INIT_BUFSIZE,
         .resize_buffer = &ms_resize_bytes
     };
 
-    if (parse_sort_keys_arg(sort_keys, &state.sort_keys) < 0) return NULL;
+    if (parse_bool_arg(sort_keys, &state.sort_keys) < 0) return NULL;
 
     state.output_buffer = PyBytes_FromStringAndSize(NULL, state.max_output_len);
     if (state.output_buffer == NULL) return NULL;
@@ -11689,16 +11589,12 @@ static PyMemberDef Encoder_members[] = {
 };
 
 static PyObject*
-Encoder_decimal_format(Encoder *self, void *closure) {
-    if (self->decimal_format == DECIMAL_FORMAT_STRING) {
-        return PyUnicode_InternFromString("string");
-    }
-    else if (self->decimal_format == DECIMAL_FORMAT_NUMBER) {
-        return PyUnicode_InternFromString("number");
+Encoder_decimal_as_number(Encoder *self, void *closure) {
+    if (self->decimal_as_number) {
+        Py_RETURN_TRUE;
     }
     else {
-        Py_INCREF(self->decimal_callable);
-        return self->decimal_callable;
+        Py_RETURN_FALSE;
     }
 }
 
@@ -11723,7 +11619,7 @@ Encoder_sort_keys(Encoder *self, void *closure) {
 }
 
 static PyGetSetDef Encoder_getset[] = {
-    {"decimal_format", (getter) Encoder_decimal_format, NULL, NULL, NULL},
+    {"decimal_as_number", (getter) Encoder_decimal_as_number, NULL, NULL, NULL},
     {"uuid_format", (getter) Encoder_uuid_format, NULL, NULL, NULL},
     {"sort_keys", (getter) Encoder_sort_keys, NULL, NULL, NULL},
     {NULL},
@@ -14374,25 +14270,18 @@ maybe_parse_number(
  *************************************************************************/
 
 PyDoc_STRVAR(JSONEncoder__doc__,
-"Encoder(*, enc_hook=None, decimal_format='string', uuid_format='canonical', sort_keys=False)\n"
+"Encoder(*, decimal_as_number=False, uuid_format='canonical', sort_keys=False)\n"
 "--\n"
 "\n"
 "A JSON encoder.\n"
 "\n"
 "Parameters\n"
 "----------\n"
-"enc_hook : callable, optional\n"
-"    A callable to call for objects that aren't supported structtype types. Takes\n"
-"    the unsupported object and should return a supported object, or raise a\n"
-"    ``NotImplementedError`` if unsupported.\n"
-"decimal_format : {'string', 'number'} or callable, optional\n"
-"    The format to use for encoding `decimal.Decimal` objects. If 'string'\n"
-"    they're encoded as strings, if 'number', they're encoded as floats. If\n"
-"    a callable is provided, it will be called with the `decimal.Decimal`\n"
-"    object and must return a JSON-serializable value (but **not** another\n"
-"    `decimal.Decimal` or a nested structure containing `decimal.Decimal`).\n"
-"    Defaults to 'string', which is the recommended value since 'number' may\n"
-"    result in precision loss when decoding for some JSON library implementations.\n"
+"decimal_as_number : bool, optional\n"
+"    Controls how `decimal.Decimal` objects are encoded. If ``False``\n"
+"    (default), they're encoded as strings. If ``True``, they're encoded as\n"
+"    numbers, which may result in precision loss when decoding for some JSON\n"
+"    library implementations.\n"
 "uuid_format : {'canonical', 'hex'}, optional\n"
 "    The format to use for encoding `uuid.UUID` objects. The 'canonical'\n"
 "    and 'hex' formats encode them as strings with and without hyphens\n"
@@ -14730,28 +14619,12 @@ json_encode_uuid(EncoderState *self, PyObject *obj)
 static int
 json_encode_decimal(EncoderState *self, PyObject *obj)
 {
-    PyObject *temp;
-
-    if (self->decimal_format == DECIMAL_FORMAT_CALLABLE) {
-        if (self->in_decimal_callable) {
-            return ms_decimal_format_error();
-        }
-        temp = PyObject_CallFunctionObjArgs(self->decimal_callable, obj, NULL);
-        if (temp == NULL) return -1;
-
-        self->in_decimal_callable = true;
-        int out = json_encode(self, temp);
-        self->in_decimal_callable = false;
-        Py_DECREF(temp);
-        return out;
-    }
-
-    temp = PyObject_Str(obj);
+    PyObject *temp = PyObject_Str(obj);
     if (temp == NULL) return -1;
 
     Py_ssize_t size;
     const char* buf = unicode_str_and_size_nocheck(temp, &size);
-    bool decimal_as_string = (self->decimal_format == DECIMAL_FORMAT_STRING);
+    bool decimal_as_string = !self->decimal_as_number;
 
     Py_ssize_t required = size + (2 * decimal_as_string);
     if (ms_ensure_space(self, size + 2) < 0) {
@@ -15534,9 +15407,7 @@ static PyTypeObject JSONEncoder_Type = {
     .tp_doc = JSONEncoder__doc__,
     .tp_basicsize = sizeof(Encoder),
     .tp_dealloc = (destructor)Encoder_dealloc,
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
-    .tp_traverse = (traverseproc)Encoder_traverse,
-    .tp_clear = (inquiry)Encoder_clear,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_new = PyType_GenericNew,
     .tp_init = (initproc)Encoder_init,
     .tp_methods = JSONEncoder_methods,
@@ -18997,7 +18868,7 @@ structtype_dump(PyObject *self, PyObject *args, PyObject *kwargs)
     state.builtin_types_seq = NULL;
     state.codecs = NULL;
 
-    if (parse_sort_keys_arg(sort_keys, &state.sort_keys) < 0) return NULL;
+    if (parse_bool_arg(sort_keys, &state.sort_keys) < 0) return NULL;
 
     if (
         ms_process_builtin_types(
@@ -20786,7 +20657,7 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
     state.str_keys = str_keys;
     state.builtin_types = 0;
     state.builtin_types_seq = NULL;
-    if (parse_sort_keys_arg(sort_keys, &state.sort_keys) < 0) return NULL;
+    if (parse_bool_arg(sort_keys, &state.sort_keys) < 0) return NULL;
     state.codecs = NULL;
     if (ms_process_builtin_types(mod, builtin_types,
             &(state.builtin_types), &(state.builtin_types_seq)) < 0) {
@@ -21091,7 +20962,7 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->str_type);
     Py_CLEAR(st->str_strict);
     Py_CLEAR(st->str_sort_keys);
-    Py_CLEAR(st->str_decimal_format);
+    Py_CLEAR(st->str_decimal_as_number);
     Py_CLEAR(st->str_uuid_format);
     Py_CLEAR(st->str_utcoffset);
     Py_CLEAR(st->str___origin__);
@@ -21522,7 +21393,7 @@ PyInit__core(void)
     CACHED_STRING(str_type, "type");
     CACHED_STRING(str_strict, "strict");
     CACHED_STRING(str_sort_keys, "sort_keys");
-    CACHED_STRING(str_decimal_format, "decimal_format");
+    CACHED_STRING(str_decimal_as_number, "decimal_as_number");
     CACHED_STRING(str_uuid_format, "uuid_format");
     CACHED_STRING(str_utcoffset, "utcoffset");
     CACHED_STRING(str___origin__, "__origin__");

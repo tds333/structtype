@@ -88,7 +88,7 @@ class StructAdapter:
         self,
         obj,
         *,
-        decimal_format=None,
+        decimal_as_number=False,
         uuid_format=None,
         sort_keys=False,
     ):
@@ -98,8 +98,9 @@ class StructAdapter:
         ----------
         obj : Any
             A value to encode. Must match the adapter's type.
-        decimal_format : str or callable, optional
-            Controls how ``Decimal`` values are encoded.
+        decimal_as_number : bool, optional
+            If True, ``Decimal`` values are encoded as JSON numbers instead
+            of strings (may lose precision when decoded).
         uuid_format : str, optional
             Controls how ``UUID`` values are encoded.
         sort_keys : bool, optional
@@ -107,7 +108,7 @@ class StructAdapter:
         """
         return _json_encode(
             obj,
-            decimal_format=decimal_format,
+            decimal_as_number=decimal_as_number,
             uuid_format=uuid_format,
             sort_keys=sort_keys,
         )

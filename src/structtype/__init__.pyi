@@ -81,9 +81,7 @@ class Struct(metaclass=StructMeta):
     def struct_dump_json(
         self,
         *,
-        decimal_format: Literal["string", "number"]
-        | Callable[[Any], Any]
-        | None = None,
+        decimal_as_number: bool = False,
         uuid_format: Literal["canonical", "hex"] | None = None,
         sort_keys: bool = False,
     ) -> bytes: ...
@@ -292,9 +290,7 @@ class StructAdapter:
         self,
         obj: Any,
         *,
-        decimal_format: Literal["string", "number"]
-        | Callable[[Any], Any]
-        | None = None,
+        decimal_as_number: bool = False,
         uuid_format: Literal["canonical", "hex"] | None = None,
         sort_keys: bool = False,
     ) -> bytes: ...

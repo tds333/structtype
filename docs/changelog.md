@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Breaking:** remove `decimal_format` and add `decimal_as_number`. The
+  `decimal_format` keyword argument (`"string"`, `"number"`, or a callable) is
+  removed from `struct_dump_json` on both `Struct` and `StructAdapter`; passing
+  it now raises a `TypeError`. It is replaced by `decimal_as_number: bool =
+  False`: `False` (default) encodes `decimal.Decimal` values as JSON strings,
+  `True` encodes them as JSON numbers. The value is parsed by truthiness, like
+  `sort_keys`. Callable support is removed entirely — a callable emitting
+  anything other than a string or number could never be decoded back into a
+  `Decimal`-typed field (only JSON strings and numbers are parsed as
+  `Decimal`), so the custom-shaping use case had no working round trip. Custom
+  shaping now requires a wrapper type with a `struct_dump` / `struct_validate`
+  protocol method. Hard break with no deprecation shims.
+
+  Migration:
+
+  | Old | New |
+  |---|---|
+  | `obj.struct_dump_json(decimal_format="number")` | `obj.struct_dump_json(decimal_as_number=True)` |
+  | `obj.struct_dump_json(decimal_format="string")` | `obj.struct_dump_json()` (default) |
+  | `obj.struct_dump_json(decimal_format=fn)` | no direct equivalent — encode as str/number or use a wrapper type |
+
 - **Breaking:** `struct_config` now returns exactly what the user specified in
   the class body (the sparse `StructConfig` dict), not the fully-resolved
   config. `__struct_config__` continues to return the fully-resolved dict with
