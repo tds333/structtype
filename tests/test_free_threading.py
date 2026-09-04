@@ -79,6 +79,43 @@ def test_concurrent_validate_json():
         t.join()
 
 
+def test_concurrent_struct_info_fastpath():
+    """Concurrent decode/validate/check_types on the same class.
+
+    Threads start before the first decode, so the StructInfo is created
+    under contention (critical section) and then served via the lock-free
+    fast path. Nested structs exercise the same at depth."""
+    class Inner(Struct):
+        v: int
+
+    class Outer(Struct):
+        inner: Inner
+
+    data = b'{"inner":{"v":1}}'
+    obj_dict = {"inner": {"v": 1}}
+    nthreads = 8
+    barrier = threading.Barrier(nthreads)
+    errors = []
+
+    def worker():
+        try:
+            barrier.wait()
+            for _ in range(200):
+                outer = Outer.struct_validate_json(data)
+                assert outer == Outer(Inner(1))
+                assert Outer.struct_validate(obj_dict) == Outer(Inner(1))
+                assert outer.struct_check_types() is None
+        except BaseException as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(nthreads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+
+
 def test_concurrent_dict_decode():
     """Stress concurrent untyped dict decoding from multiple threads.
 

@@ -4751,9 +4751,7 @@ typedef struct {
 typedef struct {
     PyObject_VAR_HEAD
     Py_ssize_t nrequired;
-#ifdef Py_GIL_DISABLED
     _Atomic(uint8_t) initialized;
-#endif
     TypedDictField fields[];
 } TypedDictInfo;
 
@@ -4768,9 +4766,7 @@ typedef struct {
     PyObject *pre_init;
     PyObject *post_init;
     PyObject *defaults;
-#ifdef Py_GIL_DISABLED
     _Atomic(uint8_t) initialized;
-#endif
     DataclassField fields[];
 } DataclassInfo;
 
@@ -4778,9 +4774,7 @@ typedef struct {
     PyObject_VAR_HEAD
     PyObject *class;
     PyObject *defaults;
-#ifdef Py_GIL_DISABLED
     _Atomic(uint8_t) initialized;
-#endif
     TypeNode *types[];
 } NamedTupleInfo;
 
@@ -4800,7 +4794,7 @@ typedef struct {
     MS_StrView *struct_alias_keys;   /* raw UTF-8 views of alias fields, NULL if none */
     MS_StrView struct_tag_field_view; /* raw UTF-8 view of tag field, valid if tag_field set */
     PyObject *struct_module;          /* owning structtype module, or NULL */
-    struct StructInfo *struct_info;
+    _Atomic(struct StructInfo *) struct_info;
     Py_ssize_t nkwonly;
     Py_ssize_t n_trailing_defaults;
     PyObject *struct_tag_field;  /* str or NULL */
@@ -4825,9 +4819,7 @@ typedef struct {
 typedef struct StructInfo {
     PyObject_VAR_HEAD
     StructMetaObject *class;
-#ifdef Py_GIL_DISABLED
     _Atomic(uint8_t) initialized;
-#endif
     TypeNode *types[];
 } StructInfo;
 
@@ -4908,7 +4900,6 @@ static MS_INLINE StructInfo *
 TypeNode_get_struct_info(TypeNode *type) {
     /* Struct types are always first */
     StructInfo *info = type->details[0].pointer;
-#ifdef Py_GIL_DISABLED
     if (atomic_load(&info->initialized)) {
         return info;
     }
@@ -4917,7 +4908,6 @@ TypeNode_get_struct_info(TypeNode *type) {
     while (!atomic_load(&info->initialized)) {
     }
     Py_END_ALLOW_THREADS
-#endif
     return info;
 }
 
@@ -4971,7 +4961,6 @@ static MS_INLINE TypedDictInfo *
 TypeNode_get_typeddict_info(TypeNode *type) {
     Py_ssize_t i = ms_popcount(type->types & (SLOT_00 | SLOT_01 | SLOT_02));
     TypedDictInfo *info = type->details[i].pointer;
-#ifdef Py_GIL_DISABLED
     if (atomic_load(&info->initialized)) {
         return info;
     }
@@ -4980,7 +4969,6 @@ TypeNode_get_typeddict_info(TypeNode *type) {
     while (!atomic_load(&info->initialized)) {
     }
     Py_END_ALLOW_THREADS
-#endif
     return info;
 }
 
@@ -4988,7 +4976,6 @@ static MS_INLINE DataclassInfo *
 TypeNode_get_dataclass_info(TypeNode *type) {
     Py_ssize_t i = ms_popcount(type->types & (SLOT_00 | SLOT_01 | SLOT_02));
     DataclassInfo *info = type->details[i].pointer;
-#ifdef Py_GIL_DISABLED
     if (atomic_load(&info->initialized)) {
         return info;
     }
@@ -4997,7 +4984,6 @@ TypeNode_get_dataclass_info(TypeNode *type) {
     while (!atomic_load(&info->initialized)) {
     }
     Py_END_ALLOW_THREADS
-#endif
     return info;
 }
 
@@ -5009,7 +4995,6 @@ TypeNode_get_namedtuple_info(TypeNode *type) {
         )
     );
     NamedTupleInfo *info = type->details[i].pointer;
-#ifdef Py_GIL_DISABLED
     if (atomic_load(&info->initialized)) {
         return info;
     }
@@ -5018,7 +5003,6 @@ TypeNode_get_namedtuple_info(TypeNode *type) {
     while (!atomic_load(&info->initialized)) {
     }
     Py_END_ALLOW_THREADS
-#endif
     return info;
 }
 
@@ -9230,9 +9214,7 @@ StructInfo_Convert_lock_held(PyObject *obj) {
     for (Py_ssize_t i = 0; i < nfields; i++) {
         info->types[i] = NULL;
     }
-#ifdef Py_GIL_DISABLED
     atomic_store(&info->initialized, 0);
-#endif
     Py_INCREF(class);
     info->class = class;
 
@@ -9259,9 +9241,7 @@ StructInfo_Convert_lock_held(PyObject *obj) {
     Py_DECREF(class);
     Py_DECREF(annotations);
     PyObject_GC_Track(info);
-#ifdef Py_GIL_DISABLED
     atomic_store(&info->initialized, 1);
-#endif
     return (PyObject *)info;
 
 error:
@@ -9289,6 +9269,19 @@ error:
 static PyObject *
 StructInfo_Convert(PyObject *obj) {
     PyObject *res = NULL;
+    /* Fast path: lock-free read of an already-published, fully
+     * initialized StructInfo. Falls through to the critical section
+     * when the info is unset or still being built by another thread
+     * (rare: first concurrent use of a class). */
+    if (ms_is_struct_cls(obj)) {
+        StructInfo *info = atomic_load(
+            &((StructMetaObject *)obj)->struct_info
+        );
+        if (info != NULL && atomic_load(&info->initialized)) {
+            Py_INCREF(info);
+            return (PyObject *)info;
+        }
+    }
     Py_BEGIN_CRITICAL_SECTION(obj);
     res = StructInfo_Convert_lock_held(obj);
     Py_END_CRITICAL_SECTION();
@@ -10664,9 +10657,7 @@ TypedDictInfo_Convert_lock_held(PyObject *obj) {
     /* Initialize nrequired to -1 as a flag in case of a recursive TypedDict
     * definition. */
     info->nrequired = -1;
-#ifdef Py_GIL_DISABLED
     atomic_store(&info->initialized, 0);
-#endif
 
     /* If not already cached, then cache on TypedDict object _before_
     * traversing fields. This is to ensure self-referential TypedDicts work. */
@@ -10692,9 +10683,7 @@ TypedDictInfo_Convert_lock_held(PyObject *obj) {
     info->nrequired = PySet_GET_SIZE(required);
 
     PyObject_GC_Track(info);
-#ifdef Py_GIL_DISABLED
     atomic_store(&info->initialized, 1);
-#endif
     succeeded = true;
 
 cleanup:
@@ -10868,9 +10857,7 @@ DataclassInfo_Convert_lock_held(PyObject *obj) {
         Py_INCREF(post_init);
         info->post_init = post_init;
     }
-#ifdef Py_GIL_DISABLED
     atomic_store(&info->initialized, 0);
-#endif
 
     /* If not already cached, then cache on Dataclass object _before_
     * traversing fields. This is to ensure self-referential Dataclasses work. */
@@ -10894,9 +10881,7 @@ DataclassInfo_Convert_lock_held(PyObject *obj) {
     }
 
     PyObject_GC_Track(info);
-#ifdef Py_GIL_DISABLED
     atomic_store(&info->initialized, 1);
-#endif
     succeeded = true;
 
 cleanup:
@@ -11089,9 +11074,7 @@ NamedTupleInfo_Convert_lock_held(PyObject *obj) {
     for (Py_ssize_t i = 0; i < nfields; i++) {
         info->types[i] = NULL;
     }
-#ifdef Py_GIL_DISABLED
     atomic_store(&info->initialized, 0);
-#endif
 
     /* If not already cached, then cache on NamedTuple object _before_
     * traversing fields. This is to ensure self-referential NamedTuple work. */
@@ -11125,9 +11108,7 @@ NamedTupleInfo_Convert_lock_held(PyObject *obj) {
     info->defaults = PyList_AsTuple(defaults_list);
     if (info->defaults == NULL) goto cleanup;
     PyObject_GC_Track(info);
-#ifdef Py_GIL_DISABLED
     atomic_store(&info->initialized, 1);
-#endif
 
     succeeded = true;
 
