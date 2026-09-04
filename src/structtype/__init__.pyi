@@ -166,12 +166,41 @@ class Constraint:
 
 @final
 class NumericConstraint(Constraint):
+    # Numeric bounds. You can't mix:
+    # - `gt` and `ge`
+    # - `lt` and `le`
+    # Cross-pair combinations (`gt` with `le`, `ge` with `lt`) are valid,
+    # so all four pairings are enumerated as separate overloads. The C
+    # runtime raises `ValueError` for the invalid pairings.
+    @overload
     def __init__(
         self,
         *,
         gt: int | float | None = None,
+        lt: int | float | None = None,
+        multiple_of: int | float | None = None,
+    ) -> None: ...
+    @overload
+    def __init__(
+        self,
+        *,
+        gt: int | float | None = None,
+        le: int | float | None = None,
+        multiple_of: int | float | None = None,
+    ) -> None: ...
+    @overload
+    def __init__(
+        self,
+        *,
         ge: int | float | None = None,
         lt: int | float | None = None,
+        multiple_of: int | float | None = None,
+    ) -> None: ...
+    @overload
+    def __init__(
+        self,
+        *,
+        ge: int | float | None = None,
         le: int | float | None = None,
         multiple_of: int | float | None = None,
     ) -> None: ...

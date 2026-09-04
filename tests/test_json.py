@@ -3440,3 +3440,68 @@ class TestMalformedTemporalStrings:
             structtype.ValidationError, match="Invalid RFC3339 encoded datetime"
         ):
             cls.struct_validate_json(b'{"v": ' + bad + b"}")
+
+
+class _ConstDecimal:
+    """Callable for custom ``Decimal`` formatting, with a stable refcount."""
+
+    def __call__(self, v):
+        return 42
+
+
+class TestReinitReferenceLifecycle:
+    """Re-initializing an Encoder/Decoder must not leak the state held by a
+    previous initialization (upstream msgspec gh-1040 class of bug)."""
+
+    def test_encoder_reinit_no_leak(self):
+        f = _ConstDecimal()
+        base = sys.getrefcount(f)
+
+        enc = JSONEncoder(decimal_format=f)
+        assert sys.getrefcount(f) == base + 1
+
+        # Re-initializing with the same callable must not accumulate refs
+        enc.__init__(decimal_format=f)
+        enc.__init__(decimal_format=f)
+        assert sys.getrefcount(f) == base + 1
+
+        # Switching away drops the reference
+        enc.__init__(decimal_format="number")
+        assert sys.getrefcount(f) == base
+        assert enc.encode(Decimal("1.5")) == b"1.5"
+
+    def test_encoder_failed_reinit_preserves_config(self):
+        enc = JSONEncoder(decimal_format="number")
+        with pytest.raises(ValueError, match="decimal_format"):
+            enc.__init__(decimal_format="bogus")
+        # The encoder keeps its previous configuration and stays usable
+        assert enc.encode(Decimal("1.5")) == b"1.5"
+
+    def test_decoder_reinit_no_leak(self):
+        t = list[list[int]]
+        base = sys.getrefcount(t)
+
+        dec = JSONDecoder(t)
+        assert sys.getrefcount(t) == base + 1
+
+        # Re-initializing with the same type must not accumulate refs
+        dec.__init__(t)
+        dec.__init__(t)
+        assert sys.getrefcount(t) == base + 1
+        assert dec.decode(b"[[1]]") == [[1]]
+
+        # Switching away drops the reference
+        dec.__init__(int)
+        assert sys.getrefcount(t) == base
+
+    def test_decoder_failed_reinit_preserves_config(self):
+        t = list[list[int]]
+        base = sys.getrefcount(t)
+        dec = JSONDecoder(t)
+
+        with pytest.raises(TypeError, match="is not supported"):
+            dec.__init__(type=123)
+
+        # Old configuration and refcount are untouched
+        assert dec.decode(b"[[1]]") == [[1]]
+        assert sys.getrefcount(t) == base + 1

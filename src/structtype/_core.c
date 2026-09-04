@@ -11422,25 +11422,28 @@ Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
         return -1;
     }
 
-    /* Process decimal format */
-    self->decimal_callable = NULL;
+    /* Process decimal format. Validation happens on locals, with the
+     * result only applied to `self` at the end of init, so that a
+     * re-initialization never loses a reference held by a previous
+     * initialization (or on a failed one). */
+    int dec_fmt = DECIMAL_FORMAT_STRING;
+    PyObject *dec_callable = NULL;
     if (decimal_format == NULL) {
-        self->decimal_format = DECIMAL_FORMAT_STRING;
+        dec_fmt = DECIMAL_FORMAT_STRING;
     }
     else if (PyCallable_Check(decimal_format)) {
-        self->decimal_format = DECIMAL_FORMAT_CALLABLE;
-        Py_INCREF(decimal_format);
-        self->decimal_callable = decimal_format;
+        dec_fmt = DECIMAL_FORMAT_CALLABLE;
+        dec_callable = decimal_format;
     }
     else {
         bool ok = false;
         if (PyUnicode_CheckExact(decimal_format)) {
             if (PyUnicode_CompareWithASCIIString(decimal_format, "string") == 0) {
-                self->decimal_format = DECIMAL_FORMAT_STRING;
+                dec_fmt = DECIMAL_FORMAT_STRING;
                 ok = true;
             }
             else if (PyUnicode_CompareWithASCIIString(decimal_format, "number") == 0) {
-                self->decimal_format = DECIMAL_FORMAT_NUMBER;
+                dec_fmt = DECIMAL_FORMAT_NUMBER;
                 ok = true;
             }
         }
@@ -11483,6 +11486,13 @@ Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
     /* Process sort_keys */
     if (parse_sort_keys_arg(sort_keys, &self->sort_keys) < 0) return -1;
 
+    /* All arguments validated, apply the new configuration */
+    Py_CLEAR(self->decimal_callable);
+    self->decimal_format = dec_fmt;
+    if (dec_callable != NULL) {
+        Py_INCREF(dec_callable);
+        self->decimal_callable = dec_callable;
+    }
     self->mod = structtype_get_global_state();
     return 0;
 }
@@ -15605,9 +15615,16 @@ JSONDecoder_init(JSONDecoder *self, PyObject *args, PyObject *kwds)
     /* Handle strict */
     self->strict = strict;
 
-    /* Handle type */
-    self->type = TypeNode_Convert(type);
-    if (self->type == NULL) return -1;
+    /* Handle type. Convert into a local first, so a failed
+     * re-initialization preserves the previous configuration. */
+    TypeNode *new_type = TypeNode_Convert(type);
+    if (new_type == NULL) return -1;
+
+    /* Free any state held by a previous initialization */
+    TypeNode_Free(self->type);
+    Py_CLEAR(self->orig_type);
+
+    self->type = new_type;
     Py_INCREF(type);
     self->orig_type = type;
 

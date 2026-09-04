@@ -29,6 +29,16 @@ class Num(Struct):
 num = Num(a=1, b=0.5, c="abc", d=4)
 fa: int = num.a
 
+# All four valid bound pairings. Mixing `gt` with `ge` or `lt` with `le` is
+# rejected by the overloads in the type stubs (and by the runtime).
+nc1 = NumericConstraint(gt=1, lt=5)
+nc2 = NumericConstraint(gt=1, le=5)
+nc3 = NumericConstraint(ge=1, lt=5)
+nc4 = NumericConstraint(ge=1, le=5)
+nc5 = NumericConstraint(multiple_of=0.5)
+nc6 = NumericConstraint(gt=1, le=5, multiple_of=0.5)
+nc7 = NumericConstraint(ge=1.5, le=10.5)
+
 
 class Opt(Struct):
     x: int | None | UnsetType = UNSET
