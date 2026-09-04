@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 (2026-09-04)
 
 - **Breaking:** remove `uuid_format` and add `uuid_as_hex`. The
   `uuid_format` keyword argument (`"canonical"`, `"hex"`) is removed from
@@ -8,8 +8,7 @@
   raises a `TypeError`. It is replaced by `uuid_as_hex: bool = False`:
   `False` (default) encodes `uuid.UUID` values as canonical strings (with
   hyphens, same as `str(uuid)`), `True` encodes them as hex strings (same as
-  `uuid.hex`). The value is parsed by truthiness, like `sort_keys`. Decoding
-  still accepts both forms. Hard break with no deprecation shims.
+  `uuid.hex`). Decoding still accepts both forms. Hard break with no deprecation shims.
 
   Migration:
 
@@ -23,8 +22,7 @@
   removed from `struct_dump_json` on both `Struct` and `StructAdapter`; passing
   it now raises a `TypeError`. It is replaced by `decimal_as_number: bool =
   False`: `False` (default) encodes `decimal.Decimal` values as JSON strings,
-  `True` encodes them as JSON numbers. The value is parsed by truthiness, like
-  `sort_keys`. Callable support is removed entirely — a callable emitting
+  `True` encodes them as JSON numbers. Callable support is removed entirely — a callable emitting
   anything other than a string or number could never be decoded back into a
   `Decimal`-typed field (only JSON strings and numbers are parsed as
   `Decimal`), so the custom-shaping use case had no working round trip. Custom
