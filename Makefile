@@ -18,8 +18,8 @@ docs-serve: ## Open built docs in browser
 	uv run python -m webbrowser site/index.html
 
 .PHONY: wheels
-wheels: ## build wheels
-	uvx --from cibuildwheel==4.2.0 cibuildwheel
+wheels: ## build wheels (musllinux skipped; unset CIBW_SKIP or run cibuildwheel directly to include it)
+	CIBW_SKIP='*-musllinux_*' uvx --from cibuildwheel==4.2.0 cibuildwheel
 
 ##@ Quality
 .PHONY: test-cov

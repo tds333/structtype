@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fix: musllinux wheels were never built at release — a config-level skip
+  overrode the release build's opt-in. The release build now produces
+  musllinux wheels; local and PR builds still skip them (via
+  `make wheels` / the CI workflow) to stay fast.
+
 ## 0.10.0 (2026-09-04)
 
 - **Breaking:** remove `uuid_format` and add `uuid_as_hex`. The
