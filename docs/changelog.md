@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Breaking:** remove `uuid_format` and add `uuid_as_hex`. The
+  `uuid_format` keyword argument (`"canonical"`, `"hex"`) is removed from
+  `struct_dump_json` on both `Struct` and `StructAdapter`; passing it now
+  raises a `TypeError`. It is replaced by `uuid_as_hex: bool = False`:
+  `False` (default) encodes `uuid.UUID` values as canonical strings (with
+  hyphens, same as `str(uuid)`), `True` encodes them as hex strings (same as
+  `uuid.hex`). The value is parsed by truthiness, like `sort_keys`. Decoding
+  still accepts both forms. Hard break with no deprecation shims.
+
+  Migration:
+
+  | Old | New |
+  |---|---|
+  | `obj.struct_dump_json(uuid_format="hex")` | `obj.struct_dump_json(uuid_as_hex=True)` |
+  | `obj.struct_dump_json(uuid_format="canonical")` | `obj.struct_dump_json()` (default) |
+
 - **Breaking:** remove `decimal_format` and add `decimal_as_number`. The
   `decimal_format` keyword argument (`"string"`, `"number"`, or a callable) is
   removed from `struct_dump_json` on both `Struct` and `StructAdapter`; passing

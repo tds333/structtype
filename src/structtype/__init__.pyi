@@ -82,7 +82,7 @@ class Struct(metaclass=StructMeta):
         self,
         *,
         decimal_as_number: bool = False,
-        uuid_format: Literal["canonical", "hex"] | None = None,
+        uuid_as_hex: bool = False,
         sort_keys: bool = False,
     ) -> bytes: ...
     def struct_dump(
@@ -291,7 +291,7 @@ class StructAdapter:
         obj: Any,
         *,
         decimal_as_number: bool = False,
-        uuid_format: Literal["canonical", "hex"] | None = None,
+        uuid_as_hex: bool = False,
         sort_keys: bool = False,
     ) -> bytes: ...
     def struct_validate(

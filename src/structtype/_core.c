@@ -463,7 +463,7 @@ typedef struct {
     PyObject *str_strict;
     PyObject *str_sort_keys;
     PyObject *str_decimal_as_number;
-    PyObject *str_uuid_format;
+    PyObject *str_uuid_as_hex;
     PyObject *str_utcoffset;
     PyObject *str___origin__;
     PyObject *str___args__;
@@ -10328,7 +10328,7 @@ PyDoc_STRVAR(Struct_rich_repr__doc__,
 );
 
 PyDoc_STRVAR(Struct_dump_json__doc__,
-"struct_dump_json(self, *, decimal_as_number=False, uuid_format=None, sort_keys=False)\n"
+"struct_dump_json(self, *, decimal_as_number=False, uuid_as_hex=False, sort_keys=False)\n"
 "--\n"
 "\n"
 "Serialize this struct to JSON bytes.\n"
@@ -10339,10 +10339,10 @@ PyDoc_STRVAR(Struct_dump_json__doc__,
 "    Controls how ``decimal.Decimal`` values are encoded. If ``False``\n"
 "    (default), encodes as JSON strings. If ``True``, encodes as JSON\n"
 "    numbers (may lose precision when decoded by some libraries).\n"
-"uuid_format : str, optional\n"
-"    Controls how ``uuid.UUID`` values are encoded. If ``\"canonical\"``\n"
+"uuid_as_hex : bool, optional\n"
+"    Controls how ``uuid.UUID`` values are encoded. If ``False``\n"
 "    (default), encodes in canonical form (``xxxxxxxx-xxxx-xxxx-xxxx-\n"
-"    xxxxxxxxxxxx``). If ``\"hex\"``, encodes as hex (``xxxxxxxxxxxxxxxxxxxx\n"
+"    xxxxxxxxxxxx``). If ``True``, encodes as hex (``xxxxxxxxxxxxxxxxxxxx\n"
 "    xxxxxxxxxxxx``) .\n"
 "sort_keys : bool, optional\n"
 "    If ``True``, dict keys and set elements are sorted so that equal\n"
@@ -11308,16 +11308,11 @@ found_val:
 #define ENC_INIT_BUFSIZE 256
 #define ENC_LINES_INIT_BUFSIZE 1024
 
-enum uuid_format {
-    UUID_FORMAT_CANONICAL = 0,
-    UUID_FORMAT_HEX = 1,
-};
-
 typedef struct EncoderState {
     StructspecState *mod;          /* module reference */
     PyObject *codecs;           /* current per-field {type: dump} map, or NULL */
     bool decimal_as_number;     /* encode Decimal as JSON number instead of string */
-    enum uuid_format uuid_format;
+    bool uuid_as_hex;           /* encode UUID as hex string instead of canonical */
     bool sort_keys;
     char* (*resize_buffer)(PyObject**, Py_ssize_t);  /* callback for resizing buffer */
 
@@ -11331,7 +11326,7 @@ typedef struct Encoder {
     PyObject_HEAD
     StructspecState *mod;
     bool decimal_as_number;
-    enum uuid_format uuid_format;
+    bool uuid_as_hex;
     bool sort_keys;
 } Encoder;
 
@@ -11393,13 +11388,13 @@ ms_write(EncoderState *self, const char *s, Py_ssize_t n)
 static int
 Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
 {
-    char *kwlist[] = {"decimal_as_number", "uuid_format", "sort_keys", NULL};
-    PyObject *decimal_as_number = NULL, *uuid_format = NULL, *sort_keys = NULL;
+    char *kwlist[] = {"decimal_as_number", "uuid_as_hex", "sort_keys", NULL};
+    PyObject *decimal_as_number = NULL, *uuid_as_hex = NULL, *sort_keys = NULL;
 
     if (
         !PyArg_ParseTupleAndKeywords(
             args, kwds, "|$OOO", kwlist,
-            &decimal_as_number, &uuid_format, &sort_keys
+            &decimal_as_number, &uuid_as_hex, &sort_keys
         )
     ) {
         return -1;
@@ -11411,37 +11406,16 @@ Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
     bool dec_as_number = false;
     if (parse_bool_arg(decimal_as_number, &dec_as_number) < 0) return -1;
 
-    /* Process uuid format */
-    if (uuid_format == NULL) {
-        self->uuid_format = UUID_FORMAT_CANONICAL;
-    }
-    else {
-        bool ok = false;
-        if (PyUnicode_CheckExact(uuid_format)) {
-            if (PyUnicode_CompareWithASCIIString(uuid_format, "canonical") == 0) {
-                self->uuid_format = UUID_FORMAT_CANONICAL;
-                ok = true;
-            }
-            else if (PyUnicode_CompareWithASCIIString(uuid_format, "hex") == 0) {
-                self->uuid_format = UUID_FORMAT_HEX;
-                ok = true;
-            }
-        }
-        if (!ok) {
-            PyErr_Format(
-                PyExc_ValueError,
-                "`uuid_format` must be 'canonical' or 'hex', got %R",
-                uuid_format
-            );
-            return -1;
-        }
-    }
+    /* Process uuid_as_hex */
+    bool u_as_hex = false;
+    if (parse_bool_arg(uuid_as_hex, &u_as_hex) < 0) return -1;
 
     /* Process sort_keys */
     if (parse_bool_arg(sort_keys, &self->sort_keys) < 0) return -1;
 
     /* All arguments validated, apply the new configuration */
     self->decimal_as_number = dec_as_number;
+    self->uuid_as_hex = u_as_hex;
     self->mod = structtype_get_global_state();
     return 0;
 }
@@ -11482,7 +11456,7 @@ encoder_encode_common(
         .mod = self->mod,
         .codecs = NULL,
         .decimal_as_number = self->decimal_as_number,
-        .uuid_format = self->uuid_format,
+        .uuid_as_hex = self->uuid_as_hex,
         .sort_keys = self->sort_keys,
         .output_len = 0,
         .max_output_len = ENC_INIT_BUFSIZE,
@@ -11509,7 +11483,7 @@ encode_common(
     int(*encode)(EncoderState*, PyObject*)
 )
 {
-    PyObject *sort_keys = NULL, *decimal_as_number = NULL, *uuid_format = NULL;
+    PyObject *sort_keys = NULL, *decimal_as_number = NULL, *uuid_as_hex = NULL;
     StructspecState *mod = structtype_get_state(module);
 
     /* Parse arguments */
@@ -11518,7 +11492,7 @@ encode_common(
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
         if ((sort_keys = find_keyword(kwnames, args + nargs, mod->str_sort_keys)) != NULL) nkwargs--;
         if ((decimal_as_number = find_keyword(kwnames, args + nargs, mod->str_decimal_as_number)) != NULL) nkwargs--;
-        if ((uuid_format = find_keyword(kwnames, args + nargs, mod->str_uuid_format)) != NULL) nkwargs--;
+        if ((uuid_as_hex = find_keyword(kwnames, args + nargs, mod->str_uuid_as_hex)) != NULL) nkwargs--;
         if (nkwargs > 0) {
             PyErr_SetString(
                 PyExc_TypeError,
@@ -11532,39 +11506,15 @@ encode_common(
     bool dec_as_number = false;
     if (parse_bool_arg(decimal_as_number, &dec_as_number) < 0) return NULL;
 
-    /* Process uuid format */
-    int uuid_fmt = UUID_FORMAT_CANONICAL;
-    if (uuid_format == Py_None) { uuid_format = NULL; }
-    if (uuid_format != NULL) {
-        if (PyUnicode_CheckExact(uuid_format)) {
-            if (PyUnicode_CompareWithASCIIString(uuid_format, "canonical") == 0) {
-                uuid_fmt = UUID_FORMAT_CANONICAL;
-            }
-            else if (PyUnicode_CompareWithASCIIString(uuid_format, "hex") == 0) {
-                uuid_fmt = UUID_FORMAT_HEX;
-            }
-            else {
-                PyErr_Format(PyExc_ValueError,
-                    "`uuid_format` must be 'canonical' or 'hex', got %R",
-                    uuid_format
-                );
-                return NULL;
-            }
-        }
-        else {
-            PyErr_Format(PyExc_ValueError,
-                "`uuid_format` must be 'canonical' or 'hex', got %R",
-                uuid_format
-            );
-            return NULL;
-        }
-    }
+    /* Process uuid_as_hex */
+    bool u_as_hex = false;
+    if (parse_bool_arg(uuid_as_hex, &u_as_hex) < 0) return NULL;
 
     EncoderState state = {
         .mod = mod,
         .codecs = NULL,
         .decimal_as_number = dec_as_number,
-        .uuid_format = uuid_fmt,
+        .uuid_as_hex = u_as_hex,
         .output_len = 0,
         .max_output_len = ENC_INIT_BUFSIZE,
         .resize_buffer = &ms_resize_bytes
@@ -11599,12 +11549,12 @@ Encoder_decimal_as_number(Encoder *self, void *closure) {
 }
 
 static PyObject*
-Encoder_uuid_format(Encoder *self, void *closure) {
-    if (self->uuid_format == UUID_FORMAT_CANONICAL) {
-        return PyUnicode_InternFromString("canonical");
+Encoder_uuid_as_hex(Encoder *self, void *closure) {
+    if (self->uuid_as_hex) {
+        Py_RETURN_TRUE;
     }
     else {
-        return PyUnicode_InternFromString("hex");
+        Py_RETURN_FALSE;
     }
 }
 
@@ -11620,7 +11570,7 @@ Encoder_sort_keys(Encoder *self, void *closure) {
 
 static PyGetSetDef Encoder_getset[] = {
     {"decimal_as_number", (getter) Encoder_decimal_as_number, NULL, NULL, NULL},
-    {"uuid_format", (getter) Encoder_uuid_format, NULL, NULL, NULL},
+    {"uuid_as_hex", (getter) Encoder_uuid_as_hex, NULL, NULL, NULL},
     {"sort_keys", (getter) Encoder_sort_keys, NULL, NULL, NULL},
     {NULL},
 };
@@ -14270,7 +14220,7 @@ maybe_parse_number(
  *************************************************************************/
 
 PyDoc_STRVAR(JSONEncoder__doc__,
-"Encoder(*, decimal_as_number=False, uuid_format='canonical', sort_keys=False)\n"
+"Encoder(*, decimal_as_number=False, uuid_as_hex=False, sort_keys=False)\n"
 "--\n"
 "\n"
 "A JSON encoder.\n"
@@ -14282,10 +14232,10 @@ PyDoc_STRVAR(JSONEncoder__doc__,
 "    (default), they're encoded as strings. If ``True``, they're encoded as\n"
 "    numbers, which may result in precision loss when decoding for some JSON\n"
 "    library implementations.\n"
-"uuid_format : {'canonical', 'hex'}, optional\n"
-"    The format to use for encoding `uuid.UUID` objects. The 'canonical'\n"
-"    and 'hex' formats encode them as strings with and without hyphens\n"
-"    respectively. Defaults to 'canonical'.\n"
+"uuid_as_hex : bool, optional\n"
+"    Controls how `uuid.UUID` objects are encoded. If ``False`` (default),\n"
+"    they're encoded as canonical strings (with hyphens). If ``True``,\n"
+"    they're encoded as hex strings (without hyphens).\n"
 "sort_keys : bool, optional\n"
 "    If ``True``, dict keys and set elements are sorted so that values which\n"
 "    compare equal produce identical encoded output, regardless of insertion\n"
@@ -14609,7 +14559,7 @@ json_encode_uuid(EncoderState *self, PyObject *obj)
 {
     char buf[38];
     buf[0] = '"';
-    bool canonical = self->uuid_format == UUID_FORMAT_CANONICAL;
+    bool canonical = !self->uuid_as_hex;
     if (ms_encode_uuid(self->mod, obj, buf + 1, canonical) < 0) return -1;
     int size = canonical ? 36 : 32;
     buf[size + 1] = '"';
@@ -20963,7 +20913,7 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->str_strict);
     Py_CLEAR(st->str_sort_keys);
     Py_CLEAR(st->str_decimal_as_number);
-    Py_CLEAR(st->str_uuid_format);
+    Py_CLEAR(st->str_uuid_as_hex);
     Py_CLEAR(st->str_utcoffset);
     Py_CLEAR(st->str___origin__);
     Py_CLEAR(st->str___args__);
@@ -21394,7 +21344,7 @@ PyInit__core(void)
     CACHED_STRING(str_strict, "strict");
     CACHED_STRING(str_sort_keys, "sort_keys");
     CACHED_STRING(str_decimal_as_number, "decimal_as_number");
-    CACHED_STRING(str_uuid_format, "uuid_format");
+    CACHED_STRING(str_uuid_as_hex, "uuid_as_hex");
     CACHED_STRING(str_utcoffset, "utcoffset");
     CACHED_STRING(str___origin__, "__origin__");
     CACHED_STRING(str___args__, "__args__");

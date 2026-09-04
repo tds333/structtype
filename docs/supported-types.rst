@@ -513,12 +513,12 @@ only.
     structtype.ValidationError: Invalid UUID
 
 Alternative formats are supported by the JSON encoder. The format may be
-selected by passing ``uuid_format`` to ``struct_dump_json`` (on a ``Struct`` or
+selected by passing ``uuid_as_hex`` to ``struct_dump_json`` (on a ``Struct`` or
 ``StructAdapter``). The following options are supported:
 
-- ``canonical``: UUIDs are encoded as RFC4122_ canonical strings (same as
-  ``str(uuid)``). This is the default.
-- ``hex``: UUIDs are encoded as RFC4122_ hex strings (same as ``uuid.hex``).
+- ``False`` (default): UUIDs are encoded as RFC4122_ canonical strings (same
+  as ``str(uuid)``).
+- ``True``: UUIDs are encoded as RFC4122_ hex strings (same as ``uuid.hex``).
 
 When decoding, any of the above formats are accepted.
 
@@ -526,7 +526,7 @@ When decoding, any of the above formats are accepted.
 
     >>> from structtype import StructAdapter
 
-    >>> uuid_hex = StructAdapter(uuid.UUID).struct_dump_json(u, uuid_format="hex")
+    >>> uuid_hex = StructAdapter(uuid.UUID).struct_dump_json(u, uuid_as_hex=True)
 
     >>> uuid_hex
     b'"c4524ac0e81e4aa8a5950aec605a659a"'
@@ -534,7 +534,7 @@ When decoding, any of the above formats are accepted.
     >>> StructAdapter(uuid.UUID).struct_validate_json(uuid_hex)
     UUID('c4524ac0-e81e-4aa8-a595-0aec605a659a')
 
-    >>> StructAdapter(uuid.UUID).struct_dump_json(u, uuid_format="hex")
+    >>> StructAdapter(uuid.UUID).struct_dump_json(u, uuid_as_hex=True)
     b'"c4524ac0e81e4aa8a5950aec605a659a"'
 
 

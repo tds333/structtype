@@ -89,7 +89,7 @@ class StructAdapter:
         obj,
         *,
         decimal_as_number=False,
-        uuid_format=None,
+        uuid_as_hex=False,
         sort_keys=False,
     ):
         """Encode a validated object to JSON bytes.
@@ -101,15 +101,16 @@ class StructAdapter:
         decimal_as_number : bool, optional
             If True, ``Decimal`` values are encoded as JSON numbers instead
             of strings (may lose precision when decoded).
-        uuid_format : str, optional
-            Controls how ``UUID`` values are encoded.
+        uuid_as_hex : bool, optional
+            If True, ``UUID`` values are encoded as hex strings instead of
+            canonical form.
         sort_keys : bool, optional
             If True, sort dict keys and set elements for deterministic output.
         """
         return _json_encode(
             obj,
             decimal_as_number=decimal_as_number,
-            uuid_format=uuid_format,
+            uuid_as_hex=uuid_as_hex,
             sort_keys=sort_keys,
         )
 

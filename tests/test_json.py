@@ -3237,8 +3237,9 @@ class TestEncoderAttributeGetters:
         assert JSONEncoder(decimal_as_number=True).decimal_as_number is True
         assert JSONEncoder().decimal_as_number is False
 
-    def test_uuid_format_getter(self):
-        assert JSONEncoder(uuid_format="canonical").uuid_format == "canonical"
+    def test_uuid_as_hex_getter(self):
+        assert JSONEncoder(uuid_as_hex=True).uuid_as_hex is True
+        assert JSONEncoder().uuid_as_hex is False
 
 
 class TestBufferAndSkipResilience:
@@ -3306,6 +3307,29 @@ class TestRemainingCPaths:
         assert obj.struct_dump_json() == b'{"v":"1.5"}'
         assert obj.struct_dump_json(decimal_as_number=True) == b'{"v":1.5}'
 
+    def test_uuid_as_hex_struct_dump_json(self):
+        u = uuid.UUID("c4524ac0-e81e-4aa8-a595-0aec605a659a")
+
+        class WithUuid(Struct):
+            v: uuid.UUID
+
+        obj = WithUuid(u)
+        canonical = obj.struct_dump_json()
+        assert canonical == b'{"v":"c4524ac0-e81e-4aa8-a595-0aec605a659a"}'
+        hexed = obj.struct_dump_json(uuid_as_hex=True)
+        assert hexed == b'{"v":"c4524ac0e81e4aa8a5950aec605a659a"}'
+        # Decoding accepts both forms
+        assert WithUuid.struct_validate_json(hexed) == obj
+        assert WithUuid.struct_validate_json(canonical) == obj
+
+        adapter = structtype.StructAdapter(uuid.UUID)
+        assert adapter.struct_dump_json(u, uuid_as_hex=True) == (
+            b'"c4524ac0e81e4aa8a5950aec605a659a"'
+        )
+        assert adapter.struct_dump_json(u) == (
+            b'"c4524ac0-e81e-4aa8-a595-0aec605a659a"'
+        )
+
 
 class TestSubMicrosecondRounding:
     def test_time_7_digit_fraction_rounds_up(self):
@@ -3359,9 +3383,10 @@ def test_literal_info_shutdown_teardown_subprocess():
 
 
 class TestEncoderOptionValidation:
-    def test_invalid_uuid_format(self):
-        with pytest.raises(ValueError, match="`uuid_format` must be 'canonical' or 'hex'"):
-            JSONEncoder(uuid_format="bogus")
+    def test_uuid_as_hex_is_truthy_checked(self):
+        # non-bool values are accepted and normalized by truthiness
+        assert JSONEncoder(uuid_as_hex=1).uuid_as_hex is True
+        assert JSONEncoder(uuid_as_hex=None).uuid_as_hex is False
 
     def test_decimal_as_number_is_truthy_checked(self):
         # non-bool values are accepted and normalized by truthiness
@@ -3460,6 +3485,8 @@ class TestReinitReferenceLifecycle:
         enc = JSONEncoder()
         with pytest.raises(TypeError, match="takes no keyword arguments"):
             enc.encode(Decimal("1.5"), decimal_format="number")
+        with pytest.raises(TypeError, match="takes no keyword arguments"):
+            enc.encode(uuid.UUID("c4524ac0-e81e-4aa8-a595-0aec605a659a"), uuid_format="hex")
 
         class WithDecimal(Struct):
             v: Decimal
@@ -3470,6 +3497,12 @@ class TestReinitReferenceLifecycle:
         with pytest.raises(TypeError):
             structtype.StructAdapter(Decimal).struct_dump_json(
                 Decimal("1.5"), decimal_format="number"
+            )
+        with pytest.raises(TypeError):
+            obj.struct_dump_json(uuid_format="hex")
+        with pytest.raises(TypeError):
+            structtype.StructAdapter(Decimal).struct_dump_json(
+                Decimal("1.5"), uuid_format="hex"
             )
 
     def test_decoder_reinit_no_leak(self):

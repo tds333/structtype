@@ -51,7 +51,7 @@ All commands go through `make`.
 
 ### Struct Methods
 
-- `obj.struct_dump_json(*, decimal_as_number=False, uuid_format=None, sort_keys=False)` — serialize to JSON bytes
+- `obj.struct_dump_json(*, decimal_as_number=False, uuid_as_hex=False, sort_keys=False)` — serialize to JSON bytes
 - `obj.struct_dump(*, sort_keys=False, str_keys=False, builtin_types=None)` — convert to built-in Python types (uses `alias` for keys)
 - `obj.struct_check_types()` — validate field values against types + constraints (pure type-check, no conversion)
 - `cls.struct_validate_json(buf, *, strict=True)` — deserialize from JSON
