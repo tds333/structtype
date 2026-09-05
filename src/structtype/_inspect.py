@@ -13,16 +13,11 @@ except ImportError:
     _TypeAliasType = type("TypeAliasType", (), {})
 
 import structtype
-from structtype import NODEFAULT, UNSET
-from structtype import UnsetType as _UnsetType
+from structtype import NODEFAULT, UNSET, UnsetType as _UnsetType
 
 from ._core import (  # type: ignore
     Constraint as _Constraint,
-)
-from ._core import (  # type: ignore
     Factory as _Factory,
-)
-from ._core import (  # type: ignore
     Struct,
     StructMeta,
     _dump,
@@ -30,17 +25,9 @@ from ._core import (  # type: ignore
 from ._utils import (
     _CONCRETE_TYPES,
     _AnnotatedAlias,
-)
-from ._utils import (
     get_class_annotations as _get_class_annotations,
-)
-from ._utils import (
     get_dataclass_info as _get_dataclass_info,
-)
-from ._utils import (
     get_pydantic_info as _get_pydantic_info,
-)
-from ._utils import (
     get_typeddict_info as _get_typeddict_info,
 )
 

@@ -1,12 +1,8 @@
 from typing import Any, get_args
 
-from ._core import (
-    JSONDecoder as _JSONDecoder,
-)
-from ._core import (
-    Serializer as _Serializer,
-)
 from ._core import (  # type: ignore
+    JSONDecoder as _JSONDecoder,
+    Serializer as _Serializer,
     _dump,
     _json_encode,
     _validate,
