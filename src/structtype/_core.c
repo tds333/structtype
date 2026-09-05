@@ -14533,8 +14533,8 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
     else if (type == &PyFloat_Type) {
         return json_encode_float_as_str(self, obj);
     }
-    else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
-        return json_encode_enum(self, obj, true);
+    else if (type == (PyTypeObject *)(self->mod->DecimalType)) {
+        return json_encode_decimal(self, obj);
     }
     else if (type == PyDateTimeAPI->DateTimeType) {
         return json_encode_datetime(self, obj);
@@ -14548,14 +14548,14 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
     else if (type == PyDateTimeAPI->DeltaType) {
         return json_encode_timedelta(self, obj);
     }
-    else if (type == &PyBytes_Type) {
-        return json_encode_bytes(self, obj);
-    }
-    else if (type == (PyTypeObject *)(self->mod->DecimalType)) {
-        return json_encode_decimal(self, obj);
+    else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
+        return json_encode_enum(self, obj, true);
     }
     else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
         return json_encode_uuid(self, obj);
+    }
+    else if (type == &PyBytes_Type) {
+        return json_encode_bytes(self, obj);
     }
     if (self->codecs != NULL) {
         PyObject *dump = codecs_lookup(self->codecs, type);
@@ -14914,17 +14914,11 @@ json_encode_struct(EncoderState *self, PyObject *obj)
 
 static MS_NOINLINE int
 json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
-    if (obj == Py_None) {
-        return ms_write(self, "null", 4);
-    }
-    else if (obj == Py_True) {
-        return ms_write(self, "true", 4);
-    }
-    else if (obj == Py_False) {
-        return ms_write(self, "false", 5);
-    }
-    else if (PyTuple_Check(obj)) {
+    if (PyTuple_Check(obj)) {
         return json_encode_tuple(self, obj);
+    }
+    else if (type == (PyTypeObject *)(self->mod->DecimalType)) {
+        return json_encode_decimal(self, obj);
     }
     else if (type == PyDateTimeAPI->DateTimeType) {
         return json_encode_datetime(self, obj);
@@ -14938,6 +14932,15 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     else if (type == PyDateTimeAPI->DeltaType) {
         return json_encode_timedelta(self, obj);
     }
+    else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
+        return json_encode_enum(self, obj, false);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
+        return json_encode_uuid(self, obj);
+    }
+    else if (PyAnySet_Check(obj)) {
+        return json_encode_set(self, obj);
+    }
     else if (type == &PyBytes_Type) {
         return json_encode_bytes(self, obj);
     }
@@ -14946,18 +14949,6 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     }
     else if (type == &PyMemoryView_Type) {
         return json_encode_memoryview(self, obj);
-    }
-    else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
-        return json_encode_enum(self, obj, false);
-    }
-    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
-        return json_encode_uuid(self, obj);
-    }
-    else if (type == (PyTypeObject *)(self->mod->DecimalType)) {
-        return json_encode_decimal(self, obj);
-    }
-    else if (PyAnySet_Check(obj)) {
-        return json_encode_set(self, obj);
     }
     if (self->codecs != NULL) {
         PyObject *dump = codecs_lookup(self->codecs, type);
@@ -15050,7 +15041,16 @@ json_encode_inline(EncoderState *self, PyObject *obj)
 {
     PyTypeObject *type = Py_TYPE(obj);
 
-    if (PyUnicode_Check(obj)) {
+    if (obj == Py_None) {
+        return ms_write(self, "null", 4);
+    }
+    else if (obj == Py_True) {
+        return ms_write(self, "true", 4);
+    }
+    else if (obj == Py_False) {
+        return ms_write(self, "false", 5);
+    }
+    else if (PyUnicode_Check(obj)) {
         return json_encode_str(self, obj);
     }
     else if (type == &PyLong_Type) {
@@ -18312,6 +18312,54 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
     ) {
         goto builtin;
     }
+    else if (PyList_Check(obj)) {
+        return dump_list(self, obj);
+    }
+    else if (PyTuple_Check(obj)) {
+        return dump_tuple(self, obj, is_key);
+    }
+    else if (PyDict_Check(obj)) {
+        return dump_dict(self, obj);
+    }
+#if PY315_PLUS
+    else if (PyFrozenDict_Check(obj)) {
+        return dump_frozendict(self, obj);
+    }
+#endif
+    else if (ms_is_struct_type(type)) {
+        return dump_struct(self, obj, is_key);
+    }
+    else if (type == (PyTypeObject *)(self->mod->DecimalType)) {
+        if (self->builtin_types & MS_BUILTIN_DECIMAL) goto builtin;
+        return dump_decimal(self, obj);
+    }
+    else if (type == PyDateTimeAPI->DateTimeType) {
+        if (self->builtin_types & MS_BUILTIN_DATETIME) goto builtin;
+        return dump_datetime(self, obj);
+    }
+    else if (type == PyDateTimeAPI->DateType) {
+        if (self->builtin_types & MS_BUILTIN_DATE) goto builtin;
+        return dump_date(self, obj);
+    }
+    else if (type == PyDateTimeAPI->TimeType) {
+        if (self->builtin_types & MS_BUILTIN_TIME) goto builtin;
+        return dump_time(self, obj);
+    }
+    else if (type == PyDateTimeAPI->DeltaType) {
+        if (self->builtin_types & MS_BUILTIN_TIMEDELTA) goto builtin;
+        return dump_timedelta(self, obj);
+    }
+    else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
+        if (self->builtin_types & MS_BUILTIN_ENUM) goto builtin;
+        return dump_enum(self, obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
+        if (self->builtin_types & MS_BUILTIN_UUID) goto builtin;
+        return dump_uuid(self, obj);
+    }
+    else if (PyAnySet_Check(obj)) {
+        return dump_set(self, obj, is_key);
+    }
     else if (type == &PyBytes_Type) {
         if (self->builtin_types & MS_BUILTIN_BYTES) goto builtin;
         return dump_binary(
@@ -18332,61 +18380,6 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         out = dump_binary(self, buffer.buf, buffer.len);
         PyBuffer_Release(&buffer);
         return out;
-    }
-    else if (type == PyDateTimeAPI->DateTimeType) {
-        if (self->builtin_types & MS_BUILTIN_DATETIME) goto builtin;
-        return dump_datetime(self, obj);
-    }
-    else if (type == PyDateTimeAPI->DateType) {
-        if (self->builtin_types & MS_BUILTIN_DATE) goto builtin;
-        return dump_date(self, obj);
-    }
-    else if (type == PyDateTimeAPI->TimeType) {
-        if (self->builtin_types & MS_BUILTIN_TIME) goto builtin;
-        return dump_time(self, obj);
-    }
-    else if (type == PyDateTimeAPI->DeltaType) {
-        if (self->builtin_types & MS_BUILTIN_TIMEDELTA) goto builtin;
-        return dump_timedelta(self, obj);
-    }
-    else if (type == (PyTypeObject *)(self->mod->DecimalType)) {
-        if (self->builtin_types & MS_BUILTIN_DECIMAL) goto builtin;
-        return dump_decimal(self, obj);
-    }
-    else if (PyList_Check(obj)) {
-        return dump_list(self, obj);
-    }
-    else if (PyTuple_Check(obj)) {
-        return dump_tuple(self, obj, is_key);
-    }
-    else if (PyDict_Check(obj)) {
-        return dump_dict(self, obj);
-    }
-#if PY315_PLUS
-    else if (PyFrozenDict_Check(obj)) {
-        return dump_frozendict(self, obj);
-    }
-#endif
-    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
-        if (self->builtin_types & MS_BUILTIN_UUID) goto builtin;
-        return dump_uuid(self, obj);
-    }
-    else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
-        if (self->builtin_types & MS_BUILTIN_ENUM) goto builtin;
-        return dump_enum(self, obj);
-    }
-    else if (PyAnySet_Check(obj)) {
-        return dump_set(self, obj, is_key);
-    }
-    else if (ms_is_struct_type(type)) {
-        return dump_struct(self, obj, is_key);
-    }
-    else if (!ms_is_struct_inst(obj) && PyObject_HasAttr(obj, self->mod->str___struct_fields__)) {
-        /* External struct type (e.g. msgspec) — use Python-level attribute access */
-        return dump_external_struct(self, obj);
-    }
-    else if (is_key & PyUnicode_Check(obj)) {
-        return PyObject_Str(obj);
     }
     if (self->codecs != NULL) {
         PyObject *dump = codecs_lookup(self->codecs, type);
@@ -18419,6 +18412,10 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         PyObject *result = dump_dict(self, dict);
         Py_DECREF(dict);
         return result;
+    }
+    else if (!ms_is_struct_inst(obj) && PyObject_HasAttr(obj, self->mod->str___struct_fields__)) {
+        /* External struct type (e.g. msgspec) — use Python-level attribute access */
+        return dump_external_struct(self, obj);
     }
     else if (!PyType_Check(obj) && type->tp_dict != NULL) {
         PyObject *fields = PyObject_GetAttr(obj, self->mod->str___dataclass_fields__);
