@@ -52,3 +52,48 @@ Here we use the ``loads`` method defined above to read some `example GeoJSON`_.
 
 .. _specification: https://datatracker.ietf.org/doc/html/rfc7946
 .. _example GeoJSON: https://github.com/tds333/structtype/blob/main/examples/geojson/canada.json
+
+
+.. _dynamodb-example:
+
+DynamoDB
+--------
+
+`Amazon DynamoDB <https://aws.amazon.com/dynamodb/>`__ has no `float` type:
+all numbers must be `decimal.Decimal` values. When storing structs with boto3_,
+declare numeric fields as `decimal.Decimal` and pass
+``builtin_types=[decimal.Decimal]`` to ``struct_dump`` — the values are kept
+as `decimal.Decimal` and the result can be used directly as the ``Item``:
+
+.. code-block:: python
+
+    >>> import decimal
+
+    >>> import boto3
+    >>> from structtype import Struct
+
+    >>> class Product(Struct):
+    ...     name: str
+    ...     price: decimal.Decimal
+    ...     rating: decimal.Decimal
+
+    >>> product = Product("widget", decimal.Decimal("9.99"), decimal.Decimal("4.5"))
+
+    >>> table = boto3.resource("dynamodb").Table("products")
+    >>> table.put_item(Item=product.struct_dump(builtin_types=[decimal.Decimal]))
+
+Reading items back works the same way: DynamoDB returns numbers as
+`decimal.Decimal`, which ``struct_validate`` accepts unchanged:
+
+.. code-block:: python
+
+    >>> item = table.get_item(Key={"name": "widget"})["Item"]
+
+    >>> Product.struct_validate(item)
+    Product(name='widget', price=Decimal('9.99'), rating=Decimal('4.5'))
+
+Other types that ``struct_dump`` converts by default can be passed through the
+same way — for example `bytes` fields (DynamoDB supports binary values
+natively) with ``builtin_types=[decimal.Decimal, bytes]``.
+
+.. _boto3: https://boto3.amazonaws.com

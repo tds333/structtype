@@ -10380,7 +10380,7 @@ PyDoc_STRVAR(Struct_dump__doc__,
 "struct_dump(self, *, sort_keys=False, str_keys=False, builtin_types=None)\n"
 "--\n"
 "\n"
-"Convert this struct to built-in Python types.\n"
+"Convert this struct to built-in Python types compatible with JSON basic types.\n"
 "\n"
 "This applies the same semantics as ``struct_dump_json`` but produces\n"
 "Python objects instead of JSON bytes:\n"

@@ -589,6 +589,33 @@ bytes, avoiding any precision loss:
    >>> StructAdapter(decimal.Decimal).struct_validate_json(b"0.1234567891234567811")
    Decimal('0.1234567891234567811')
 
+For ``struct_dump`` (Python-side dumps) `decimal.Decimal` values are converted
+to `str` by default, matching the JSON behavior. Pass
+``builtin_types=[decimal.Decimal]`` to keep the values as `decimal.Decimal`
+instances instead:
+
+.. code-block:: python
+
+    >>> from structtype import Struct
+
+    >>> class Product(Struct):
+    ...     name: str
+    ...     price: decimal.Decimal
+    ...     rating: decimal.Decimal
+
+    >>> p = Product("widget", decimal.Decimal("9.99"), decimal.Decimal("4.5"))
+
+    >>> p.struct_dump()
+    {'name': 'widget', 'price': '9.99', 'rating': '4.5'}
+
+    >>> p.struct_dump(builtin_types=[decimal.Decimal])
+    {'name': 'widget', 'price': Decimal('9.99'), 'rating': Decimal('4.5')}
+
+Passing ``ALL_BUILTIN_TYPES`` keeps every type that would otherwise be
+converted (``bytes``, `datetime.datetime`, `decimal.Decimal`, ...) unchanged.
+This is useful for targets that accept richer types than JSON — for example
+:ref:`DynamoDB <dynamodb-example>`.
+
 
 ``list`` / ``tuple`` / ``set`` / ``frozenset``
 ----------------------------------------------
