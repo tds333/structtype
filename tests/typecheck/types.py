@@ -12,7 +12,7 @@ import enum
 import uuid
 from typing import Any, Literal
 
-from structtype import Raw, Struct, StructConfig
+from structtype import Struct, StructConfig
 
 
 class Color(enum.Enum):
@@ -72,10 +72,6 @@ class Dir(Struct):
     contents: list[File | Dir]
 
 
-class WithRaw(Struct):
-    data: Raw
-
-
 c = Collections(
     ints=[1], mapping={"a": 1}, s={"x"}, fs=frozenset({1}), tup=(1,), fixed=(1, "a")
 )
@@ -99,4 +95,3 @@ v = Variants(
 )
 nested = Nested(p=c, scalar=s)
 tree = Dir(contents=[File(name="a", size=1), Dir(contents=[])])
-raw = WithRaw(data=Raw(b"{}"))

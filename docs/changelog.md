@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Breaking:** remove `structtype.Raw`. `Raw` was the only type that did not
+  participate in the full API surface (e.g. it raised a `TypeError` when passed
+  to `struct_dump`), and its lazy-decode / verbatim-encode semantics required
+  special-casing throughout the encoder, decoder, and validator. For plain
+  arbitrary-JSON-data fields, `Any` covers the use case (values decode to plain
+  Python types and re-encode on output). For a dedicated named type, use a
+  wrapper type with a `Serializer` codec, which works with both the JSON and
+  Python paths.
+  Migration:
+
+  | Old | New |
+  |---|---|
+  | `r: Raw` field | `r: Any` |
+  | `Raw(b'{"x": 1}')` verbatim passthrough | typed wrapper + `Annotated[Wrapper, Serializer(dump=..., load=...)]` — decoded on input, re-encoded on output |
+
 - Fix: musllinux wheels were never built at release — a config-level skip
   overrode the release build's opt-in. The release build now produces
   musllinux wheels; local and PR builds still skip them (via

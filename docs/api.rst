@@ -277,14 +277,6 @@ TimezoneConstraint
     :members:
 
 
-Raw
----
-
-.. currentmodule:: structtype
-
-.. autoclass:: Raw
-    :members:
-
 Unset
 -----
 

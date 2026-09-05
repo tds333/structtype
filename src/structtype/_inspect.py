@@ -70,7 +70,6 @@ __all__ = (
     "NamedTupleType",
     "NoneType",
     "PydanticType",
-    "RawType",
     "SetType",
     "StrType",
     "StructType",
@@ -287,10 +286,6 @@ class UUIDType(Type):
 
 class DecimalType(Type):
     """A type corresponding to `decimal.Decimal`."""
-
-
-class RawType(Type):
-    """A type corresponding to `structtype.Raw`."""
 
 
 class EnumType(Type):
@@ -998,8 +993,6 @@ class _Translator:
             return UUIDType()
         elif t is decimal.Decimal:
             return DecimalType()
-        elif t is structtype.Raw:
-            return RawType()
         elif t is list:
             return ListType(
                 self.translate(args[0]) if args else AnyType(),

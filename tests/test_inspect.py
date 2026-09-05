@@ -170,10 +170,6 @@ def test_decimal():
     assert mi.type_info(decimal.Decimal) == mi.DecimalType()
 
 
-def test_raw():
-    assert mi.type_info(structtype.Raw) == mi.RawType()
-
-
 def test_msgpack_ext():
     pass
 

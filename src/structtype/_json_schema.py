@@ -27,7 +27,6 @@ from ._inspect import (
     NamedTupleType,
     NoneType,
     PydanticType,
-    RawType,
     SetType,
     StrType,
     StructType,
@@ -298,7 +297,7 @@ class _SchemaGenerator:
             schema["$ref"] = self.ref_template.format(name=name)
             return schema
 
-        if isinstance(t, (AnyType, RawType)):
+        if isinstance(t, AnyType):
             pass
         elif isinstance(t, NoneType):
             schema["type"] = "null"

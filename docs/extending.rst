@@ -158,7 +158,7 @@ this when the class is created, raising a ``TypeError`` when:
 - the type is :doc:`natively supported <supported-types>` — this covers the
   scalars (``bool``, ``int``, ``float``, ``str``, ``bytes``, ``bytearray``,
   ``memoryview``), the ``datetime`` family, ``uuid.UUID``,
-  ``decimal.Decimal``, ``structtype.Raw``, enums, ``Literal`` values,
+  ``decimal.Decimal``, enums, ``Literal`` values,
   containers (``list``, ``dict``, ``tuple``, ``set``, ``frozenset`` —
   parameterized or not), unions (including ``Optional[...]``), and nested
   ``Struct`` / ``TypedDict`` / ``dataclass`` / ``NamedTuple`` types — e.g.
@@ -172,7 +172,6 @@ this when the class is created, raising a ``TypeError`` when:
 *Subclasses* of natively supported types are classified as custom types, so
 Serializers attach fine to them — see :ref:`native-subclass-formats` below for the
 recommended pattern.
-
 Serializers are only supported on :class:`Struct` fields.
 :class:`StructAdapter` rejects annotations containing a ``Serializer`` —
 use the protocol methods on the type there, or a :class:`Struct`:
@@ -184,6 +183,19 @@ use the protocol methods on the type there, or a :class:`Struct`:
     # Raises TypeError — use a `struct_dump`/`struct_validate` protocol method
     # on the type, or a `Struct` instead.
     StructAdapter(Annotated[complex, Serializer(dump=dump, load=validate)])
+
+.. _arbitrary-json-data:
+
+Wrapping arbitrary JSON data
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A field may hold arbitrary JSON data — nested objects or arrays whose schema
+is not known up front. If no dedicated type is needed, an `Any` annotation
+already covers this: the value decodes to plain Python types and re-encodes on
+output. Use a wrapper type with a ``Serializer`` when the field should be a
+real, named type (type checking, introspection, methods on the value). The
+wrapper works with both the JSON and the Python path:
+
 
 Recipes
 -------
@@ -240,7 +252,8 @@ These aliases nest (``list[Complex]``, ``dict[str, Fraction]``), and the
 fields only — :class:`StructAdapter` rejects them (see above). For types you
 control, prefer the ``struct_dump`` / ``struct_validate`` protocol methods.
 Single-argument string-constructible types such as ``IPv4Address`` may also use
-``Annotated[T, Serializer(dump=str, load=T)]`` directly.
+``Annotated[T, Serializer(dump=str, load=T)]`` directly. For a field holding
+arbitrary JSON data, see :ref:`arbitrary-json-data` above.
 
 .. _native-subclass-formats:
 

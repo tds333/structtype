@@ -23,7 +23,6 @@ Most combinations of the following types are supported (with a few restrictions)
 
 **Structtype types**
 
-- `structtype.Raw`
 - `structtype.UNSET`
 - `structtype.Struct` types
 
@@ -1419,97 +1418,6 @@ Union restrictions are as follows:
       File "<stdin>", line 1, in <module>
     structtype.ValidationError: Expected `int | str | array`, got `bool`
 
-``Raw``
--------
-
-`structtype.Raw` is a buffer-like type containing an already-encoded message.
-They have two common uses:
-
-**1. Avoiding unnecessary encoding cost**
-
-Wrapping an already-encoded buffer in `structtype.Raw` lets the encoder avoid
-re-encoding the message, instead it will simply be copied to the output buffer.
-This can be useful when part of a message already exists in an encoded format
-(e.g. reading JSON bytes from a database and returning them as part of a larger
-message).
-
-.. code-block:: python
-
-    >>> from structtype import Raw, Struct
-
-    >>> # Create a new `Raw` object wrapping a pre-encoded message
-    ... fragment = Raw(b'{"x": 1, "y": 2}')
-
-    >>> # Compose a larger message containing the pre-encoded fragment
-    ... msg = {"a": 1, "b": fragment}
-
-    >>> # During encoding, the raw message is efficiently copied into
-    ... # the output buffer, avoiding any extra encoding cost
-    ... StructAdapter(Any).struct_dump_json(msg)
-    b'{"a":1,"b":{"x": 1, "y": 2}}'
-
-
-**2. Delaying decoding of part of a message**
-
-Sometimes the type of a serialized value depends on the value of other fields
-in a message. ``structtype`` provides an optimized version of one common pattern
-(:ref:`struct-tagged-unions`), but if you need to do something more complicated
-you may find using `structtype.Raw` useful here.
-
-For example, here we demonstrate how to decode a message where the type of one
-field (``point``) depends on the value of another (``dimensions``).
-
-.. code-block:: python
-
-    >>> from structtype import Raw, Struct
-
-    >>> from typing import Union
-
-    >>> class Point1D(Struct):
-    ...     x: int
-
-    >>> class Point2D(Struct):
-    ...     x: int
-    ...     y: int
-
-    >>> class Point3D(Struct):
-    ...     x: int
-    ...     y: int
-    ...     z: int
-
-    >>> class Model(Struct):
-    ...     dimensions: int
-    ...     point: Raw  # use structtype.Raw to delay decoding the point field
-
-    >>> def decode_point(msg: bytes) -> Point1D | Point2D | Point3D:
-    ...     """A function for efficiently decoding the `point` field"""
-    ...     # First decode the outer `Model` struct. Decoding of the `point`
-    ...     # field is delayed, with the composite bytes stored as a `Raw` object
-    ...     # on `point`.
-    ...     model = StructAdapter(Model).struct_validate_json(msg)
-    ...
-    ...     # Based on the value of `dimensions`, determine which type to use
-    ...     # when decoding the `point` field
-    ...     if model.dimensions == 1:
-    ...         point_type = Point1D
-    ...     elif model.dimensions == 2:
-    ...         point_type = Point2D
-    ...     elif model.dimensions == 3:
-    ...         point_type = Point3D
-    ...     else:
-    ...         raise ValueError("Too many dimensions!")
-    ...
-    ...     # Now that we know the type of `point`, we can finish decoding it.
-    ...     # Note that `Raw` objects are buffer-like, and can be passed
-    ...     # directly to ``struct_validate_json``.
-    ...     return StructAdapter(point_type).struct_validate_json(model.point)
-
-    >>> decode_point(b'{"dimensions": 2, "point": {"x": 1, "y": 2}}')
-    Point2D(x=1, y=2)
-
-    >>> decode_point(b'{"dimensions": 3, "point": {"x": 1, "y": 2, "z": 3}}')
-    Point3D(x=1, y=2, z=3)
-
 
 ``Any``
 -------
@@ -1531,6 +1439,12 @@ JSON_ types are decoded to Python types as follows:
 .. [#number_json] Numbers are decoded as integers if they contain no decimal or
    exponent components (e.g. ``1`` but not ``1.0`` or ``1e10``). All other
    numbers decode as floats.
+
+For fields holding arbitrary JSON data — nested values whose schema is not
+known up front — an `Any` annotation already does the job: the value decodes
+to plain Python types and re-encodes on output. To make it a real, named type
+instead, use a wrapper type with a ``Serializer``; see
+:ref:`arbitrary-json-data` in :doc:`extending` for an example.
 
 
 

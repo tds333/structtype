@@ -1,4 +1,4 @@
-# ruff: noqa: PYI041, PYI015, PYI020, UP037
+# ruff: noqa: PYI041, PYI015
 import enum
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from inspect import Signature
@@ -108,16 +108,6 @@ class Struct(metaclass=StructMeta):
         strict: bool = True,
         from_attributes: bool = False,
     ) -> Self: ...
-
-# Lie and say `Raw` is a subclass of `bytes`, so mypy will accept it in most
-# places where an object that implements the buffer protocol is valid
-@final
-class Raw(bytes):
-    @overload
-    def __new__(cls) -> "Raw": ...
-    @overload
-    def __new__(cls, msg: Buffer | str) -> "Raw": ...
-    def copy(self) -> "Raw": ...
 
 #: We can't represent this in types, only via a name:
 _NonNegativeInt: TypeAlias = int

@@ -55,10 +55,6 @@ def test_any():
     assert make_schema(Any) == {}
 
 
-def test_raw():
-    assert make_schema(structtype.Raw) == {}
-
-
 def test_msgpack_ext():
     pass
 

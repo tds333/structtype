@@ -522,7 +522,6 @@ VALIDATOR_MATRIX = [
     ("uuid", UUID, UUID(int=7), 7),
     ("decimal", decimal.Decimal, decimal.Decimal("1.5"), [1]),
     ("enum", Color, Color.RED, "nope"),
-    ("raw", structtype.Raw, structtype.Raw(b"{}"), "{}"),
     ("any-set", Any, object(), None),
     ("set-coerce-list", set[int], [1, 2], ["x"]),
     ("frozenset", frozenset[int], frozenset([1]), [object()]),

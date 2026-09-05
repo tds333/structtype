@@ -8,8 +8,7 @@ from typing import Any, NamedTuple, TypedDict
 
 import pytest
 
-import structtype
-from structtype import ALL_BUILTIN_TYPES, Struct, StructConfig, ValidationError
+from structtype import ALL_BUILTIN_TYPES, Struct, StructConfig
 
 
 class Color(enum.Enum):
@@ -219,18 +218,3 @@ def test_roundtrip_tagged_union():
         back = Zoo.struct_validate(Zoo(animal).struct_dump())
         assert back == Zoo(animal)
         assert type(back.animal) is type(animal)
-
-
-def test_roundtrip_raw_dump_unsupported():
-    class WithRaw(Struct):
-        r: structtype.Raw
-
-    obj = WithRaw(structtype.Raw(b'{"x":1}'))
-    with pytest.raises(TypeError, match="unsupported"):
-        obj.struct_dump()
-
-    back = WithRaw.struct_validate({"r": structtype.Raw(b'{"x":1}')})
-    assert back == obj
-
-    with pytest.raises(ValidationError):
-        WithRaw.struct_validate({"r": {"x": 1}})

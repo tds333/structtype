@@ -1992,14 +1992,13 @@ def _ser():
         lambda: Annotated[int | str, _ser()],
         lambda: Annotated[Optional[int], _ser()],
         lambda: Annotated[_Color, _ser()],
-        lambda: Annotated[structtype.Raw, _ser()],
         lambda: Annotated[_Point, _ser()],
     ],
     ids=[
         "bool", "int", "float", "str", "bytes", "bytearray", "memoryview",
         "datetime", "date", "time", "timedelta", "uuid", "decimal",
         "any", "none", "literal", "list", "bare-list", "dict", "tuple",
-        "set", "frozenset", "union", "optional", "enum", "raw",
+        "set", "frozenset", "union", "optional", "enum",
         "nested-struct",
     ],
 )

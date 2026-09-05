@@ -1417,242 +1417,6 @@ static PyTypeObject StrLookup_Type = {
     .tp_traverse = (traverseproc) StrLookup_traverse,
 };
 
-/*************************************************************************
- * Raw                                                                   *
- *************************************************************************/
-
-static PyTypeObject Raw_Type;
-
-typedef struct Raw {
-    PyObject_HEAD
-    PyObject *base;
-    char *buf;
-    Py_ssize_t len;
-    bool is_view;
-    Py_buffer view;
-} Raw;
-
-static PyObject *
-Raw_New(PyObject *msg) {
-    Raw *out = (Raw *)Raw_Type.tp_alloc(&Raw_Type, 0);
-    if (out == NULL) return NULL;
-    if (PyBytes_CheckExact(msg)) {
-        Py_INCREF(msg);
-        out->base = msg;
-        out->buf = PyBytes_AS_STRING(msg);
-        out->len = PyBytes_GET_SIZE(msg);
-        out->is_view = false;
-    }
-    else if (PyUnicode_CheckExact(msg)) {
-        out->base = msg;
-        out->buf = (char *)unicode_str_and_size(msg, &out->len);
-        if (out->buf == NULL) return NULL;
-        Py_INCREF(msg);
-        out->is_view = false;
-    }
-    else {
-        Py_buffer buffer;
-        if (PyObject_GetBuffer(msg, &buffer, PyBUF_CONTIG_RO) < 0) {
-            Py_DECREF(out);
-            return NULL;
-        }
-        out->view = buffer;
-        out->base = buffer.obj;
-        out->buf = buffer.buf;
-        out->len = buffer.len;
-        out->is_view = true;
-    }
-    return (PyObject *)out;
-}
-
-PyDoc_STRVAR(Raw__doc__,
-"Raw(msg="", /)\n"
-"--\n"
-"\n"
-"A buffer containing an encoded message.\n"
-"\n"
-"Raw objects have two common uses:\n"
-"\n"
-"- During decoding. Fields annotated with the ``Raw`` type won't be decoded\n"
-"  immediately, but will instead return a ``Raw`` object with a view into the\n"
-"  original message where that field is encoded. This is useful for decoding\n"
-"  fields whose type may only be inferred after decoding other fields.\n"
-"- During encoding. Raw objects wrap pre-encoded messages. These can be added\n"
-"  as components of larger messages without having to pay the cost of decoding\n"
-"  and re-encoding them.\n"
-"\n"
-"Parameters\n"
-"----------\n"
-"msg: bytes, bytearray, memoryview, or str, optional\n"
-"    A buffer containing an encoded message. One of bytes, bytearray, memoryview,\n"
-"    str, or any object that implements the buffer protocol. If not present,\n"
-"    defaults to an empty buffer."
-);
-static PyObject *
-Raw_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
-    PyObject *msg;
-    Py_ssize_t nargs, nkwargs;
-
-    nargs = PyTuple_GET_SIZE(args);
-    nkwargs = (kwargs == NULL) ? 0 : PyDict_GET_SIZE(kwargs);
-
-    if (nkwargs != 0) {
-        PyErr_SetString(
-            PyExc_TypeError,
-            "Raw takes no keyword arguments"
-        );
-        return NULL;
-    }
-    else if (nargs == 0) {
-        msg = PyBytes_FromStringAndSize(NULL, 0);
-        if (msg == NULL) return NULL;
-        /* This looks weird, but is safe since the empty bytes object is an
-         * immortal singleton */
-        Py_DECREF(msg);
-    }
-    else if (nargs == 1) {
-        msg = PyTuple_GET_ITEM(args, 0);
-    }
-    else {
-        PyErr_Format(
-            PyExc_TypeError,
-            "Raw expected at most 1 arguments, got %zd",
-            nargs
-        );
-        return NULL;
-    }
-    return Raw_New(msg);
-}
-
-static void
-Raw_dealloc(Raw *self)
-{
-    if (self->base != NULL) {
-        if (!self->is_view) {
-            Py_DECREF(self->base);
-        }
-        else {
-            ms_release_buffer(&self->view);
-        }
-    }
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-static PyObject *
-Raw_FromView(PyObject *buffer_obj, char *data, Py_ssize_t len) {
-    Raw *out = (Raw *)Raw_Type.tp_alloc(&Raw_Type, 0);
-    if (out == NULL) return NULL;
-
-    Py_buffer buffer;
-    if (ms_get_buffer(buffer_obj, &buffer) < 0) {
-        Py_DECREF(out);
-        return NULL;
-    }
-    out->view = buffer;
-    out->base = buffer.obj;
-    out->buf = data;
-    out->len = len;
-    out->is_view = true;
-    return (PyObject *)out;
-}
-
-static PyObject *
-Raw_richcompare(Raw *self, PyObject *other, int op) {
-    if (Py_TYPE(other) != &Raw_Type) {
-        Py_RETURN_NOTIMPLEMENTED;
-    }
-    if (op != Py_EQ && op != Py_NE) {
-        Py_RETURN_NOTIMPLEMENTED;
-    }
-
-    Raw *raw_other = (Raw *)other;
-    bool equal = (
-        self == raw_other || (
-            (self->len == raw_other->len) &&
-            (memcmp(self->buf, raw_other->buf, self->len) == 0)
-        )
-    );
-    bool result = (op == Py_EQ) ? equal : !equal;
-    if (result) {
-        Py_RETURN_TRUE;
-    }
-    Py_RETURN_FALSE;
-}
-
-static int
-Raw_buffer_getbuffer(Raw *self, Py_buffer *view, int flags)
-{
-    return PyBuffer_FillInfo(view, (PyObject *)self, self->buf, self->len, 1, flags);
-}
-
-static PyBufferProcs Raw_as_buffer = {
-    .bf_getbuffer = (getbufferproc)Raw_buffer_getbuffer
-};
-
-static Py_ssize_t
-Raw_length(Raw *self) {
-    return self->len;
-}
-
-static PySequenceMethods Raw_as_sequence = {
-    .sq_length = (lenfunc)Raw_length
-};
-
-static PyObject *
-Raw_reduce(Raw *self, PyObject *unused)
-{
-    if (!self->is_view) {
-        return Py_BuildValue("O(O)", &Raw_Type, self->base);
-    }
-    return Py_BuildValue("O(y#)", &Raw_Type, self->buf, self->len);
-}
-
-PyDoc_STRVAR(Raw_copy__doc__,
-"copy(self)\n"
-"--\n"
-"\n"
-"Copy a Raw object.\n"
-"\n"
-"If the raw message is backed by a memoryview into a larger buffer (as happens\n"
-"during decoding), the message is copied and the reference to the larger buffer\n"
-"released. This may be useful to reduce memory usage if a Raw object created\n"
-"during decoding will be kept in memory for a while rather than immediately\n"
-"decoded and dropped."
-);
-static PyObject *
-Raw_copy(Raw *self, PyObject *unused)
-{
-    if (!self->is_view) {
-        Py_INCREF(self);
-        return (PyObject *)self;
-    }
-    PyObject *buf = PyBytes_FromStringAndSize(self->buf, self->len);
-    if (buf == NULL) return NULL;
-    PyObject *out = Raw_New(buf);
-    Py_DECREF(buf);
-    return out;
-}
-
-static PyMethodDef Raw_methods[] = {
-    {"__reduce__", (PyCFunction)Raw_reduce, METH_NOARGS},
-    {"copy", (PyCFunction)Raw_copy, METH_NOARGS, Raw_copy__doc__},
-    {NULL, NULL},
-};
-
-static PyTypeObject Raw_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "structtype.Raw",
-    .tp_doc = Raw__doc__,
-    .tp_basicsize = sizeof(Raw),
-    .tp_itemsize = sizeof(char),
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_new = Raw_new,
-    .tp_dealloc = (destructor) Raw_dealloc,
-    .tp_as_buffer = &Raw_as_buffer,
-    .tp_as_sequence = &Raw_as_sequence,
-    .tp_methods = Raw_methods,
-    .tp_richcompare = (richcmpfunc) Raw_richcompare,
-};
 
 static bool
 ensure_is_string(PyObject *val, const char *param) {
@@ -6854,9 +6618,6 @@ typenode_collect_type(TypeNodeCollectState *state, PyObject *obj) {
     }
     else if (t == state->mod->DecimalType) {
         state->types |= MS_TYPE_DECIMAL;
-    }
-    else if (t == (PyObject *)(&Raw_Type)) {
-        /* Raw is marked with a typecode of 0, nothing to do */
     }
     else if (Py_TYPE(t) == (PyTypeObject *)(state->mod->typing_typevar)) {
         out = typenode_collect_typevar(state, t);
@@ -14491,13 +14252,6 @@ json_encode_memoryview(EncoderState *self, PyObject *obj)
     return out;
 }
 
-static int
-json_encode_raw(EncoderState *self, PyObject *obj)
-{
-    Raw *raw = (Raw *)obj;
-    return ms_write(self, raw->buf, raw->len);
-}
-
 static int json_encode_dict_key_noinline(EncoderState *, PyObject *);
 
 /* Extract an enum member's value. Enum members store their value as a plain
@@ -15192,9 +14946,6 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     }
     else if (type == &PyMemoryView_Type) {
         return json_encode_memoryview(self, obj);
-    }
-    else if (type == &Raw_Type) {
-        return json_encode_raw(self, obj);
     }
     else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
         return json_encode_enum(self, obj, false);
@@ -17572,16 +17323,6 @@ json_maybe_decode_number(JSONDecoderState *self, TypeNode *type, PathNode *path)
     return out;
 }
 
-static MS_NOINLINE PyObject *
-json_decode_raw(JSONDecoderState *self) {
-    unsigned char c;
-    if (MS_UNLIKELY(!json_peek_skip_ws(self, &c))) return NULL;
-    const unsigned char *start = self->input_pos;
-    if (json_skip(self) < 0) return NULL;
-    Py_ssize_t size = self->input_pos - start;
-    return Raw_FromView(self->buffer_obj, (char *)start, size);
-}
-
 /* Fast path for the common `str`/`Any` string decode, inlined so the hot path
  * avoids the large non-inline `json_decode_string` (which also handles
  * datetime, uuid, decimal, bytes, enum, ...). */
@@ -17631,9 +17372,6 @@ static PyObject *
 json_decode(
     JSONDecoderState *self, TypeNode *type, PathNode *path
 ) {
-    if (MS_UNLIKELY(type->types == 0)) {
-        return json_decode_raw(self);
-    }
     PyObject *obj = json_decode_nocustom(self, type, path);
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
         return ms_decode_custom(obj, type, path);
@@ -19247,16 +18985,6 @@ validate_immutable(
     return ms_validation_error(expected, type, path);
 }
 
-static PyObject *
-validate_raw(
-    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
-) {
-    if (type->types == 0) {
-        Py_INCREF(obj);
-        return obj;
-    }
-    return ms_validation_error("raw", type, path);
-}
 
 static PyObject *
 validate_seq_to_list(
@@ -20403,9 +20131,6 @@ validate_obj_dispatch(
     else if (PyType_IsSubtype(Py_TYPE(pytype), self->mod->EnumMetaType)) {
         return validate_enum(self, obj, type, path);
     }
-    else if (pytype == &Raw_Type) {
-        return validate_raw(self, obj, type, path);
-    }
     else if (PyAnySet_Check(obj)) {
         return validate_any_set(self, obj, type, path);
     }
@@ -21084,8 +20809,6 @@ PyInit__core(void)
         return NULL;
     if (PyType_Ready(&StructMixinType) < 0)
         return NULL;
-    if (PyType_Ready(&Raw_Type) < 0)
-        return NULL;
     if (PyType_Ready(&JSONEncoder_Type) < 0)
         return NULL;
     if (PyType_Ready(&JSONDecoder_Type) < 0)
@@ -21116,8 +20839,6 @@ PyInit__core(void)
     if (PyModule_AddObjectRef(m, "TimezoneConstraint", (PyObject *)&TimezoneConstraint_Type) < 0)
         return NULL;
 
-    if (PyModule_AddObjectRef(m, "Raw", (PyObject *)&Raw_Type) < 0)
-        return NULL;
     if (PyModule_AddObjectRef(m, "JSONEncoder", (PyObject *)&JSONEncoder_Type) < 0)
         return NULL;
     if (PyModule_AddObjectRef(m, "JSONDecoder", (PyObject *)&JSONDecoder_Type) < 0)
