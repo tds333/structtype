@@ -606,7 +606,22 @@ class StructType(Type):
 
 
 class FieldInfo(structtype.Struct):
-    """A record describing a field in a struct."""
+    """An introspection record for a single struct field.
+
+    Obtain instances via :func:`fields`, which returns one ``FieldInfo`` per
+    field in declaration order.
+
+    Examples
+    --------
+    >>> class Point(Struct):
+    ...     x: float
+    ...     y: float
+
+    >>> for info in fields(Point):
+    ...     print(info)
+    FieldInfo(name='x', alias='x', type=<class 'float'>, required=True)
+    FieldInfo(name='y', alias='y', type=<class 'float'>, required=True)
+    """
 
     name: str
     alias: str
@@ -622,6 +637,7 @@ class FieldInfo(structtype.Struct):
 
     @property
     def required(self) -> bool:
+        """True when the field has no default and no default factory."""
         return self.default is NODEFAULT and self.default_factory is NODEFAULT
 
     def __repr__(self):

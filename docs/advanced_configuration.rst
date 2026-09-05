@@ -263,27 +263,59 @@ fields as a tuple of ``FieldInfo`` objects:
 
 .. code-block:: python
 
-    >>> from structtype import Struct, fields
+    >>> from structtype import Struct, fields, Factory
+    >>> from typing import Annotated
+    >>> from structtype import Field
 
     >>> class Point(Struct):
     ...     x: float
     ...     y: float
 
     >>> fields(Point)
-    (FieldInfo(name='x', alias='x', type=float, default=NODEFAULT, default_factory=NODEFAULT),
-     FieldInfo(name='y', alias='y', type=float, default=NODEFAULT, default_factory=NODEFAULT))
+    (FieldInfo(name='x', alias='x', type=<class 'float'>, required=True), FieldInfo(name='y', alias='y', type=<class 'float'>, required=True))
 
     >>> fields(Point(1.0, 2.0))  # also works on instances
-    (FieldInfo(...), FieldInfo(...))
+    (FieldInfo(name='x', alias='x', type=<class 'float'>, required=True), FieldInfo(name='y', alias='y', type=<class 'float'>, required=True))
 
 Each ``FieldInfo`` has the following attributes:
 
 - ``name``: the Python field name.
 - ``alias``: the name used for serialization (affected by ``rename``/``alias``).
 - ``type``: the field's type annotation.
-- ``default``: the default value, or ``NODEFAULT`` if required.
-- ``default_factory``: the default factory callable, or ``NODEFAULT`` if none.
+- ``default``: the default value, or ``NODEFAULT`` for required fields.
+- ``default_factory``: a callable that produces the default value, or ``NODEFAULT`` if none.
 - ``required``: a property returning ``True`` if the field has no default value.
+
+**Fields with defaults and factories:**
+
+.. code-block:: python
+
+    >>> class Config(Struct):
+    ...     name: str
+    ...     count: int = 0
+    ...     items: list = Factory(list)
+
+    >>> fields(Config)[0].required
+    True
+
+    >>> fields(Config)[1].required
+    False
+
+    >>> fields(Config)[1].default
+    0
+
+    >>> fields(Config)[2].default_factory is list
+    True
+
+**Aliased fields:**
+
+.. code-block:: python
+
+    >>> class Api(Struct):
+    ...     user_name: Annotated[str, Field(alias="userName")]
+
+    >>> fields(Api)[0].alias
+    'userName'
 
 ``dict``
 --------

@@ -96,7 +96,51 @@ Structs
 .. autofunction:: structtype.json_schema_components
 
 .. autoclass:: structtype.FieldInfo
-    :members:
+    :members: required
+
+    .. note::
+
+       ``FieldInfo`` is the *read* side of field metadata — you obtain it by
+       calling :func:`structtype.fields`. To *set* metadata (aliases,
+       descriptions, JSON schema extra, …) on a field, use
+       :class:`typing.Annotated` with :class:`Field` in the annotation —
+       see :doc:`annotation`.
+
+    .. attribute:: name
+
+        The Python field name (the name used in ``__init__`` and as a dict
+        key).
+
+    .. attribute:: alias
+
+        The name used for serialization — equals *name* unless
+        ``Field(alias=...)`` or ``StructConfig(rename=...)`` is used.
+
+    .. attribute:: type
+
+        The field's type annotation.
+
+    .. attribute:: default
+
+        The default value, or ``NODEFAULT`` for required fields.
+
+    .. attribute:: default_factory
+
+        A callable that produces the default value, or ``NODEFAULT`` if
+        none.
+
+    **Example:**
+
+    .. code-block:: python
+
+        >>> from structtype import Struct, fields, Factory
+        >>> class User(Struct):
+        ...     name: str
+        ...     age: int = 0
+        >>> for info in fields(User):
+        ...     print(f"{info.name}: required={info.required}")
+        name: required=True
+        age: required=False
 
 .. autoclass:: structtype.StructConfig
 
@@ -115,61 +159,112 @@ Structs
 
         :type: bool
 
+        Make instances immutable — ``setattr``/``delattr`` raise
+        ``FrozenInstanceError``. Enables ``__hash__`` (only when
+        ``eq=True``, the default). See :ref:`struct-frozen`.
+
     .. attribute:: eq
 
         :type: bool
+
+        Generate ``__eq__`` and ``__ne__``. Enabled by default.
 
     .. attribute:: order
 
         :type: bool
 
-    .. attribute:: repr_omit_defaults
-
-        :type: bool
-
-    .. attribute:: array_like
-
-        :type: bool
-
-    .. attribute:: weakref
-
-        :type: bool
-
-    .. attribute:: dict
-
-        :type: bool
-
-    .. attribute:: cache_hash
-
-        :type: bool
-
-    .. attribute:: omit_defaults
-
-        :type: bool
-
-    .. attribute:: forbid_unknown_fields
-
-        :type: bool
-
-    .. attribute:: check_types_on_init
-
-        :type: bool
-
-    .. attribute:: tag
-
-        :type: str | int | None
-
-    .. attribute:: tag_field
-
-        :type: str | None
+        Generate ``__lt__``, ``__le__``, ``__gt__``, ``__ge__``.
+        Requires ``eq=True``. See :doc:`usage` (Field Ordering).
 
     .. attribute:: kw_only
 
         :type: bool
 
+        All fields are keyword-only in ``__init__``. Enabled by default.
+
+    .. attribute:: repr_omit_defaults
+
+        :type: bool
+
+        Omit fields equal to their default value in ``__repr__``.
+        Described in :doc:`advanced_configuration`.
+
+    .. attribute:: array_like
+
+        :type: bool
+
+        Encode as positional array (``list``/``tuple``) instead of a
+        JSON object. Described in :doc:`supported-types`.
+
+    .. attribute:: weakref
+
+        :type: bool
+
+        Allow ``weakref.ref`` on instances (one pointer per instance).
+        Described in :doc:`advanced_configuration`.
+
+    .. attribute:: dict
+
+        :type: bool
+
+        Give instances a ``__dict__`` for arbitrary runtime attributes.
+        Described in :doc:`advanced_configuration`.
+
+    .. attribute:: cache_hash
+
+        :type: bool
+
+        Cache the hash of frozen struct instances after the first
+        ``hash()`` call. Described in :doc:`advanced_configuration`.
+
+    .. attribute:: omit_defaults
+
+        :type: bool
+
+        Omit fields equal to their default value in
+        ``struct_dump_json`` output. See :ref:`omit_defaults`.
+
+    .. attribute:: forbid_unknown_fields
+
+        :type: bool
+
+        Raise ``ValidationError`` on unknown keys in
+        ``struct_validate``/``struct_validate_json``.
+        See :ref:`forbid-unknown-fields`.
+
+    .. attribute:: check_types_on_init
+
+        :type: bool
+
+        Run type and constraint validation on every ``__init__`` call.
+        See :ref:`struct-check-types-on-init`.
+
+    .. attribute:: tag
+
+        :type: bool | str | int | Callable[[str], str | int] | None
+
+        The discriminant value used for tagged unions — either a fixed
+        value or a callable that maps the class name to one. Set to
+        ``False`` to explicitly disable tagging. See
+        :ref:`struct-tagged-unions`.
+
+    .. attribute:: tag_field
+
+        :type: str | None
+
+        The key used to store the discriminant value. Defaults to
+        ``"type"`` when either *tag* or *tag_field* is set. See
+        :ref:`struct-tagged-unions`.
+
     .. attribute:: rename
 
-        :type: str | dict | callable | None
+        :type: None | Literal["lower", "upper", "camel", "pascal", "kebab"] | Callable[[str], str | None] | Mapping[str, str]
+
+        Rename fields for serialization. Accepts a preset string
+        (``"lower"``, ``"upper"``, ``"camel"``, ``"pascal"``,
+        ``"kebab"``), a callable ``(name) -> new_name | None``, or a
+        dict mapping original names to serialized names.
+        See :ref:`renaming-fields`.
 
 .. autodata:: NODEFAULT
    :no-value:
