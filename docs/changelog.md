@@ -22,6 +22,8 @@
   musllinux wheels; local and PR builds still skip them (via
   `make wheels` / the CI workflow) to stay fast.
 
+- Internal performance improvements.
+
 ## 0.10.0 (2026-09-04)
 
 - **Breaking:** remove `uuid_format` and add `uuid_as_hex`. The
