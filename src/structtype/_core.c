@@ -18367,6 +18367,17 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         return dump_frozendict(self, obj);
     }
 #endif
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
+        if (self->builtin_types & MS_BUILTIN_UUID) goto builtin;
+        return dump_uuid(self, obj);
+    }
+    else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
+        if (self->builtin_types & MS_BUILTIN_ENUM) goto builtin;
+        return dump_enum(self, obj);
+    }
+    else if (PyAnySet_Check(obj)) {
+        return dump_set(self, obj, is_key);
+    }
     else if (ms_is_struct_type(type)) {
         return dump_struct(self, obj, is_key);
     }
@@ -18374,19 +18385,8 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         /* External struct type (e.g. msgspec) — use Python-level attribute access */
         return dump_external_struct(self, obj);
     }
-    else if (PyType_IsSubtype(Py_TYPE(type), self->mod->EnumMetaType)) {
-        if (self->builtin_types & MS_BUILTIN_ENUM) goto builtin;
-        return dump_enum(self, obj);
-    }
     else if (is_key & PyUnicode_Check(obj)) {
         return PyObject_Str(obj);
-    }
-    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->UUIDType))) {
-        if (self->builtin_types & MS_BUILTIN_UUID) goto builtin;
-        return dump_uuid(self, obj);
-    }
-    else if (PyAnySet_Check(obj)) {
-        return dump_set(self, obj, is_key);
     }
     if (self->codecs != NULL) {
         PyObject *dump = codecs_lookup(self->codecs, type);
