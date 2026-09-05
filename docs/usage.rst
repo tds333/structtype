@@ -1118,7 +1118,55 @@ For cases where you'd like a more lax set of conversion rules, pass
     ... )
     User(name='alice', groups={'admin'}, email=None)
 
-See :doc:`supported-types` for how lax mode affects individual types.
+The following table summarizes lax-mode behavior per type.  "Source" means the
+input type that gets automatically converted.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 35 40
+
+   * - Target type
+     - Lax conversions allowed
+     - Example
+   * - ``None``
+     - ``str`` → ``None`` (case-insensitive ``"null"``)
+     - ``"null"`` → ``None``
+   * - ``bool``
+     - ``str`` → ``bool`` (``"true"``/``"false"``, case-insensitive); ``int`` 0/1 → ``bool``
+     - ``"TRUE"`` → ``True``; ``1`` → ``True``
+   * - ``int``
+     - ``str`` → ``int``; ``float`` → ``int`` (exact integers only)
+     - ``"123"`` → ``123``; ``1.0`` → ``1``
+   * - ``float``
+     - ``str`` → ``float``
+     - ``"3.14"`` → ``3.14``
+   * - ``datetime.datetime``
+     - ``int``/``float``/``str`` → datetime (epoch seconds, UTC)
+     - ``1617405490`` → datetime
+   * - ``datetime.timedelta``
+     - ``int``/``float``/``str`` → timedelta (total seconds)
+     - ``90.5`` → timedelta(seconds=90, microseconds=500000)
+
+**Types with no lax mode:** ``str``, ``bytes``, ``bytearray``, ``memoryview``,
+``datetime.time``, ``datetime.date``, ``uuid.UUID``, ``decimal.Decimal``,
+``enum.Enum``, ``set``, ``frozenset``, ``list``, ``tuple``, ``dict``,
+``Struct``, ``dataclass``, ``NamedTuple``.  These types never perform implicit
+string-to-type conversion regardless of the ``strict`` setting.
+
+.. important::
+
+   ``struct_validate_json`` and ``struct_validate`` handle ``strict=False``
+   differently:
+
+   - **struct_validate_json**: no side effects — JSON keys are inherently
+     strings and the decoder handles key parsing natively.
+   - **struct_validate**: automatically enables string-to-type conversion
+     for dict keys as well as values (e.g. a dict with string keys
+     ``{"1": "foo"}`` validates against ``Dict[int, str]``).  This is
+     because lax mode is designed for string-heavy untyped protocols (URL
+     query strings, form data, CSV) where everything arrives as strings.
+
+See :doc:`supported-types` for per-type details.
 
 .. _to-builtins-vs-asdict:
 

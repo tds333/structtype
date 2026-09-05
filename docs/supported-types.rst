@@ -2,7 +2,10 @@ Supported Types
 ===============
 
 ``structtype`` uses Python `type annotations`_ to describe the expected types.
-Most combinations of the following types are supported (with a few restrictions):
+Most combinations of the following types are supported (with a few restrictions).
+
+For a summary of which types support lax-mode string-to-type conversion, see
+:ref:`strict-vs-lax`.
 
 **Builtin Types**
 
@@ -240,6 +243,8 @@ Bytes-like objects map to base64-encoded strings in JSON.
     >>> StructAdapter(bytearray).struct_validate_json(msg)
     bytearray(b'\xf0\x9d\x84\x9e')
 
+When using ``struct_validate``, a Python ``str`` containing base64 data will be
+decoded to ``bytes`` / ``bytearray`` / ``memoryview`` automatically.
 
 .. note::
 
