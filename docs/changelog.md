@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 (2026-09-06)
 
 - **Breaking:** remove `structtype.Raw`. `Raw` was the only type that did not
   participate in the full API surface (e.g. it raised a `TypeError` when passed
@@ -17,11 +17,7 @@
   | `r: Raw` field | `r: Any` |
   | `Raw(b'{"x": 1}')` verbatim passthrough | typed wrapper + `Annotated[Wrapper, Serializer(dump=..., load=...)]` — decoded on input, re-encoded on output |
 
-- Fix: musllinux wheels were never built at release — a config-level skip
-  overrode the release build's opt-in. The release build now produces
-  musllinux wheels; local and PR builds still skip them (via
-  `make wheels` / the CI workflow) to stay fast.
-
+- Improve musllinux wheels build.
 - Internal performance improvements.
 
 ## 0.10.0 (2026-09-04)
