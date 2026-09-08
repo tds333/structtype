@@ -152,26 +152,33 @@ that field — including nested inside lists, dicts, and tuples:
         b: Annotated[complex, Serializer(dump=dump_real)]        # -> real
         values: list[Annotated[complex, Serializer(dump=dump_pair)]]
 
-Serializers may only be attached to a *custom* type. ``structtype`` validates
-this when the class is created, raising a ``TypeError`` when:
+Serializers may only be attached to types that are not in the blocked set.
+``structtype`` validates this when the class is created, raising a
+``TypeError`` when:
 
-- the type is :doc:`natively supported <supported-types>` — this covers the
-  scalars (``bool``, ``int``, ``float``, ``str``, ``bytes``, ``bytearray``,
-  ``memoryview``), the ``datetime`` family, ``uuid.UUID``,
-  ``decimal.Decimal``, enums, ``Literal`` values,
-  containers (``list``, ``dict``, ``tuple``, ``set``, ``frozenset`` —
-  parameterized or not), unions (including ``Optional[...]``), and nested
-  ``Struct`` / ``TypedDict`` / ``dataclass`` / ``NamedTuple`` types — e.g.
+- the type is one of the blocked native types: ``bool``, ``int``, ``float``,
+  ``str``, ``list``, ``dict``, ``tuple`` (parameterized or not),
+  ``TypedDict``, ``NamedTuple``, ``frozendict`` — e.g.
   ``Annotated[int, Serializer(dump=...)]``,
-- the type is a union — including optional types such as
-  ``Annotated[complex | None, Serializer(dump=...)]``
+- the type is a union containing a blocked type — including optional types
+  such as ``Annotated[complex | None, Serializer(dump=...)]``
   (``Annotated[int | str, Serializer(dump=...)]``),
 - two different ``dump=`` Serializers apply within a single field, e.g.
   ``tuple[Annotated[complex, Serializer(dump=a)], Annotated[complex, Serializer(dump=b)]]``.
 
+All other types are allowed, including ``Literal`` values,
+``bytes``, ``bytearray``, ``memoryview``, the ``datetime`` family,
+``uuid.UUID``, ``decimal.Decimal``, enums, ``set``, ``frozenset``,
+``Struct`` subclasses, and ``dataclass`` / ``attrs`` types.
+
 *Subclasses* of natively supported types are classified as custom types, so
 Serializers attach fine to them — see :ref:`native-subclass-formats` below for the
-recommended pattern.
+recommended pattern.  (Direct use of the base type is also fine for most types
+now — only ``bool``, ``int``, ``float``, ``str``, ``list``, ``dict``,
+``tuple``, ``TypedDict``, ``NamedTuple``, and ``frozendict`` remain blocked.
+``Literal``, ``bytes``, ``datetime``, ``UUID``, ``Decimal``,
+``Enum``, ``set``, ``frozenset``, ``Struct`` subclasses, etc. are all
+accepted.)
 Serializers are only supported on :class:`Struct` fields.
 :class:`StructAdapter` rejects annotations containing a ``Serializer`` —
 use the protocol methods on the type there, or a :class:`Struct`:

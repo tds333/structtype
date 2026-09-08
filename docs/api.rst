@@ -306,11 +306,13 @@ Serializer
 
         A callable converting a custom-type value into a value composed of
         :doc:`natively supported <supported-types>` types. Used during
-        encoding. Only valid for custom types; attaching a ``dump=`` Serializer to a
-        natively supported type or a union (including optional types such as
-        ``Annotated[complex | None, ...]``) raises a ``TypeError`` — at
-        class creation time for ``Struct``, at construction for
-        ``StructAdapter``. See :doc:`extending`.
+        encoding. Not valid on blocked types (``bool``, ``int``, ``float``,
+        ``str``, ``list``, ``dict``, ``tuple``, ``TypedDict``, ``NamedTuple``,
+        ``frozendict``) or unions containing them — attaching a ``dump=`` Serializer
+        to a blocked type raises a ``TypeError`` at class creation time for
+        ``Struct``, at construction for ``StructAdapter``. All other types
+        (``Any``, ``Literal``, ``bytes``, ``datetime``, ``UUID``, ``Decimal``,
+        ``Enum``, ``Struct`` subclasses, etc.) are accepted. See :doc:`extending`.
 
     .. attribute:: load
         :no-index:

@@ -4368,6 +4368,15 @@ AssocList_Sort(AssocList* list) {
 // this type is always defined for order consistency:
 #define MS_TYPE_FROZENDICT          ((1ull << 38) | (1ull << 39))
 
+/* Types that cannot have a Serializer annotation.  Everything else (bytes,
+ * datetime, UUID, Enum, Struct subclasses, Literal, etc.) is allowed. */
+#define MS_SERIALIZER_BLOCKED_TYPES ( \
+    MS_TYPE_ANY | MS_TYPE_NONE | MS_TYPE_BOOL | MS_TYPE_INT | \
+    MS_TYPE_FLOAT | MS_TYPE_STR | MS_TYPE_LIST | MS_TYPE_DICT | \
+    MS_TYPE_VARTUPLE | MS_TYPE_FIXTUPLE | MS_TYPE_TYPEDDICT | \
+    MS_TYPE_NAMEDTUPLE | MS_TYPE_FROZENDICT \
+)
+
 /* Aliases for commonly used types */
 #if PY315_PLUS
 #define MS_ANY_DICT                 (MS_TYPE_DICT | MS_TYPE_FROZENDICT)
@@ -4682,11 +4691,12 @@ TypeNode_get_custom(TypeNode *type) {
 
 static MS_INLINE PyObject *
 TypeNode_get_codec(TypeNode *type) {
-    /* Serializers are only valid on custom types, which occupy the first
-     * detail slot; the Serializer is therefore always the next one.
-     * A user-defined Constraint may follow it (details[2]), but never
-     * precede it. */
-    return type->details[1].pointer;
+    /* The Serializer is packed after the type-specific detail slots
+     * (SLOT_00..SLOT_04) and before the user validator / constraint slots. */
+    Py_ssize_t i = ms_popcount(
+        type->types & (SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04)
+    );
+    return type->details[i].pointer;
 }
 
 static MS_INLINE PyObject *
@@ -5274,17 +5284,13 @@ typenode_collect_constraints(
     if (constraints == NULL) return 0;
     if (constraints_is_empty(constraints)) return 0;
 
-    /* Serializers are only supported on custom (non-native) types */
+    /* Serializers are not supported on native types such as int, str, etc. */
     if (constraints->serializer != NULL) {
-        bool is_custom = (
-            state->custom_obj != NULL &&
-            (state->types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_NONE)) == 0
-        );
-        if (!is_custom) {
+        if (state->types & MS_SERIALIZER_BLOCKED_TYPES) {
             PyErr_Format(
                 PyExc_TypeError,
-                "`Serializer(load=...)`/`Serializer(dump=...)` can only be "
-                "used on custom types - type `%R` is invalid",
+                "`Serializer(load=...)`/`Serializer(dump=...)` can not be "
+                "used on native types - type `%R` is invalid",
                 obj
             );
             return -1;
@@ -7637,11 +7643,7 @@ ms_is_single_custom_type(PyObject *t, StructspecState *mod) {
         PyErr_Clear();
         goto done;
     }
-    out = (
-        state.custom_obj != NULL &&
-        (state.types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC |
-                         MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR)) == 0
-    );
+    out = (state.types & MS_SERIALIZER_BLOCKED_TYPES) == 0;
 done:
     typenode_collect_clear_state(&state);
     return out;
@@ -7826,7 +7828,7 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     PyErr_Format(
                         PyExc_TypeError,
                         "`Serializer(load=...)`/`Serializer(dump=...)` codecs can "
-                        "only be used on custom types - type `%R` is invalid",
+                        "not be used on native types - type `%R` is invalid",
                         origin
                     );
                     Py_DECREF(metadata);
@@ -17371,7 +17373,30 @@ static PyObject *
 json_decode(
     JSONDecoderState *self, TypeNode *type, PathNode *path
 ) {
-    PyObject *obj = json_decode_nocustom(self, type, path);
+    PyObject *obj;
+    /* Non-custom types with a Serializer: parse raw JSON (as Any) first,
+     * then apply the load callback so it can transform the value before
+     * any type-specific logic. */
+    if (MS_UNLIKELY(
+        (type->types & MS_CONSTR_CODEC) &&
+        !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))
+    )) {
+        TypeNode type_any = {MS_TYPE_ANY};
+        obj = json_decode_nocustom(self, &type_any, path);
+        if (obj == NULL) return NULL;
+        Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
+        if (serializer->load != NULL) {
+            PyObject *temp = PyObject_CallOneArg(serializer->load, obj);
+            Py_DECREF(obj);
+            if (temp == NULL) {
+                ms_maybe_wrap_validation_error(path);
+                return NULL;
+            }
+            obj = temp;
+        }
+        return obj;
+    }
+    obj = json_decode_nocustom(self, type, path);
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
         return ms_decode_custom(obj, type, path);
     }
@@ -20139,6 +20164,22 @@ static PyObject *
 validate_obj(
     ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
+    /* Non-custom types with a Serializer: apply the load callback first,
+     * then validate the transformed value normally. */
+    if (MS_UNLIKELY(
+        (type->types & MS_CONSTR_CODEC) &&
+        !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))
+    )) {
+        Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
+        if (serializer->load != NULL) {
+            PyObject *temp = PyObject_CallOneArg(serializer->load, obj);
+            if (temp == NULL) {
+                ms_maybe_wrap_validation_error(path);
+                return NULL;
+            }
+            obj = temp;
+        }
+    }
     PyObject *out = validate_obj_dispatch(self, obj, type, path);
     /* Custom types had any user validator applied by `ms_decode_custom` */
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {

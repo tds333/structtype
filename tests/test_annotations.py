@@ -747,7 +747,7 @@ class TestSerializerCodecWiring:
         def f(x):
             return x
 
-        with pytest.raises(TypeError, match="custom types"):
+        with pytest.raises(TypeError, match="native types"):
 
             class Msg(Struct):
                 value: Annotated[int, Serializer(load=f)]
@@ -756,7 +756,7 @@ class TestSerializerCodecWiring:
         def f(x):
             return x
 
-        with pytest.raises(TypeError, match="custom types"):
+        with pytest.raises(TypeError, match="native types"):
 
             class Msg(Struct):
                 values: list[Annotated[str, Serializer(dump=str)]]
@@ -765,15 +765,95 @@ class TestSerializerCodecWiring:
         def f(x):
             return x
 
-        with pytest.raises(TypeError, match="custom types"):
+        with pytest.raises(TypeError, match="native types"):
             JSONDecoder(Annotated[int, Serializer(load=f)])
 
     def test_native_type_rejected_in_direct_decoder_nested(self):
         def f(x):
             return x
 
-        with pytest.raises(TypeError, match="custom types"):
+        with pytest.raises(TypeError, match="native types"):
             JSONDecoder(list[Annotated[int, Serializer(load=f)]])
+
+    def test_allowed_type_serializer_at_class_creation(self):
+        def load(value):
+            return datetime.datetime.fromisoformat(value)
+
+        def dump(dt):
+            return dt.isoformat()
+
+        class Msg(Struct):
+            ts: Annotated[datetime.datetime, Serializer(load=load, dump=dump)]
+
+        msg = Msg.struct_validate_json(b'{"ts": "2024-01-15T10:30:00"}')
+        assert msg.ts == datetime.datetime(2024, 1, 15, 10, 30, 0)
+        assert msg.struct_dump_json() == b'{"ts":"2024-01-15T10:30:00"}'
+
+    def test_allowed_type_serializer_in_nested_position(self):
+        def load(value):
+            return uuid.UUID(value)
+
+        def dump(u):
+            return str(u)
+
+        class Msg(Struct):
+            ids: list[Annotated[uuid.UUID, Serializer(load=load, dump=dump)]]
+
+        msg = Msg.struct_validate_json(
+            b'{"ids": ["00000000-0000-0000-0000-000000000001"]}'
+        )
+        assert msg.ids[0] == uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+    def test_allowed_type_serializer_in_direct_decoder(self):
+        def load(value):
+            return decimal.Decimal(value)
+
+        dec = JSONDecoder(
+            Annotated[decimal.Decimal, Serializer(load=load)]
+        )
+        assert dec.decode(b'"3.14"') == decimal.Decimal("3.14")
+
+    def test_allowed_type_bytes_serializer(self):
+        import base64 as b64
+
+        def load(value):
+            return b64.b64decode(value)
+
+        def dump(data):
+            return b64.b64encode(data).decode()
+
+        class Msg(Struct):
+            data: Annotated[bytes, Serializer(load=load, dump=dump)]
+
+        msg = Msg.struct_validate_json(b'{"data": "aGVsbG8="}')
+        assert msg.data == b"hello"
+
+    def test_allowed_type_enum_serializer(self):
+        class Color(enum.Enum):
+            RED = "red"
+            GREEN = "green"
+
+        def load(value):
+            return Color(value)
+
+        def dump(color):
+            return color.value
+
+        class Msg(Struct):
+            color: Annotated[Color, Serializer(load=load, dump=dump)]
+
+        msg = Msg.struct_validate_json(b'{"color": "red"}')
+        assert msg.color is Color.RED
+
+    def test_allowed_type_literal_serializer(self):
+        def load(value):
+            return 1 if value == "one" else value
+
+        class Msg(Struct):
+            code: Annotated[Literal[1], Serializer(load=load)]
+
+        msg = Msg.struct_validate_json(b'{"code": "one"}')
+        assert msg.code == 1
 
     def test_multiple_serializers_in_one_position_rejected(self):
         def f(x):
@@ -1971,6 +2051,31 @@ def _ser():
         lambda: Annotated[int, _ser()],
         lambda: Annotated[float, _ser()],
         lambda: Annotated[str, _ser()],
+        lambda: Annotated[type(None), _ser()],
+        lambda: Annotated[list[int], _ser()],
+        lambda: Annotated[list, _ser()],
+        lambda: Annotated[dict[str, int], _ser()],
+        lambda: Annotated[tuple[int, ...], _ser()],
+        lambda: Annotated[int | str, _ser()],
+        lambda: Annotated[Optional[int], _ser()],
+    ],
+    ids=[
+        "bool", "int", "float", "str", "none",
+        "list", "bare-list", "dict", "tuple", "union", "optional",
+    ],
+)
+def test_blocked_types_reject_serializer(ann_factory):
+    with pytest.raises(TypeError, match="native types"):
+        type(
+            f"Reject_{abs(hash(str(ann_factory)))}",
+            (Struct,),
+            {"__annotations__": {"v": ann_factory()}},
+        )
+
+
+@pytest.mark.parametrize(
+    "ann_factory",
+    [
         lambda: Annotated[bytes, _ser()],
         lambda: Annotated[bytearray, _ser()],
         lambda: Annotated[memoryview, _ser()],
@@ -1980,35 +2085,24 @@ def _ser():
         lambda: Annotated[datetime.timedelta, _ser()],
         lambda: Annotated[uuid.UUID, _ser()],
         lambda: Annotated[decimal.Decimal, _ser()],
-        lambda: Annotated[Any, _ser()],
-        lambda: Annotated[type(None), _ser()],
-        lambda: Annotated[Literal["x"], _ser()],
-        lambda: Annotated[list[int], _ser()],
-        lambda: Annotated[list, _ser()],
-        lambda: Annotated[dict[str, int], _ser()],
-        lambda: Annotated[tuple[int, ...], _ser()],
         lambda: Annotated[set[int], _ser()],
         lambda: Annotated[frozenset[int], _ser()],
-        lambda: Annotated[int | str, _ser()],
-        lambda: Annotated[Optional[int], _ser()],
         lambda: Annotated[_Color, _ser()],
         lambda: Annotated[_Point, _ser()],
+        lambda: Annotated[Literal["x"], _ser()],
     ],
     ids=[
-        "bool", "int", "float", "str", "bytes", "bytearray", "memoryview",
-        "datetime", "date", "time", "timedelta", "uuid", "decimal",
-        "any", "none", "literal", "list", "bare-list", "dict", "tuple",
-        "set", "frozenset", "union", "optional", "enum",
-        "nested-struct",
+        "bytes", "bytearray", "memoryview", "datetime", "date", "time",
+        "timedelta", "uuid", "decimal", "set", "frozenset", "enum",
+        "nested-struct", "literal",
     ],
 )
-def test_native_types_reject_serializer(ann_factory):
-    with pytest.raises(TypeError, match="only be used on custom types"):
-        type(
-            f"Reject_{abs(hash(str(ann_factory)))}",
-            (Struct,),
-            {"__annotations__": {"v": ann_factory()}},
-        )
+def test_allowed_types_accept_serializer(ann_factory):
+    type(
+        f"Accept_{abs(hash(str(ann_factory)))}",
+        (Struct,),
+        {"__annotations__": {"v": ann_factory()}},
+    )
 
 
 def test_subclasses_of_natives_accept_serializer():
