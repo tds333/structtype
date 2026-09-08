@@ -7847,32 +7847,27 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     goto error;
                 }
                 if (serializer->dump != NULL) {
-                    /* For Union/Optional types (e.g. Optional[datetime]),
-                     * resolve to the concrete non-None type for the codec
-                     * map key so the encoder can find it at runtime. */
+                    /* For Union/Optional types (e.g. Optional[datetime] or
+                     * complex | None), resolve to the concrete non-None type
+                     * for the codec map key so the encoder can find it at
+                     * runtime.  typing.Union has __origin__ == Union;
+                     * types.UnionType (3.10+) has no __origin__ but both
+                     * have __args__. */
                     PyObject *codec_key = origin;
-                    PyObject *origin_type = PyObject_GetAttr(
-                        origin, mod->str___origin__
+                    PyObject *args = PyObject_GetAttr(
+                        origin, mod->str___args__
                     );
-                    if (origin_type != NULL) {
-                        if (origin_type == mod->typing_union) {
-                            PyObject *args = PyObject_GetAttr(
-                                origin, mod->str___args__
-                            );
-                            if (args != NULL) {
-                                for (Py_ssize_t j = 0;
-                                     j < PyTuple_GET_SIZE(args); j++)
-                                {
-                                    PyObject *arg = PyTuple_GET_ITEM(args, j);
-                                    if (arg != NONE_TYPE) {
-                                        codec_key = arg;
-                                        break;
-                                    }
-                                }
-                                Py_DECREF(args);
+                    if (args != NULL) {
+                        for (Py_ssize_t j = 0;
+                             j < PyTuple_GET_SIZE(args); j++)
+                        {
+                            PyObject *arg = PyTuple_GET_ITEM(args, j);
+                            if (arg != NONE_TYPE) {
+                                codec_key = arg;
+                                break;
                             }
                         }
-                        Py_DECREF(origin_type);
+                        Py_DECREF(args);
                     }
                     if (codec_map_set(codecs, codec_key, serializer->dump, ctx) < 0) {
                         Py_DECREF(metadata);
