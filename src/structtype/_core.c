@@ -7869,6 +7869,9 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                         }
                         Py_DECREF(args);
                     }
+                    else {
+                        PyErr_Clear();
+                    }
                     if (codec_map_set(codecs, codec_key, serializer->dump, ctx) < 0) {
                         Py_DECREF(metadata);
                         Py_DECREF(origin);
