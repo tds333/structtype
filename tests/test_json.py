@@ -2997,6 +2997,132 @@ class TestFieldCodecEncode:
         }
 
 
+class TestDictKeyCodec:
+    """Dict-key Serializer codecs — struct_dump respects codecs for keys."""
+
+    def test_dict_key_codec_struct_dump(self):
+        def dump(c):
+            return f"{c.real}+{c.imag}j"
+
+        def load(v):
+            return complex(v)
+
+        class Msg(Struct):
+            v: dict[
+                Annotated[complex, Serializer(dump=dump, load=load)], int
+            ]
+
+        msg = Msg({complex(1, 2): 10})
+        assert msg.struct_dump() == {"v": {"1.0+2.0j": 10}}
+
+    def test_dict_key_codec_struct_dump_datetime(self):
+        def dump(d):
+            return d.strftime("%Y")
+
+        def load(v):
+            return datetime.datetime(int(v), 1, 1)
+
+        class Msg(Struct):
+            v: dict[
+                Annotated[datetime.datetime, Serializer(dump=dump, load=load)],
+                int,
+            ]
+
+        dt = datetime.datetime(2026, 6, 15)
+        msg = Msg({dt: 42})
+        assert msg.struct_dump() == {"v": {"2026": 42}}
+
+    def test_dict_key_codec_struct_validate(self):
+        def load(v):
+            return complex(v[0], v[1])
+
+        class Msg(Struct):
+            v: dict[
+                Annotated[complex, Serializer(dump=lambda c: [c.real, c.imag], load=load)],
+                int,
+            ]
+
+        msg = Msg.struct_validate({"v": {complex(3, 4): 7}})
+        assert msg.v == {complex(3, 4): 7}
+
+    def test_dict_key_codec_optional_none(self):
+        def dump(c):
+            return [c.real, c.imag]
+
+        def load(v):
+            return complex(v[0], v[1])
+
+        class Msg(Struct):
+            v: Optional[
+                dict[
+                    Annotated[complex, Serializer(dump=dump, load=load)],
+                    int,
+                ]
+            ]
+
+        msg = Msg(None)
+        assert msg.struct_dump() == {"v": None}
+
+
+class TestCodecBeforeNativePriority:
+    """Serializer codecs take precedence over native encoders in struct_dump
+    (the builtins path), since dump_obj checks codecs before native type
+    dispatch."""
+
+    def test_datetime_codec_overrides_native_struct_dump(self):
+        def custom_dump(d):
+            return {"year": d.year, "month": d.month}
+
+        class Msg(Struct):
+            v: Annotated[datetime.datetime, Serializer(dump=custom_dump)]
+
+        msg = Msg(datetime.datetime(2026, 3, 15))
+        assert msg.struct_dump() == {"v": {"year": 2026, "month": 3}}
+
+    def test_uuid_codec_overrides_native_struct_dump(self):
+        def custom_dump(u):
+            return u.hex
+
+        class Msg(Struct):
+            v: Annotated[uuid.UUID, Serializer(dump=custom_dump)]
+
+        u = uuid.UUID("c4524ac0-e81e-4aa8-a595-0aec605a659a")
+        msg = Msg(u)
+        assert msg.struct_dump() == {"v": u.hex}
+
+    def test_bytes_codec_overrides_native_struct_dump(self):
+        def custom_dump(b):
+            return len(b)
+
+        class Msg(Struct):
+            v: Annotated[bytes, Serializer(dump=custom_dump)]
+
+        msg = Msg(b"hello")
+        assert msg.struct_dump() == {"v": 5}
+
+    def test_decimal_codec_overrides_native_struct_dump(self):
+        def custom_dump(d):
+            return float(d)
+
+        class Msg(Struct):
+            v: Annotated[
+                decimal.Decimal, Serializer(dump=custom_dump, load=decimal.Decimal)
+            ]
+
+        msg = Msg(decimal.Decimal("3.14"))
+        assert msg.struct_dump() == {"v": 3.14}
+
+    def test_codec_overrides_native_in_list_element(self):
+        def custom_dump(d):
+            return d.year
+
+        class Msg(Struct):
+            v: list[Annotated[datetime.datetime, Serializer(dump=custom_dump)]]
+
+        msg = Msg([datetime.datetime(2026, 1, 1), datetime.datetime(2027, 6, 15)])
+        assert msg.struct_dump() == {"v": [2026, 2027]}
+
+
 class TestHooksRemovedFromStruct:
     def test_struct_dump_json_rejects_enc_hook(self):
         class Msg(Struct):

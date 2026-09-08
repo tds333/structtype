@@ -2136,6 +2136,299 @@ class TestNativeSubclassCodecs:
         assert ok.struct_dump_json() == b'{"when":"2020-01-01T12:00:00"}'
 
 
+class TestNativeTypeSerializerFunctional:
+    """Functional tests for Serializer on newly allowed types (load, dump,
+    roundtrip, struct_dump builtins path, error wrapping)."""
+
+    # -- set / frozenset ---------------------------------------------------
+
+    def test_set_serializer_roundtrip(self):
+        class Msg(Struct):
+            v: Annotated[set[int], Serializer(dump=sorted, load=set)]
+
+        msg = Msg.struct_validate_json(b'{"v": [3, 1, 2]}')
+        assert msg.v == {1, 2, 3}
+        assert msg.struct_dump_json() == b'{"v":[1,2,3]}'
+        assert msg.struct_dump() == {"v": [1, 2, 3]}
+
+    def test_frozenset_serializer_roundtrip(self):
+        class Msg(Struct):
+            v: Annotated[frozenset[int], Serializer(dump=sorted, load=frozenset)]
+
+        msg = Msg.struct_validate_json(b'{"v": [3, 1, 2]}')
+        assert msg.v == frozenset({1, 2, 3})
+        assert msg.struct_dump_json() == b'{"v":[1,2,3]}'
+        assert msg.struct_dump() == {"v": [1, 2, 3]}
+
+    def test_set_serializer_struct_validate(self):
+        class Msg(Struct):
+            v: Annotated[set[int], Serializer(dump=sorted, load=set)]
+
+        msg = Msg.struct_validate({"v": [3, 1, 2]})
+        assert msg.v == {1, 2, 3}
+
+    def test_set_serializer_optional_none(self):
+        class Msg(Struct):
+            v: Annotated[Optional[set[int]], Serializer(dump=sorted, load=set)]
+
+        msg = Msg.struct_validate_json(b'{"v": null}')
+        assert msg.v is None
+        assert msg.struct_dump_json() == b'{"v":null}'
+
+    # -- date / time / timedelta -------------------------------------------
+
+    def test_date_serializer_roundtrip(self):
+        def dump(d):
+            return d.isoformat()
+
+        def load(v):
+            return datetime.date.fromisoformat(v)
+
+        class Msg(Struct):
+            v: Annotated[datetime.date, Serializer(dump=dump, load=load)]
+
+        msg = Msg.struct_validate_json(b'{"v": "2026-01-15"}')
+        assert msg.v == datetime.date(2026, 1, 15)
+        assert msg.struct_dump_json() == b'{"v":"2026-01-15"}'
+        assert msg.struct_dump() == {"v": "2026-01-15"}
+
+    def test_time_serializer_roundtrip(self):
+        def dump(t):
+            return t.isoformat()
+
+        def load(v):
+            return datetime.time.fromisoformat(v)
+
+        class Msg(Struct):
+            v: Annotated[datetime.time, Serializer(dump=dump, load=load)]
+
+        msg = Msg.struct_validate_json(b'{"v": "14:30:00"}')
+        assert msg.v == datetime.time(14, 30)
+        assert msg.struct_dump_json() == b'{"v":"14:30:00"}'
+        assert msg.struct_dump() == {"v": "14:30:00"}
+
+    def test_timedelta_serializer_roundtrip(self):
+        def dump(td):
+            return td.total_seconds()
+
+        def load(v):
+            return datetime.timedelta(seconds=v)
+
+        class Msg(Struct):
+            v: Annotated[
+                datetime.timedelta, Serializer(dump=dump, load=load)
+            ]
+
+        td = datetime.timedelta(hours=1, minutes=30)
+        msg = Msg.struct_validate_json(b'{"v": 5400.0}')
+        assert msg.v == td
+        assert msg.struct_dump() == {"v": 5400.0}
+
+    def test_date_serializer_struct_validate(self):
+        def load(v):
+            return datetime.date.fromisoformat(v)
+
+        class Msg(Struct):
+            v: Annotated[datetime.date, Serializer(dump=str, load=load)]
+
+        msg = Msg.struct_validate({"v": "2026-06-15"})
+        assert msg.v == datetime.date(2026, 6, 15)
+
+    def test_date_serializer_optional_none(self):
+        def dump(d):
+            return d.isoformat()
+
+        def load(v):
+            return datetime.date.fromisoformat(v)
+
+        class Msg(Struct):
+            v: Annotated[
+                Optional[datetime.date], Serializer(dump=dump, load=load)
+            ]
+
+        msg = Msg.struct_validate_json(b'{"v": null}')
+        assert msg.v is None
+        assert msg.struct_dump_json() == b'{"v":null}'
+
+    # -- Decimal in struct field -------------------------------------------
+
+    def test_decimal_serializer_in_struct(self):
+        def dump(d):
+            return str(d)
+
+        def load(v):
+            return decimal.Decimal(v)
+
+        class Msg(Struct):
+            v: Annotated[decimal.Decimal, Serializer(dump=dump, load=load)]
+
+        msg = Msg.struct_validate_json(b'{"v": "3.14"}')
+        assert msg.v == decimal.Decimal("3.14")
+        assert msg.struct_dump_json() == b'{"v":"3.14"}'
+        assert msg.struct_dump() == {"v": "3.14"}
+
+    def test_decimal_serializer_struct_validate(self):
+        class Msg(Struct):
+            v: Annotated[decimal.Decimal, Serializer(dump=str, load=decimal.Decimal)]
+
+        msg = Msg.struct_validate({"v": "9.99"})
+        assert msg.v == decimal.Decimal("9.99")
+
+    # -- Literal load ------------------------------------------------------
+
+    def test_literal_serializer_load(self):
+        class Msg(Struct):
+            v: Annotated[
+                Literal[1, 2, 3],
+                Serializer(dump=lambda x: x * 10, load=lambda x: x // 10),
+            ]
+
+        msg = Msg.struct_validate_json(b'{"v": 50}')
+        assert msg.v == 5
+
+    # -- Union[X, None] outside Annotated — load path ----------------------
+
+    def test_union_outside_annotated_load_path(self):
+        class Msg(Struct):
+            v: Annotated[
+                complex,
+                Serializer(load=lambda v: complex(v[0], v[1])),
+            ] | None
+
+        msg = Msg.struct_validate_json(b'{"v": [1.0, 2.0]}')
+        assert msg.v == complex(1, 2)
+
+    def test_union_outside_annotated_none_bypass(self):
+        class Msg(Struct):
+            v: Annotated[
+                complex,
+                Serializer(
+                    dump=lambda c: [c.real, c.imag],
+                    load=lambda v: complex(v[0], v[1]),
+                ),
+            ] | None
+
+        msg = Msg.struct_validate_json(b'{"v": null}')
+        assert msg.v is None
+        assert msg.struct_dump_json() == b'{"v":null}'
+
+    def test_union_outside_annotated_dump_path(self):
+        class Msg(Struct):
+            v: Annotated[
+                complex, Serializer(dump=lambda c: [c.real, c.imag])
+            ] | None
+
+        msg = Msg(complex(1, 2))
+        assert msg.struct_dump_json() == b'{"v":[1.0,2.0]}'
+
+    # -- struct_dump() builtins path for newly allowed types ---------------
+
+    def test_struct_dump_builtins_datetime(self):
+        class Msg(Struct):
+            v: Annotated[datetime.datetime, Serializer(dump=lambda d: d.year)]
+
+        msg = Msg(datetime.datetime(2026, 3, 15))
+        assert msg.struct_dump() == {"v": 2026}
+
+    def test_struct_dump_builtins_uuid(self):
+        class Msg(Struct):
+            v: Annotated[uuid.UUID, Serializer(dump=lambda u: u.hex)]
+
+        u = uuid.UUID("c4524ac0-e81e-4aa8-a595-0aec605a659a")
+        msg = Msg(u)
+        assert msg.struct_dump() == {"v": u.hex}
+
+    def test_struct_dump_builtins_bytes(self):
+        class Msg(Struct):
+            v: Annotated[bytes, Serializer(dump=len, load=lambda n: b"x" * n)]
+
+        msg = Msg(b"hello")
+        assert msg.struct_dump() == {"v": 5}
+
+    def test_struct_dump_builtins_decimal(self):
+        class Msg(Struct):
+            v: Annotated[decimal.Decimal, Serializer(dump=str, load=decimal.Decimal)]
+
+        msg = Msg(decimal.Decimal("2.5"))
+        assert msg.struct_dump() == {"v": "2.5"}
+
+    def test_struct_dump_optional_none_bypasses_codec(self):
+        class Msg(Struct):
+            v: Annotated[
+                Optional[datetime.datetime],
+                Serializer(dump=lambda d: d.year, load=lambda v: datetime.datetime(v, 1, 1)),
+            ]
+
+        msg = Msg(None)
+        assert msg.struct_dump() == {"v": None}
+        assert msg.struct_dump_json() == b'{"v":null}'
+
+    # -- Error wrapping for newly allowed types ----------------------------
+
+    def test_error_wrapping_datetime_load(self):
+        def bad_load(v):
+            raise ValueError("custom error")
+
+        class Msg(Struct):
+            v: Annotated[datetime.datetime, Serializer(load=bad_load, dump=str)]
+
+        with pytest.raises(ValidationError, match="custom error"):
+            Msg.struct_validate_json(b'{"v": "2026-01-01T00:00:00"}')
+
+    def test_error_wrapping_uuid_load(self):
+        def bad_load(v):
+            raise ValueError("bad uuid")
+
+        class Msg(Struct):
+            v: Annotated[uuid.UUID, Serializer(load=bad_load, dump=str)]
+
+        with pytest.raises(ValidationError, match="bad uuid"):
+            Msg.struct_validate_json(b'{"v": "c4524ac0-e81e-4aa8-a595-0aec605a659a"}')
+
+    def test_error_wrapping_bytes_load(self):
+        def bad_load(v):
+            raise ValueError("bad bytes")
+
+        class Msg(Struct):
+            v: Annotated[bytes, Serializer(load=bad_load, dump=str)]
+
+        with pytest.raises(ValidationError, match="bad bytes"):
+            Msg.struct_validate_json(b'{"v": "aGVsbG8="}')
+
+    def test_error_wrapping_decimal_load(self):
+        def bad_load(v):
+            raise ValueError("bad decimal")
+
+        class Msg(Struct):
+            v: Annotated[decimal.Decimal, Serializer(load=bad_load, dump=str)]
+
+        with pytest.raises(ValidationError, match="bad decimal"):
+            Msg.struct_validate_json(b'{"v": "3.14"}')
+
+    def test_error_wrapping_enum_load(self):
+        class Color(enum.Enum):
+            RED = "r"
+
+        def bad_load(v):
+            raise ValueError("bad color")
+
+        class Msg(Struct):
+            v: Annotated[Color, Serializer(load=bad_load, dump=str)]
+
+        with pytest.raises(ValidationError, match="bad color"):
+            Msg.struct_validate_json(b'{"v": "r"}')
+
+    def test_error_wrapping_via_struct_validate(self):
+        def bad_load(v):
+            raise RuntimeError("boom")
+
+        class Msg(Struct):
+            v: Annotated[datetime.datetime, Serializer(load=bad_load, dump=str)]
+
+        with pytest.raises(RuntimeError, match="boom"):
+            Msg.struct_validate({"v": "2026-01-01"})
+
+
 class _Point(Struct):
     x: int
 

@@ -4778,7 +4778,8 @@ static MS_INLINE PyObject *
 TypeNode_get_constr_str_regex(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR | SLOT_22
         )
     );
     return type->details[i].pointer;
@@ -4788,8 +4789,9 @@ static MS_INLINE void
 TypeNode_get_dict(TypeNode *type, TypeNode **key, TypeNode **val) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 |
-            SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_22
         )
     );
     *key = type->details[i].pointer;
@@ -4800,7 +4802,9 @@ static MS_INLINE TypeNode *
 TypeNode_get_array(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 |
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 |
             SLOT_22
         )
     );
@@ -4811,8 +4815,9 @@ static MS_INLINE int64_t
 TypeNode_get_constr_int_min(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_22
         )
     );
     return type->details[i].i64;
@@ -4822,8 +4827,9 @@ static MS_INLINE int64_t
 TypeNode_get_constr_int_max(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_22
         )
     );
     return type->details[i].i64;
@@ -4833,8 +4839,9 @@ static MS_INLINE int64_t
 TypeNode_get_constr_int_multiple_of(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_22
         )
     );
     return type->details[i].i64;
@@ -4844,8 +4851,9 @@ static MS_INLINE double
 TypeNode_get_constr_float_min(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_22
         )
     );
     return type->details[i].f64;
@@ -4855,8 +4863,9 @@ static MS_INLINE double
 TypeNode_get_constr_float_max(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_22
         )
     );
     return type->details[i].f64;
@@ -4866,8 +4875,9 @@ static MS_INLINE double
 TypeNode_get_constr_float_multiple_of(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_22
         )
     );
     return type->details[i].f64;
@@ -4877,8 +4887,9 @@ static MS_INLINE Py_ssize_t
 TypeNode_get_constr_str_min_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -4888,8 +4899,9 @@ static MS_INLINE Py_ssize_t
 TypeNode_get_constr_str_max_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_22
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_22
         )
     );
     return type->details[i].py_ssize_t;
@@ -4899,8 +4911,9 @@ static MS_INLINE Py_ssize_t
 TypeNode_get_constr_bytes_min_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
             SLOT_22
         )
     );
@@ -4911,8 +4924,9 @@ static MS_INLINE Py_ssize_t
 TypeNode_get_constr_bytes_max_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
             SLOT_16 | SLOT_22
         )
     );
@@ -4923,8 +4937,9 @@ static MS_INLINE Py_ssize_t
 TypeNode_get_constr_array_min_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
             SLOT_16 | SLOT_17 | SLOT_22
         )
     );
@@ -4935,8 +4950,9 @@ static MS_INLINE Py_ssize_t
 TypeNode_get_constr_array_max_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
             SLOT_16 | SLOT_17 | SLOT_18 | SLOT_22
         )
     );
@@ -4947,8 +4963,9 @@ static MS_INLINE Py_ssize_t
 TypeNode_get_constr_map_min_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
             SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_22
         )
     );
@@ -4959,8 +4976,9 @@ static MS_INLINE Py_ssize_t
 TypeNode_get_constr_map_max_length(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
             SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_20 | SLOT_22
         )
     );
@@ -4971,7 +4989,9 @@ static MS_INLINE void
 TypeNode_get_fixtuple(TypeNode *type, Py_ssize_t *offset, Py_ssize_t *size) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | SLOT_05 | SLOT_06 | SLOT_07 |
+            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
+            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
+            SLOT_05 | SLOT_06 | SLOT_07 |
             SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
             SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_20 | SLOT_21 | SLOT_22
         )
@@ -5006,7 +5026,7 @@ TypeNode_get_traverse_ranges(
                 MS_TYPE_ENUM | MS_TYPE_STRLITERAL |
                 MS_TYPE_TYPEDDICT | MS_TYPE_DATACLASS |
                 MS_TYPE_NAMEDTUPLE |
-                MS_CONSTR_USER_VALIDATOR
+                MS_CONSTR_USER_VALIDATOR | MS_CONSTR_CODEC
             )
         );
         /* Number of typenode details */
@@ -14992,9 +15012,12 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
         if (dump != NULL) {
             PyObject *temp = PyObject_CallOneArg(dump, obj);
             if (temp == NULL) return -1;
-            int status = json_encode_inline(self, temp);
+            if (Py_TYPE(temp) != type) {
+                int status = json_encode_inline(self, temp);
+                Py_DECREF(temp);
+                return status;
+            }
             Py_DECREF(temp);
-            return status;
         }
     }
     if (PyObject_HasAttr(obj, self->mod->str_struct_dump)) {
@@ -18383,9 +18406,12 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         if (dump != NULL) {
             PyObject *temp = PyObject_CallOneArg(dump, obj);
             if (temp == NULL) return NULL;
-            PyObject *result = dump_obj(self, temp, is_key);
+            if (Py_TYPE(temp) != type) {
+                PyObject *result = dump_obj(self, temp, is_key);
+                Py_DECREF(temp);
+                return result;
+            }
             Py_DECREF(temp);
-            return result;
         }
     }
     if (PyList_Check(obj)) {
@@ -20206,6 +20232,7 @@ static PyObject *
 validate_obj(
     ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
+    PyObject *codec_temp = NULL;
     /* Non-custom types with a Serializer: apply the load callback first,
      * then validate the transformed value normally. */
     if (MS_UNLIKELY(
@@ -20254,12 +20281,14 @@ validate_obj(
                         ms_maybe_wrap_validation_error(path);
                         return NULL;
                     }
+                    codec_temp = temp;
                     obj = temp;
                 }
             }
         }
     }
     PyObject *out = validate_obj_dispatch(self, obj, type, path);
+    Py_XDECREF(codec_temp);
     /* Custom types had any user validator applied by `ms_decode_custom` */
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
         return out;
