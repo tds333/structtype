@@ -18379,7 +18379,18 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
     ) {
         goto builtin;
     }
-    else if (PyList_Check(obj)) {
+    /* Per-field dump codecs take precedence over the native encoders below. */
+    if (self->codecs != NULL) {
+        PyObject *dump = codecs_lookup(self->codecs, type);
+        if (dump != NULL) {
+            PyObject *temp = PyObject_CallOneArg(dump, obj);
+            if (temp == NULL) return NULL;
+            PyObject *result = dump_obj(self, temp, is_key);
+            Py_DECREF(temp);
+            return result;
+        }
+    }
+    if (PyList_Check(obj)) {
         return dump_list(self, obj);
     }
     else if (PyTuple_Check(obj)) {
@@ -18447,16 +18458,6 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         out = dump_binary(self, buffer.buf, buffer.len);
         PyBuffer_Release(&buffer);
         return out;
-    }
-    if (self->codecs != NULL) {
-        PyObject *dump = codecs_lookup(self->codecs, type);
-        if (dump != NULL) {
-            PyObject *temp = PyObject_CallOneArg(dump, obj);
-            if (temp == NULL) return NULL;
-            PyObject *result = dump_obj(self, temp, is_key);
-            Py_DECREF(temp);
-            return result;
-        }
     }
     if (PyObject_HasAttr(obj, self->mod->str_struct_dump)) {
         /* Custom type — struct_dump() to a base type, then re-process */
