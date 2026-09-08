@@ -20264,8 +20264,8 @@ validate_obj(
             else if (bits & MS_TYPE_UUID && PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->UUIDType)))
                 already_matches = true;
             else if (bits & (MS_TYPE_INTENUM | MS_TYPE_ENUM)) {
-                PyObject *cls = TypeNode_get_int_enum_or_literal(type);
-                if (cls == NULL) cls = TypeNode_get_str_enum_or_literal(type);
+                PyObject *cls = (PyObject *)TypeNode_get_int_enum_or_literal(type);
+                if (cls == NULL) cls = (PyObject *)TypeNode_get_str_enum_or_literal(type);
                 if (cls != NULL) {
                     int is_inst = PyObject_IsInstance(obj, cls);
                     if (is_inst < 0) { ms_maybe_wrap_validation_error(path); return NULL; }
