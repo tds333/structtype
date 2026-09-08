@@ -6,7 +6,8 @@
   could only be used on custom (user-defined) types. Now it is accepted on
   `Literal` values, `bytes`, `bytearray`, `memoryview`, the `datetime`
   family, `uuid.UUID`, `decimal.Decimal`, enums, `set`, `frozenset`, `Struct`
-  subclasses, and `dataclass` / `attrs` types. The blocked set is reduced to:
+  subclasses, `dataclass` / `attrs` types, and `Optional[allowed_type]`
+  (where `None` bypasses the codec). The blocked set is reduced to:
   `Any`, `bool`, `int`, `float`, `str`, `list`, `dict`, `tuple`, `TypedDict`,
   `NamedTuple`, and `frozendict`. Unions containing any blocked type are also
   rejected.

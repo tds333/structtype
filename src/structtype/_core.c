@@ -4369,9 +4369,10 @@ AssocList_Sort(AssocList* list) {
 #define MS_TYPE_FROZENDICT          ((1ull << 38) | (1ull << 39))
 
 /* Types that cannot have a Serializer annotation.  Everything else (bytes,
- * datetime, UUID, Enum, Struct subclasses, Literal, etc.) is allowed. */
+ * datetime, UUID, Enum, Struct subclasses, Literal, Optional[allowed], etc.)
+ * is allowed. */
 #define MS_SERIALIZER_BLOCKED_TYPES ( \
-    MS_TYPE_ANY | MS_TYPE_NONE | MS_TYPE_BOOL | MS_TYPE_INT | \
+    MS_TYPE_ANY | MS_TYPE_BOOL | MS_TYPE_INT | \
     MS_TYPE_FLOAT | MS_TYPE_STR | MS_TYPE_LIST | MS_TYPE_DICT | \
     MS_TYPE_VARTUPLE | MS_TYPE_FIXTUPLE | MS_TYPE_TYPEDDICT | \
     MS_TYPE_NAMEDTUPLE | MS_TYPE_FROZENDICT \
@@ -5284,8 +5285,18 @@ typenode_collect_constraints(
     if (constraints == NULL) return 0;
     if (constraints_is_empty(constraints)) return 0;
 
-    /* Serializers are not supported on native types such as int, str, etc. */
+    /* Serializers are not supported on bare `None` or on native types such as
+     * int, str, etc.  `None` in a union (e.g. `Optional[datetime]`) is fine. */
     if (constraints->serializer != NULL) {
+        if (state->types == MS_TYPE_NONE) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "`Serializer(load=...)`/`Serializer(dump=...)` can not be "
+                "used on `None` type - type `%R` is invalid",
+                obj
+            );
+            return -1;
+        }
         if (state->types & MS_SERIALIZER_BLOCKED_TYPES) {
             PyErr_Format(
                 PyExc_TypeError,
@@ -7836,7 +7847,34 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     goto error;
                 }
                 if (serializer->dump != NULL) {
-                    if (codec_map_set(codecs, origin, serializer->dump, ctx) < 0) {
+                    /* For Union/Optional types (e.g. Optional[datetime]),
+                     * resolve to the concrete non-None type for the codec
+                     * map key so the encoder can find it at runtime. */
+                    PyObject *codec_key = origin;
+                    PyObject *origin_type = PyObject_GetAttr(
+                        origin, mod->str___origin__
+                    );
+                    if (origin_type != NULL) {
+                        if (origin_type == mod->typing_union) {
+                            PyObject *args = PyObject_GetAttr(
+                                origin, mod->str___args__
+                            );
+                            if (args != NULL) {
+                                for (Py_ssize_t j = 0;
+                                     j < PyTuple_GET_SIZE(args); j++)
+                                {
+                                    PyObject *arg = PyTuple_GET_ITEM(args, j);
+                                    if (arg != NONE_TYPE) {
+                                        codec_key = arg;
+                                        break;
+                                    }
+                                }
+                                Py_DECREF(args);
+                            }
+                        }
+                        Py_DECREF(origin_type);
+                    }
+                    if (codec_map_set(codecs, codec_key, serializer->dump, ctx) < 0) {
                         Py_DECREF(metadata);
                         Py_DECREF(origin);
                         goto error;
@@ -17384,6 +17422,11 @@ json_decode(
         TypeNode type_any = {MS_TYPE_ANY};
         obj = json_decode_nocustom(self, &type_any, path);
         if (obj == NULL) return NULL;
+        /* `null` bypasses the codec for Optional types, matching the
+         * custom-type behavior in `ms_decode_custom`. */
+        if (obj == Py_None && (type->types & MS_TYPE_NONE)) {
+            return obj;
+        }
         Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
         if (serializer->load != NULL) {
             PyObject *temp = PyObject_CallOneArg(serializer->load, obj);
@@ -20170,14 +20213,51 @@ validate_obj(
         (type->types & MS_CONSTR_CODEC) &&
         !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))
     )) {
-        Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
-        if (serializer->load != NULL) {
-            PyObject *temp = PyObject_CallOneArg(serializer->load, obj);
-            if (temp == NULL) {
-                ms_maybe_wrap_validation_error(path);
-                return NULL;
+        /* `None` bypasses the codec for Optional types. */
+        if (!(obj == Py_None && (type->types & MS_TYPE_NONE))) {
+            /* Skip `load` when the value already matches the target type. */
+            bool already_matches = false;
+            PyTypeObject *pytype = Py_TYPE(obj);
+            uint64_t bits = type->types;
+            if (bits & MS_TYPE_DATETIME && pytype == PyDateTimeAPI->DateTimeType)
+                already_matches = true;
+            else if (bits & MS_TYPE_DATE && pytype == PyDateTimeAPI->DateType)
+                already_matches = true;
+            else if (bits & MS_TYPE_TIME && pytype == PyDateTimeAPI->TimeType)
+                already_matches = true;
+            else if (bits & MS_TYPE_TIMEDELTA && pytype == PyDateTimeAPI->DeltaType)
+                already_matches = true;
+            else if (bits & MS_TYPE_DECIMAL && pytype == (PyTypeObject *)(self->mod->DecimalType))
+                already_matches = true;
+            else if (bits & MS_TYPE_BYTES && pytype == &PyBytes_Type)
+                already_matches = true;
+            else if (bits & MS_TYPE_BYTEARRAY && pytype == &PyByteArray_Type)
+                already_matches = true;
+            else if (bits & MS_TYPE_MEMORYVIEW && pytype == &PyMemoryView_Type)
+                already_matches = true;
+            else if (bits & MS_TYPE_UUID && PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->UUIDType)))
+                already_matches = true;
+            else if (bits & (MS_TYPE_INTENUM | MS_TYPE_ENUM)) {
+                PyObject *cls = TypeNode_get_int_enum_or_literal(type);
+                if (cls == NULL) cls = TypeNode_get_str_enum_or_literal(type);
+                if (cls != NULL) {
+                    int is_inst = PyObject_IsInstance(obj, cls);
+                    if (is_inst < 0) { ms_maybe_wrap_validation_error(path); return NULL; }
+                    already_matches = (is_inst == 1);
+                }
             }
-            obj = temp;
+
+            if (!already_matches) {
+                Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
+                if (serializer->load != NULL) {
+                    PyObject *temp = PyObject_CallOneArg(serializer->load, obj);
+                    if (temp == NULL) {
+                        ms_maybe_wrap_validation_error(path);
+                        return NULL;
+                    }
+                    obj = temp;
+                }
+            }
         }
     }
     PyObject *out = validate_obj_dispatch(self, obj, type, path);

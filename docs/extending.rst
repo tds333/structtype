@@ -169,7 +169,8 @@ Serializers may only be attached to types that are not in the blocked set.
 All other types are allowed, including ``Literal`` values,
 ``bytes``, ``bytearray``, ``memoryview``, the ``datetime`` family,
 ``uuid.UUID``, ``decimal.Decimal``, enums, ``set``, ``frozenset``,
-``Struct`` subclasses, and ``dataclass`` / ``attrs`` types.
+``Struct`` subclasses, ``dataclass`` / ``attrs`` types,
+and ``Optional[allowed_type]`` (``None`` bypasses the codec).
 
 *Subclasses* of natively supported types are classified as custom types, so
 Serializers attach fine to them — see :ref:`native-subclass-formats` below for the
@@ -177,8 +178,8 @@ recommended pattern.  (Direct use of the base type is also fine for most types
 now — only ``bool``, ``int``, ``float``, ``str``, ``list``, ``dict``,
 ``tuple``, ``TypedDict``, ``NamedTuple``, and ``frozendict`` remain blocked.
 ``Literal``, ``bytes``, ``datetime``, ``UUID``, ``Decimal``,
-``Enum``, ``set``, ``frozenset``, ``Struct`` subclasses, etc. are all
-accepted.)
+``Enum``, ``set``, ``frozenset``, ``Struct`` subclasses,
+``Optional[allowed_type]``, etc. are all accepted.)
 Serializers are only supported on :class:`Struct` fields.
 :class:`StructAdapter` rejects annotations containing a ``Serializer`` —
 use the protocol methods on the type there, or a :class:`Struct`:

@@ -323,13 +323,12 @@ Serializer
         back into a custom-type value. Called during decoding
         (``struct_validate`` / ``struct_validate_json``). In
         ``struct_check_types`` / ``check_types_on_init``, if the field value is
-        not already an instance of the custom type, a ``ValidationError`` is
-        raised instead — ``load`` is **not** called. Only valid for custom
-        types; attaching a ``load=`` Serializer to a natively supported type or a
-        union (including optional types such as
-        ``Annotated[complex | None, ...]``) raises a ``TypeError`` — at
-        class creation time for ``Struct``, at construction for
-        ``StructAdapter``. See :doc:`extending`.
+        not already an instance of the target type, a ``ValidationError`` is
+        raised instead — ``load`` is **not** called. Not valid on blocked
+        types (``Any``, ``bool``, ``int``, ``float``, ``str``, ``list``,
+        ``dict``, ``tuple``, ``TypedDict``, ``NamedTuple``, ``frozendict``)
+        or unions containing them. ``None`` bypasses ``load`` for
+        ``Optional[allowed_type]`` fields. See :doc:`extending`.
 
 
 Constraint

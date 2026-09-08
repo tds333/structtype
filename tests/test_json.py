@@ -2868,14 +2868,19 @@ class TestFieldCodecClassCreation:
             Sub(complex(1, 2), 3).struct_dump_json() == b'{"value":[1.0,2.0],"other":3}'
         )
 
-    def test_union_with_none_errors_at_definition(self):
+    def test_optional_complex_roundtrip(self):
         def dump(c):
             return (c.real, c.imag)
 
-        with pytest.raises(TypeError):
+        def load(v):
+            return complex(v[0], v[1])
 
-            class Bad(Struct):
-                value: Annotated[complex | None, Serializer(dump=dump)]
+        class Msg(Struct):
+            value: Annotated[complex | None, Serializer(dump=dump, load=load)]
+
+        assert Msg(complex(1, 2)).struct_dump_json() == b'{"value":[1.0,2.0]}'
+        assert Msg(None).struct_dump_json() == b'{"value":null}'
+        assert Msg.struct_validate_json(b'{"value":null}').value is None
 
     def test_codec_union_outside_works(self):
         def dump(c):
