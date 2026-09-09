@@ -3,7 +3,7 @@
 ## Project
 
 Fast struct validation + JSON serialization for Python.
-Core is a monolithic C extension (`src/structtype/_core.c`, ~19K lines).
+Core is a monolithic C extension (`src/structtype/_core.c`, ~21K lines).
 No runtime deps.
 
 ## Setup
@@ -14,7 +14,8 @@ uv sync --frozen
 
 ## Commands
 
-All commands go through `make`.
+Use `make` targets where available. Targeted tests can be run directly with
+`uv run` as shown below.
 
 | Task | Command |
 |---|---|
@@ -27,7 +28,7 @@ All commands go through `make`.
 | Format | `make format` |
 | Lint | `make ruff-check` |
 | Type check | `make type-check` |
-| All checks | `make check` |
+| Static checks | `make check` |
 
 ## Conventions
 
@@ -44,10 +45,11 @@ All commands go through `make`.
 - `structtype.Struct` — base class with config options (frozen, tag, rename, etc.)
 - `structtype.Field` — field metadata (alias, title, description, examples, deprecated, json_schema_extra)
 - `structtype.Constraint` — base constraint (callable `fn`); subclasses: `NumericConstraint`, `StrConstraint`, `BytesConstraint`, `CollectionConstraint`, `TimezoneConstraint`
-- `structtype.Serializer` — custom-type load/dump codecs
+- `structtype.Serializer` — load/dump codecs for supported custom and native types
 - `structtype.Raw` — lazy JSON passthrough
 - `structtype.fields(type_or_instance)` — get FieldInfo tuple for a struct type/instance
 - `structtype._inspect.type_info()` / `multi_type_info()` — type introspection
+- `structtype.StructAdapter` — validate and serialize values against arbitrary types
 
 ### Struct Methods
 
@@ -67,6 +69,8 @@ Struct instances support the mapping protocol:
 
 - `make test-cov` reinstalls the C extension before running. `make test-cov-c` builds an `-O0 --coverage` instrumented extension **in place**; afterwards any reinstalling target (`make test`, `make test-cov`) restores the optimized build.
 - C coverage requires `lcov`/`genhtml`; report lands in `htmlcov-c/`.
+- `make check` runs static type and Ruff checks only; it does not run tests,
+  documentation builds, or formatting.
 - Validation matches keys by the **alias** name only, except `struct_validate(obj, from_attributes=True)` on a **non-dict object**, which matches by both the python field name and the alias. Dict/JSON input (even with `from_attributes=True`) and all dump/serialization use only the alias name.
 
 ## graphify

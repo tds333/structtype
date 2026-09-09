@@ -161,7 +161,7 @@ Serializers may only be attached to types that are not in the blocked set.
   ``TypedDict``, ``NamedTuple``, ``frozendict`` — e.g.
   ``Annotated[int, Serializer(dump=...)]``,
 - the type is a union containing a blocked type — including optional types
-  such as ``Annotated[complex | None, Serializer(dump=...)]``
+  such as ``Annotated[int | None, Serializer(dump=...)]``
   (``Annotated[int | str, Serializer(dump=...)]``),
 - two different ``dump=`` Serializers apply within a single field, e.g.
   ``tuple[Annotated[complex, Serializer(dump=a)], Annotated[complex, Serializer(dump=b)]]``.
