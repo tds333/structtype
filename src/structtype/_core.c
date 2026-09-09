@@ -7867,36 +7867,79 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     goto error;
                 }
                 if (serializer->dump != NULL) {
-                    /* For Union/Optional types (e.g. Optional[datetime] or
-                     * complex | None), resolve to the concrete non-None type
-                     * for the codec map key so the encoder can find it at
-                     * runtime.  typing.Union has __origin__ == Union;
-                     * types.UnionType (3.10+) has no __origin__ but both
-                     * have __args__. */
+                    /* Resolve the codec map key: for Union/Optional types
+                     * pick the first non-None member; for parameterized
+                     * generics (e.g. Box[int]) use the raw origin class
+                     * so codecs_lookup() can match the runtime type. */
                     PyObject *codec_key = origin;
-                    PyObject *args = PyObject_GetAttr(
-                        origin, mod->str___args__
+                    bool codec_key_is_new_ref = false;
+                    bool is_union = false;
+                    bool is_generic = false;
+                    PyObject *oo = PyObject_GetAttr(
+                        origin, mod->str___origin__
                     );
-                    if (args != NULL) {
-                        for (Py_ssize_t j = 0;
-                             j < PyTuple_GET_SIZE(args); j++)
-                        {
-                            PyObject *arg = PyTuple_GET_ITEM(args, j);
-                            if (arg != NONE_TYPE) {
-                                codec_key = arg;
-                                break;
-                            }
+                    if (oo != NULL) {
+                        if (oo == mod->typing_union) {
+                            is_union = true;
+                            Py_DECREF(oo);
                         }
-                        Py_DECREF(args);
+                        else {
+                            /* Parameterized generic
+                             * (e.g. Box[int]): oo is the raw
+                             * origin class. */
+                            is_generic = true;
+                            /* oo kept as new ref for codec_key */
+                        }
                     }
                     else {
                         PyErr_Clear();
+                        /* Python 3.10+ types.UnionType (int | str)
+                         * may not have __origin__. */
+                        if (mod->types_uniontype != NULL) {
+                            int rc = PyObject_IsInstance(
+                                origin, mod->types_uniontype
+                            );
+                            if (rc > 0) is_union = true;
+                            else if (rc < 0) {
+                                Py_DECREF(metadata);
+                                Py_DECREF(origin);
+                                goto error;
+                            }
+                        }
+                    }
+                    if (is_union) {
+                        PyObject *args = PyObject_GetAttr(
+                            origin, mod->str___args__
+                        );
+                        if (args != NULL) {
+                            for (Py_ssize_t j = 0;
+                                 j < PyTuple_GET_SIZE(args); j++)
+                            {
+                                PyObject *arg = PyTuple_GET_ITEM(
+                                    args, j
+                                );
+                                if (arg != NONE_TYPE) {
+                                    codec_key = arg;
+                                    break;
+                                }
+                            }
+                            Py_DECREF(args);
+                        }
+                        else {
+                            PyErr_Clear();
+                        }
+                    }
+                    else if (is_generic) {
+                        codec_key = oo;
+                        codec_key_is_new_ref = true;
                     }
                     if (codec_map_set(codecs, codec_key, serializer->dump, ctx) < 0) {
+                        if (codec_key_is_new_ref) Py_DECREF(codec_key);
                         Py_DECREF(metadata);
                         Py_DECREF(origin);
                         goto error;
                     }
+                    if (codec_key_is_new_ref) Py_DECREF(codec_key);
                 }
             }
             else if (PyObject_TypeCheck(item, (PyTypeObject *)&Constraint_Type)) {
@@ -16042,6 +16085,33 @@ json_decode_dict_key_fallback(
     JSONDecoderState *self,
     const char *view, Py_ssize_t size, bool is_ascii, TypeNode *type, PathNode *path
 ) {
+    /* Codec with `load` on a non-custom key type takes over: the key
+     * string is handed to `load` (the user validator is applied by the
+     * caller, `json_decode_dict_key`). */
+    if (MS_UNLIKELY(type->types & MS_CONSTR_CODEC) &&
+        !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC)))
+    {
+        Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
+        if (serializer->load != NULL) {
+            PyObject *out;
+            if (is_ascii) {
+                out = PyUnicode_New(size, 127);
+                if (MS_UNLIKELY(out == NULL)) return NULL;
+                memcpy(ascii_get_buffer(out), view, size);
+            }
+            else {
+                out = PyUnicode_DecodeUTF8(view, size, NULL);
+            }
+            if (out == NULL) return NULL;
+            PyObject *key = PyObject_CallOneArg(serializer->load, out);
+            Py_DECREF(out);
+            if (key == NULL) {
+                ms_maybe_wrap_validation_error(path);
+                return NULL;
+            }
+            return key;
+        }
+    }
     if (type->types & (MS_TYPE_STR | MS_TYPE_ANY)) {
         PyObject *out;
         if (is_ascii) {

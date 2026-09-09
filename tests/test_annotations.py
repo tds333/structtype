@@ -1,11 +1,12 @@
 import base64
+import dataclasses
 import datetime
 import decimal
 import enum
 import re
 import sys
 import uuid
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, NamedTuple, Optional, Union
 
 import pytest
 
@@ -2443,6 +2444,19 @@ class _Color(enum.Enum):
     R = "r"
 
 
+class _IntEnum(enum.IntEnum):
+    A = 1
+
+
+class _NamedTuple(NamedTuple):
+    x: int
+
+
+@dataclasses.dataclass
+class _Dataclass:
+    x: int
+
+
 def _ser():
     return Serializer(load=int, dump=str)
 
@@ -2528,3 +2542,294 @@ def test_subclasses_of_natives_accept_serializer():
             (Struct,),
             {"__annotations__": {"v": Annotated[sub, _ser()]}},
         )
+
+
+def test_struct_types_accept_serializer():
+    class Msg(Struct):
+        point: Annotated[_Point, _ser()]
+
+
+def test_array_like_struct_accepts_serializer():
+    class Inner(Struct):
+        struct_config = StructConfig(array_like=True)
+        x: int
+
+    def dump_inner(inner):
+        return {"x": inner.x}
+
+    class Msg(Struct):
+        inner: Annotated[Inner, Serializer(dump=dump_inner)]
+
+    msg = Msg(inner=Inner(x=1))
+    assert msg.struct_dump() == {"inner": {"x": 1}}
+
+
+def test_typeddict_rejects_serializer():
+    from typing import TypedDict
+
+    class TD(TypedDict):
+        x: int
+
+    with pytest.raises(TypeError, match="native types"):
+
+        class Msg(Struct):
+            t: Annotated[TD, _ser()]
+
+
+class TestNonCustomTypeCodecs:
+    """Functional tests for Serializer on native types: roundtrip, null
+    bypass, element-level codecs, constraints, check_types, per-field
+    isolation, dict key codecs, and generic custom types."""
+
+    def test_namedtuple_rejected(self):
+        def dump(p):
+            return [p.x]
+
+        def load(v):
+            return _NamedTuple(v[0])
+
+        with pytest.raises(TypeError, match="native types"):
+
+            class Msg(Struct):
+                p: Annotated[_NamedTuple, Serializer(dump=dump, load=load)]
+
+    def test_dataclass_roundtrip(self):
+        def dump(dc):
+            return {"x": dc.x, "y": dc.x}
+
+        def load(v):
+            return _Dataclass(v["x"])
+
+        class Msg(Struct):
+            dc: Annotated[_Dataclass, Serializer(dump=dump, load=load)]
+
+        msg = Msg(_Dataclass(3))
+        assert msg.struct_dump_json() == b'{"dc":{"x":3,"y":3}}'
+        assert Msg.struct_validate_json(
+            b'{"dc":{"x":3,"y":3}}'
+        ).dc == _Dataclass(3)
+
+    def test_optional_datetime_null_bypasses_load(self):
+        def dump(d):
+            return int(d.timestamp()) if d is not None else None
+
+        def load(v):
+            assert v is not None
+            return datetime.datetime.fromtimestamp(
+                v, datetime.timezone.utc
+            )
+
+        class Msg(Struct):
+            d: Annotated[
+                Optional[datetime.datetime],
+                Serializer(dump=dump, load=load),
+            ]
+
+        assert Msg.struct_validate_json(b'{"d":null}').d is None
+        assert Msg.struct_validate({"d": None}).d is None
+        out = Msg.struct_validate_json(b'{"d":1767225600}')
+        assert out.d == datetime.datetime(
+            2026, 1, 1, tzinfo=datetime.timezone.utc
+        )
+
+    def test_optional_enum_roundtrip(self):
+        def dump(f):
+            return f.value.upper()
+
+        def load(v):
+            return _Color(v.lower())
+
+        class Msg(Struct):
+            c: Annotated[
+                Optional[_Color], Serializer(dump=dump, load=load)
+            ]
+
+        msg = Msg(_Color.R)
+        assert msg.struct_dump_json() == b'{"c":"R"}'
+        assert Msg.struct_validate_json(b'{"c":null}').c is None
+        assert Msg.struct_validate_json(b'{"c":"R"}') == msg
+
+    def test_element_codec_inside_set(self):
+        def load(value):
+            return datetime.datetime.fromtimestamp(
+                value, datetime.timezone.utc
+            )
+
+        def dump(d):
+            return int(d.timestamp())
+
+        class Msg(Struct):
+            ds: Annotated[
+                set[
+                    Annotated[
+                        datetime.datetime,
+                        Serializer(dump=dump, load=load),
+                    ]
+                ],
+                None,
+            ]
+
+        dt = datetime.datetime(
+            2026, 1, 1, tzinfo=datetime.timezone.utc
+        )
+        msg = Msg({dt})
+        assert msg.struct_dump_json() == b'{"ds":[1767225600]}'
+        assert Msg.struct_validate_json(
+            b'{"ds":[1767225600]}'
+        ).ds == {dt}
+
+    def test_element_codec_inside_tuple(self):
+        def load(value):
+            return datetime.datetime.fromtimestamp(
+                value, datetime.timezone.utc
+            )
+
+        def dump(d):
+            return int(d.timestamp())
+
+        class Msg(Struct):
+            ds: Annotated[
+                tuple[
+                    Annotated[
+                        datetime.datetime,
+                        Serializer(dump=dump, load=load),
+                    ],
+                    ...,
+                ],
+                None,
+            ]
+
+        dt = datetime.datetime(
+            2026, 1, 1, tzinfo=datetime.timezone.utc
+        )
+        msg = Msg((dt, dt))
+        assert msg.struct_dump_json() == b'{"ds":[1767225600,1767225600]}'
+        assert Msg.struct_validate_json(
+            b'{"ds":[1767225600]}'
+        ).ds == (dt,)
+
+    def test_codec_and_bytes_constraint(self):
+        def dump(b):
+            return b.hex()
+
+        class Msg(Struct):
+            b: Annotated[
+                bytes,
+                BytesConstraint(min_length=2),
+                Serializer(dump=dump, load=bytes.fromhex),
+            ]
+
+        # Python path, already bytes: constraints apply.
+        assert Msg.struct_validate({"b": b"\x01\x02"}).b == b"\x01\x02"
+        with pytest.raises(ValidationError):
+            Msg.struct_validate({"b": b"\x01"})
+        # JSON path: load takes over, structural constraints are skipped.
+        assert Msg.struct_validate_json(b'{"b":"0102"}').b == b"\x01\x02"
+        assert Msg.struct_validate_json(b'{"b":"01"}').b == b"\x01"
+
+    def test_check_types_on_codec_field(self):
+        def dump(d):
+            return int(d.timestamp())
+
+        def load(v):
+            return datetime.datetime.fromtimestamp(
+                v, datetime.timezone.utc
+            )
+
+        class Msg(Struct):
+            d: Annotated[
+                datetime.datetime,
+                Serializer(dump=dump, load=load),
+            ]
+
+        Msg(datetime.datetime(2026, 1, 1)).struct_check_types()
+        with pytest.raises(ValidationError):
+            Msg("not-a-datetime").struct_check_types()
+
+    def test_per_field_isolation(self):
+        def dump_a(d):
+            return int(d.timestamp())
+
+        def load_a(v):
+            return datetime.datetime.fromtimestamp(
+                v, datetime.timezone.utc
+            )
+
+        def dump_b(d):
+            return d.year
+
+        def load_b(v):
+            return datetime.datetime(
+                int(v), 1, 1, tzinfo=datetime.timezone.utc
+            )
+
+        class Msg(Struct):
+            a: Annotated[
+                datetime.datetime,
+                Serializer(dump=dump_a, load=load_a),
+            ]
+            b: Annotated[
+                datetime.datetime,
+                Serializer(dump=dump_b, load=load_b),
+            ]
+
+        d = datetime.datetime(
+            2026, 1, 1, tzinfo=datetime.timezone.utc
+        )
+        msg = Msg(d, d)
+        assert msg.struct_dump_json() == b'{"a":1767225600,"b":2026}'
+        out = Msg.struct_validate_json(
+            b'{"a":1767225600,"b":2026}'
+        )
+        assert out.a == d and out.b == d
+
+    def test_dict_key_codec(self):
+        def dump(d):
+            return d.strftime("%Y")
+
+        def load(v):
+            return datetime.datetime(int(v), 1, 1)
+
+        class Msg(Struct):
+            by_year: Annotated[
+                dict[
+                    Annotated[
+                        datetime.datetime,
+                        Serializer(dump=dump, load=load),
+                    ],
+                    int,
+                ],
+                None,
+            ]
+
+        dt = datetime.datetime(2026, 1, 1)
+        msg = Msg({dt: 1})
+        assert msg.struct_dump_json() == b'{"by_year":{"2026":1}}'
+        assert Msg.struct_validate_json(
+            b'{"by_year":{"2026":1}}'
+        ) == msg
+
+    def test_generic_custom_dump_codec_fires(self):
+        from typing import Generic, TypeVar
+
+        T = TypeVar("T")
+
+        class Box(Generic[T]):
+            def __init__(self, v):
+                self.v = v
+
+            def struct_dump(self):
+                return self.v
+
+            def __eq__(self, other):
+                return isinstance(other, Box) and self.v == other.v
+
+        def dump(b):
+            return [b.v, b.v]
+
+        class Msg(Struct):
+            b: Annotated[Box[int], Serializer(dump=dump)]
+
+        # The codec (not the struct_dump protocol fallback) must fire.
+        assert Msg(Box(1)).struct_dump_json() == b'{"b":[1,1]}'
+        assert Msg(Box(1)).struct_dump() == {"b": [1, 1]}
