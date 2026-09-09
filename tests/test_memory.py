@@ -61,3 +61,91 @@ def test_struct_validate_json_type_str_not_leaked():
         P.struct_validate_json(b'{"x":1}')
     gc.collect()
     assert sys.getrefcount(t) == base
+
+
+def test_codec_serializer_freed_with_decoder():
+    import datetime
+
+    from typing import Annotated
+
+    from structtype import Serializer
+    from structtype._core import JSONDecoder
+
+    def dump(d):
+        return int(d.timestamp())
+
+    def load(v):
+        return datetime.datetime.fromtimestamp(v, datetime.timezone.utc)
+
+    # Keep the serializer in a heap-held container so its refcount is stable
+    # under free-threaded builds (stack-only references may not be counted).
+    ser = Serializer(dump=dump, load=load)
+    keep = [ser]
+    # Build the annotation first: typing's alias cache holds the serializer,
+    # so those references must be part of the baseline.
+    ann = Annotated[datetime.datetime, ser]
+    gc.collect()
+    base = sys.getrefcount(ser)
+
+    decoder = JSONDecoder(ann)
+    gc.collect()
+    # The decoder's TypeNode holds exactly one extra reference (the codec
+    # detail slot); it must be released when the decoder is freed.
+    del decoder
+    gc.collect()
+    assert sys.getrefcount(ser) == base
+
+
+def test_codec_decode_does_not_leak_values():
+    import datetime
+
+    from typing import Annotated
+
+    from structtype import Serializer
+    from structtype._core import JSONDecoder
+
+    def dump(d):
+        return int(d.timestamp())
+
+    def load(v):
+        return datetime.datetime.fromtimestamp(v, datetime.timezone.utc)
+
+    # Element-level codec inside a container: exercises both the container
+    # node and a codec'd element node in the TypeNode tree.
+    decoder = JSONDecoder(
+        set[Annotated[datetime.datetime, Serializer(dump=dump, load=load)]]
+    )
+
+    gc.collect()
+    out = decoder.decode("[1767225600]")
+    assert out == {
+        datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    }
+    for _ in range(200):
+        decoder.decode("[1767225600]")
+    gc.collect()
+
+
+def test_codec_encode_does_not_leak_values():
+    import datetime
+    from typing import Annotated
+
+    import structtype
+    from structtype import Serializer
+
+    def dump(d):
+        return int(d.timestamp())
+
+    def load(v):
+        return datetime.datetime.fromtimestamp(v, datetime.timezone.utc)
+
+    ann = Annotated[datetime.datetime, Serializer(dump=dump, load=load)]
+    ns = {"__annotations__": {"d": ann}, "__module__": __name__}
+    Msg = type("Msg", (structtype.Struct,), ns)
+
+    msg = Msg(datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
+    gc.collect()
+    for _ in range(200):
+        buf = msg.struct_dump_json()
+        assert Msg.struct_validate_json(buf) == msg
+    gc.collect()

@@ -3122,6 +3122,126 @@ class TestCodecBeforeNativePriority:
         msg = Msg([datetime.datetime(2026, 1, 1), datetime.datetime(2027, 6, 15)])
         assert msg.struct_dump() == {"v": [2026, 2027]}
 
+    @pytest.mark.parametrize(
+        "tp,value,expected_json,load_fn",
+        [
+            (
+                datetime.datetime,
+                datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+                b'{"v":"2026-01-01T00:00:00+00:00"}',
+                lambda v: datetime.datetime.fromisoformat(v),
+            ),
+            (
+                datetime.date,
+                datetime.date(2026, 3, 15),
+                b'{"v":"2026-03-15"}',
+                lambda v: datetime.date.fromisoformat(v),
+            ),
+            (
+                datetime.time,
+                datetime.time(12, 30),
+                b'{"v":"12:30:00"}',
+                lambda v: datetime.time.fromisoformat(v),
+            ),
+            (
+                datetime.timedelta,
+                datetime.timedelta(hours=1),
+                b'{"v":3600.0}',
+                lambda v: datetime.timedelta(seconds=v),
+            ),
+            (
+                uuid.UUID,
+                uuid.UUID("c4524ac0-e81e-4aa8-a595-0aec605a659a"),
+                b'{"v":"c4524ac0e81e4aa8a5950aec605a659a"}',
+                None,
+            ),
+            (
+                decimal.Decimal,
+                decimal.Decimal("3.14"),
+                b'{"v":3.14}',
+                None,
+            ),
+            (
+                set,
+                {1, 2, 3},
+                b'{"v":[1,2,3]}',
+                set,
+            ),
+            (
+                frozenset,
+                frozenset({1, 2}),
+                b'{"v":[1,2]}',
+                frozenset,
+            ),
+            (
+                bytes,
+                b"hello",
+                b'{"v":5}',
+                None,
+            ),
+            (
+                bytearray,
+                bytearray(b"xyz"),
+                b'{"v":3}',
+                None,
+            ),
+        ],
+        ids=[
+            "datetime",
+            "date",
+            "time",
+            "timedelta",
+            "uuid",
+            "decimal",
+            "set",
+            "frozenset",
+            "bytes",
+            "bytearray",
+        ],
+    )
+    def test_codec_overrides_native_struct_dump_json(
+        self, tp, value, expected_json, load_fn
+    ):
+        def custom_dump(v):
+            if isinstance(v, (datetime.datetime, datetime.date, datetime.time)):
+                return v.isoformat()
+            if isinstance(v, datetime.timedelta):
+                return v.total_seconds()
+            if isinstance(v, uuid.UUID):
+                return v.hex
+            if isinstance(v, decimal.Decimal):
+                return float(v)
+            if isinstance(v, (set, frozenset)):
+                return sorted(v)
+            if isinstance(v, (bytes, bytearray)):
+                return len(v)
+            raise TypeError(f"unexpected type {type(v)}")
+
+        ann = Annotated[tp, Serializer(dump=custom_dump, load=load_fn)]
+        ns = {"__annotations__": {"v": ann}, "__module__": __name__}
+        Msg = type("Msg", (Struct,), ns)
+
+        msg = Msg(value)
+        buf = msg.struct_dump_json()
+        assert buf == expected_json
+        if load_fn is not None:
+            assert Msg.struct_validate_json(buf) == msg
+
+    def test_codec_overrides_native_enum_struct_dump_json(self):
+        class Color(enum.Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        def custom_dump(c):
+            return c.value.upper()
+
+        class Msg(Struct):
+            v: Annotated[Color, Serializer(dump=custom_dump)]
+
+        msg = Msg(Color.RED)
+        buf = msg.struct_dump_json()
+        assert buf == b'{"v":"RED"}'
+
 
 class TestHooksRemovedFromStruct:
     def test_struct_dump_json_rejects_enc_hook(self):

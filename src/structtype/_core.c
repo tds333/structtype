@@ -14584,6 +14584,17 @@ static MS_NOINLINE int
 json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
     PyTypeObject *type = Py_TYPE(obj);
 
+    /* Per-field dump codecs take precedence over the native encoders below. */
+    if (self->codecs != NULL) {
+        PyObject *dump = codecs_lookup(self->codecs, type);
+        if (dump != NULL) {
+            PyObject *temp = PyObject_CallOneArg(dump, obj);
+            if (temp == NULL) return -1;
+            int status = json_encode_dict_key(self, temp);
+            Py_DECREF(temp);
+            return status;
+        }
+    }
     if (type == &PyLong_Type) {
         return json_encode_long_as_str(self, obj);
     }
@@ -14613,16 +14624,6 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
     }
     else if (type == &PyBytes_Type) {
         return json_encode_bytes(self, obj);
-    }
-    if (self->codecs != NULL) {
-        PyObject *dump = codecs_lookup(self->codecs, type);
-        if (dump != NULL) {
-            PyObject *temp = PyObject_CallOneArg(dump, obj);
-            if (temp == NULL) return -1;
-            int status = json_encode_dict_key(self, temp);
-            Py_DECREF(temp);
-            return status;
-        }
     }
     return ms_encode_err_type_unsupported(type);
 }
@@ -14971,6 +14972,21 @@ json_encode_struct(EncoderState *self, PyObject *obj)
 
 static MS_NOINLINE int
 json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
+    /* Per-field dump codecs take precedence over both the native encoders
+     * and the protocol fallbacks below. */
+    if (self->codecs != NULL) {
+        PyObject *dump = codecs_lookup(self->codecs, type);
+        if (dump != NULL) {
+            PyObject *temp = PyObject_CallOneArg(dump, obj);
+            if (temp == NULL) return -1;
+            if (Py_TYPE(temp) != type) {
+                int status = json_encode_inline(self, temp);
+                Py_DECREF(temp);
+                return status;
+            }
+            Py_DECREF(temp);
+        }
+    }
     if (PyTuple_Check(obj)) {
         return json_encode_tuple(self, obj);
     }
@@ -15006,19 +15022,6 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     }
     else if (type == &PyMemoryView_Type) {
         return json_encode_memoryview(self, obj);
-    }
-    if (self->codecs != NULL) {
-        PyObject *dump = codecs_lookup(self->codecs, type);
-        if (dump != NULL) {
-            PyObject *temp = PyObject_CallOneArg(dump, obj);
-            if (temp == NULL) return -1;
-            if (Py_TYPE(temp) != type) {
-                int status = json_encode_inline(self, temp);
-                Py_DECREF(temp);
-                return status;
-            }
-            Py_DECREF(temp);
-        }
     }
     if (PyObject_HasAttr(obj, self->mod->str_struct_dump)) {
         /* Custom type — struct_dump() to a base type, then re-encode */
