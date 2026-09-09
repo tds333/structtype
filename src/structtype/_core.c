@@ -134,6 +134,25 @@ PyDict_GetItemRef(PyObject *mp, PyObject *key, PyObject **result)
 }
 #endif // PY_VERSION_HEX < 0x030D00A1
 
+#if PY_VERSION_HEX < 0x030D00A1
+static inline int
+PyObject_GetOptionalAttr(PyObject *obj, PyObject *attr_name, PyObject **result)
+{
+    PyObject *res = PyObject_GetAttr(obj, attr_name);
+    if (res != NULL) {
+        *result = res;
+        return 1;
+    }
+    if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
+        PyErr_Clear();
+        *result = NULL;
+        return 0;
+    }
+    *result = NULL;
+    return -1;
+}
+#endif // PY_VERSION_HEX < 0x030D00A1
+
 #if PY315_PLUS
 static inline PyObject *
 _PyFrozenDict_NewSteal(PyObject *dict) {
@@ -11589,67 +11608,84 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
     }
 
     /* Cached interned names avoid per-call string creation in
-     * HasAttr/GetAttr lookups. */
+     * GetOptionalAttr lookups. */
     StructspecState *st = structtype_get_global_state();
 
     /* Custom type — struct_validate(dict) */
-    if (PyObject_HasAttr(custom_cls, st->str_struct_validate) && out != Py_None) {
-        int is_inst = PyObject_IsInstance(out, custom_cls);
-        if (is_inst < 0) {
-            Py_DECREF(out);
-            return NULL;
-        }
-        if (!is_inst) {
-            PyObject *fn = PyObject_GetAttr(custom_cls, st->str_struct_validate);
-            if (fn == NULL) {
-                Py_DECREF(out);
-                ms_maybe_wrap_validation_error(path);
-                return NULL;
+    {
+        PyObject *fn;
+        int found = PyObject_GetOptionalAttr(custom_cls, st->str_struct_validate, &fn);
+        if (found < 0) { Py_DECREF(out); return NULL; }
+        if (found) {
+            if (out != Py_None) {
+                int is_inst = PyObject_IsInstance(out, custom_cls);
+                if (is_inst < 0) { Py_DECREF(fn); Py_DECREF(out); return NULL; }
+                if (!is_inst) {
+                    PyObject *temp = PyObject_CallOneArg(fn, out);
+                    Py_DECREF(fn);
+                    if (temp == NULL) {
+                        Py_DECREF(out);
+                        ms_maybe_wrap_validation_error(path);
+                        return NULL;
+                    }
+                    Py_DECREF(out);
+                    out = temp;
+                }
+                else {
+                    Py_DECREF(fn);
+                }
             }
-            PyObject *temp = PyObject_CallOneArg(fn, out);
-            Py_DECREF(fn);
-            if (temp == NULL) {
-                Py_DECREF(out);
-                ms_maybe_wrap_validation_error(path);
-                return NULL;
+            else {
+                Py_DECREF(fn);
             }
-            Py_DECREF(out);
-            out = temp;
         }
     }
 
     /* Pydantic BaseModel — model_validate(dict) */
-    if (PyObject_HasAttr(custom_cls, st->str_model_validate) && out != Py_None) {
-        int is_inst = PyObject_IsInstance(out, custom_cls);
-        if (is_inst < 0) {
-            Py_DECREF(out);
-            return NULL;
-        }
-        if (!is_inst) {
-            PyObject *fn = PyObject_GetAttr(custom_cls, st->str_model_validate);
-            if (fn == NULL) {
-                Py_DECREF(out);
-                ms_maybe_wrap_validation_error(path);
-                return NULL;
+    {
+        PyObject *fn;
+        int found = PyObject_GetOptionalAttr(custom_cls, st->str_model_validate, &fn);
+        if (found < 0) { Py_DECREF(out); return NULL; }
+        if (found) {
+            if (out != Py_None) {
+                int is_inst = PyObject_IsInstance(out, custom_cls);
+                if (is_inst < 0) { Py_DECREF(fn); Py_DECREF(out); return NULL; }
+                if (!is_inst) {
+                    PyObject *temp = PyObject_CallOneArg(fn, out);
+                    Py_DECREF(fn);
+                    if (temp == NULL) {
+                        Py_DECREF(out);
+                        ms_maybe_wrap_validation_error(path);
+                        return NULL;
+                    }
+                    Py_DECREF(out);
+                    out = temp;
+                }
+                else {
+                    Py_DECREF(fn);
+                }
             }
-            PyObject *temp = PyObject_CallOneArg(fn, out);
-            Py_DECREF(fn);
-            if (temp == NULL) {
-                Py_DECREF(out);
-                ms_maybe_wrap_validation_error(path);
-                return NULL;
+            else {
+                Py_DECREF(fn);
             }
-            Py_DECREF(out);
-            out = temp;
         }
     }
 
     /* External struct type (e.g. msgspec) — construct from dict */
-    else if (PyDict_CheckExact(out) && PyObject_HasAttr(custom_cls, st->str___struct_fields__)) {
-        PyObject *temp = ms_decode_custom_struct(custom_cls, out, path);
-        if (temp == NULL) { Py_DECREF(out); return NULL; }
-        Py_DECREF(out);
-        out = temp;
+    {
+        PyObject *fields;
+        int found = PyObject_GetOptionalAttr(custom_cls, st->str___struct_fields__, &fields);
+        if (found < 0) { Py_DECREF(out); return NULL; }
+        if (found && PyDict_CheckExact(out)) {
+            PyObject *temp = ms_decode_custom_struct(custom_cls, out, path);
+            Py_DECREF(fields);
+            if (temp == NULL) { Py_DECREF(out); return NULL; }
+            Py_DECREF(out);
+            out = temp;
+        }
+        else {
+            Py_XDECREF(fields);
+        }
     }
 
     /* Auto-coerce subclasses of built-in types.
@@ -15066,65 +15102,72 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     else if (type == &PyMemoryView_Type) {
         return json_encode_memoryview(self, obj);
     }
-    if (PyObject_HasAttr(obj, self->mod->str_struct_dump)) {
-        /* Custom type — struct_dump() to a base type, then re-encode */
-        PyObject *dump = PyObject_GetAttr(obj, self->mod->str_struct_dump);
-        if (dump == NULL) return -1;
-        PyObject *dumped = PyObject_CallNoArgs(dump);
-        Py_DECREF(dump);
+    PyObject *attr;
+    int found;
+
+    /* Custom type — struct_dump() to a base type, then re-encode */
+    found = PyObject_GetOptionalAttr(obj, self->mod->str_struct_dump, &attr);
+    if (found < 0) return -1;
+    if (found) {
+        PyObject *dumped = PyObject_CallNoArgs(attr);
+        Py_DECREF(attr);
         if (dumped == NULL) return -1;
         int status = json_encode_inline(self, dumped);
         Py_DECREF(dumped);
         return status;
     }
-    else if (PyObject_HasAttr(obj, self->mod->str_model_dump)) {
-        /* Pydantic BaseModel — model_dump() to dict, then encode */
-        PyObject *dump = PyObject_GetAttr(obj, self->mod->str_model_dump);
-        if (dump == NULL) return -1;
-        PyObject *dict = PyObject_CallNoArgs(dump);
-        Py_DECREF(dump);
+
+    /* Pydantic BaseModel — model_dump() to dict, then encode */
+    found = PyObject_GetOptionalAttr(obj, self->mod->str_model_dump, &attr);
+    if (found < 0) return -1;
+    if (found) {
+        PyObject *dict = PyObject_CallNoArgs(attr);
+        Py_DECREF(attr);
         if (dict == NULL) return -1;
         int status = json_encode_dict(self, dict);
         Py_DECREF(dict);
         return status;
     }
-    else if (!ms_is_struct_inst(obj) && PyObject_HasAttr(obj, self->mod->str___struct_fields__)) {
-        /* External struct type (e.g. msgspec) — iterate fields and encode as JSON object */
-        PyObject *fields = PyObject_GetAttr(obj, self->mod->str___struct_fields__);
-        if (fields == NULL) return -1;
-        if (!PyTuple_CheckExact(fields)) { Py_DECREF(fields); return -1; }
 
-        Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
-        if (ms_write(self, "{", 1) < 0) { Py_DECREF(fields); return -1; }
-        int status = -1;
-        Py_ssize_t start_offset = self->output_len;
-        if (Py_EnterRecursiveCall(" while serializing an object")) { Py_DECREF(fields); return -1; }
+    /* External struct type (e.g. msgspec) — iterate fields and encode as JSON object */
+    if (!ms_is_struct_inst(obj)) {
+        found = PyObject_GetOptionalAttr(obj, self->mod->str___struct_fields__, &attr);
+        if (found < 0) return -1;
+        if (found) {
+            if (!PyTuple_CheckExact(attr)) { Py_DECREF(attr); return -1; }
 
-        for (Py_ssize_t i = 0; i < nfields; i++) {
-            PyObject *key = PyTuple_GET_ITEM(fields, i);
-            PyObject *val = PyObject_GetAttr(obj, key);
-            if (val == NULL) { PyErr_Clear(); continue; }
-            if (json_encode_str_noescape(self, key) < 0 || ms_write(self, ":", 1) < 0) {
-                Py_DECREF(val); goto cleanup;
+            Py_ssize_t nfields = PyTuple_GET_SIZE(attr);
+            if (ms_write(self, "{", 1) < 0) { Py_DECREF(attr); return -1; }
+            int status = -1;
+            Py_ssize_t start_offset = self->output_len;
+            if (Py_EnterRecursiveCall(" while serializing an object")) { Py_DECREF(attr); return -1; }
+
+            for (Py_ssize_t i = 0; i < nfields; i++) {
+                PyObject *key = PyTuple_GET_ITEM(attr, i);
+                PyObject *val = PyObject_GetAttr(obj, key);
+                if (val == NULL) { PyErr_Clear(); continue; }
+                if (json_encode_str_noescape(self, key) < 0 || ms_write(self, ":", 1) < 0) {
+                    Py_DECREF(val); goto cleanup;
+                }
+                if (json_encode(self, val) < 0) { Py_DECREF(val); goto cleanup; }
+                if (ms_write(self, ",", 1) < 0) { Py_DECREF(val); goto cleanup; }
+                Py_DECREF(val);
             }
-            if (json_encode(self, val) < 0) { Py_DECREF(val); goto cleanup; }
-            if (ms_write(self, ",", 1) < 0) { Py_DECREF(val); goto cleanup; }
-            Py_DECREF(val);
-        }
 
-        if (start_offset == self->output_len) {
-            status = ms_write(self, "}", 1);
+            if (start_offset == self->output_len) {
+                status = ms_write(self, "}", 1);
+            }
+            else {
+                *(self->output_buffer_raw + self->output_len - 1) = '}';
+                status = 0;
+            }
+    cleanup:
+            Py_LeaveRecursiveCall();
+            Py_DECREF(attr);
+            return status;
         }
-        else {
-            *(self->output_buffer_raw + self->output_len - 1) = '}';
-            status = 0;
-        }
-cleanup:
-        Py_LeaveRecursiveCall();
-        Py_DECREF(fields);
-        return status;
     }
-    else if (!PyType_Check(obj) && type->tp_dict != NULL) {
+    if (!PyType_Check(obj) && type->tp_dict != NULL) {
         PyObject *fields = PyObject_GetAttr(obj, self->mod->str___dataclass_fields__);
         if (fields != NULL) {
             int status = json_encode_dataclass(self, obj, fields);
@@ -18301,20 +18344,16 @@ cleanup:
 }
 
 static PyObject *
-dump_external_struct(DumpState *self, PyObject *obj) {
+dump_external_struct(DumpState *self, PyObject *obj, PyObject *fields) {
     /* External struct type (e.g. msgspec.Struct) — convert fields to dict
      * using Python-level attribute access (no C offset assumptions). */
-    PyObject *fields = PyObject_GetAttr(
-        obj, self->mod->str___struct_fields__
-    );
-    if (fields == NULL) return NULL;
 
     Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
     PyObject *out = PyDict_New();
-    if (out == NULL) { Py_DECREF(fields); return NULL; }
+    if (out == NULL) { return NULL; }
 
     bool ok = false;
-    if (Py_EnterRecursiveCall(" while serializing an object")) { Py_DECREF(fields); Py_DECREF(out); return NULL; }
+    if (Py_EnterRecursiveCall(" while serializing an object")) { Py_DECREF(out); return NULL; }
 
     for (Py_ssize_t i = 0; i < nfields; i++) {
         PyObject *key = PyTuple_GET_ITEM(fields, i);
@@ -18331,7 +18370,6 @@ dump_external_struct(DumpState *self, PyObject *obj) {
     ok = true;
 cleanup:
     Py_LeaveRecursiveCall();
-    Py_DECREF(fields);
     if (!ok) { Py_CLEAR(out); }
     return out;
 }
@@ -18556,33 +18594,44 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         PyBuffer_Release(&buffer);
         return out;
     }
-    if (PyObject_HasAttr(obj, self->mod->str_struct_dump)) {
-        /* Custom type — struct_dump() to a base type, then re-process */
-        PyObject *dump = PyObject_GetAttr(obj, self->mod->str_struct_dump);
-        if (dump == NULL) return NULL;
-        PyObject *dumped = PyObject_CallNoArgs(dump);
-        Py_DECREF(dump);
+    PyObject *attr;
+    int found;
+
+    /* Custom type — struct_dump() to a base type, then re-process */
+    found = PyObject_GetOptionalAttr(obj, self->mod->str_struct_dump, &attr);
+    if (found < 0) return NULL;
+    if (found) {
+        PyObject *dumped = PyObject_CallNoArgs(attr);
+        Py_DECREF(attr);
         if (dumped == NULL) return NULL;
         PyObject *result = dump_obj(self, dumped, is_key);
         Py_DECREF(dumped);
         return result;
     }
-    else if (PyObject_HasAttr(obj, self->mod->str_model_dump)) {
-        /* Pydantic BaseModel — model_dump() to dict, then process */
-        PyObject *dump = PyObject_GetAttr(obj, self->mod->str_model_dump);
-        if (dump == NULL) return NULL;
-        PyObject *dict = PyObject_CallNoArgs(dump);
-        Py_DECREF(dump);
+
+    /* Pydantic BaseModel — model_dump() to dict, then process */
+    found = PyObject_GetOptionalAttr(obj, self->mod->str_model_dump, &attr);
+    if (found < 0) return NULL;
+    if (found) {
+        PyObject *dict = PyObject_CallNoArgs(attr);
+        Py_DECREF(attr);
         if (dict == NULL) return NULL;
         PyObject *result = dump_dict(self, dict);
         Py_DECREF(dict);
         return result;
     }
-    else if (!ms_is_struct_inst(obj) && PyObject_HasAttr(obj, self->mod->str___struct_fields__)) {
-        /* External struct type (e.g. msgspec) — use Python-level attribute access */
-        return dump_external_struct(self, obj);
+
+    /* External struct type (e.g. msgspec) — use Python-level attribute access */
+    if (!ms_is_struct_inst(obj)) {
+        found = PyObject_GetOptionalAttr(obj, self->mod->str___struct_fields__, &attr);
+        if (found < 0) return NULL;
+        if (found) {
+            PyObject *out = dump_external_struct(self, obj, attr);
+            Py_DECREF(attr);
+            return out;
+        }
     }
-    else if (!PyType_Check(obj) && type->tp_dict != NULL) {
+    if (!PyType_Check(obj) && type->tp_dict != NULL) {
         PyObject *fields = PyObject_GetAttr(obj, self->mod->str___dataclass_fields__);
         if (fields != NULL) {
             PyObject *out = dump_dataclass(self, obj, fields);
