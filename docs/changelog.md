@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix concurrent unsorted dictionary JSON encoding on free-threaded Python so
+  an empty snapshot produces valid ``{}`` output instead of corrupting the
+  surrounding JSON buffer.
 - Allow `Serializer` annotations on most native types. Previously, `Serializer`
   could only be used on custom (user-defined) types. Now it is accepted on
   `Literal` values, `bytes`, `bytearray`, `memoryview`, the `datetime`

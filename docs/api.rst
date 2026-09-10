@@ -180,7 +180,8 @@ Structs
 
         :type: bool
 
-        All fields are keyword-only in ``__init__``. Enabled by default.
+        All fields are keyword-only in ``__init__`` when enabled. Disabled by
+        default.
 
     .. attribute:: repr_omit_defaults
 

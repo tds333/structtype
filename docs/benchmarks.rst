@@ -79,7 +79,7 @@ The full benchmark source can be found
 `here <https://github.com/tds333/structtype/blob/main/benchmarks/bench_libs.py>`__.
 
 .. code-block:: text
-    :caption: Python 3.15t (free-threaded), structtype 0.10.1.dev, msgspec 0.21.1, pydantic 2.13.5
+    :caption: Historical snapshot: Python 3.15t (free-threaded), structtype 0.10.1.dev, msgspec 0.21.1, pydantic 2.13.5
 
     Dump (struct → dict)
     -------------------------------------------------------
@@ -161,7 +161,7 @@ The full benchmark source can be found `here
 Run it with ``make bench-validators``.
 
 .. code-block:: text
-    :caption: Python 3.15t (free-threaded), structtype 0.10.1.dev, pydantic 2.13.5
+    :caption: Historical snapshot: Python 3.15t (free-threaded), structtype 0.10.1.dev, pydantic 2.13.5
 
     Load (dict -> object)
     -------------------------------------------------------
@@ -238,7 +238,7 @@ The full benchmark source can be found `here
   alternatives.
 
 .. code-block:: text
-    :caption: Python 3.15t (free-threaded), structtype 0.10.1.dev, attrs 26.1.0, msgspec 0.21.1, pydantic 2.13.5
+    :caption: Historical snapshot: Python 3.15t (free-threaded), structtype 0.10.1.dev, attrs 26.1.0, msgspec 0.21.1, pydantic 2.13.5
 
     +----------------------+-------------+-------------+---------------+------------+
     |                      | import (μs) | create (μs) | equality (μs) | order (μs) |
@@ -288,7 +288,7 @@ The full benchmark source can be found `here
   tracking a full GC pass completes in a fraction of the time.
 
 .. code-block:: text
-    :caption: Python 3.15t (free-threaded), structtype 0.10.1.dev
+    :caption: Historical snapshot: Python 3.15t (free-threaded), structtype 0.10.1.dev
 
     +-----------------------------------+--------------+-------------------+
     |                                   | GC time (ms) | Memory Used (MiB) |

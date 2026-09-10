@@ -2,7 +2,7 @@ Installation
 ============
 
 ``structtype`` may be installed via ``pip`` or ``uv``. Note that Python >= 3.10
-is required. The basic install has no required dependencies. Pre build wheels are
+is required. The basic install has no required dependencies. Pre-built wheels are
 available.
 
 **pip**
@@ -28,6 +28,5 @@ install from the `main branch on GitHub
 .. code-block:: shell
 
     pip install git+https://github.com/tds333/structtype.git
-
 
 

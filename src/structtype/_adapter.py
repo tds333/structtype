@@ -66,7 +66,8 @@ class StructAdapter:
         buf : str or bytes
             The JSON message to decode.
         strict : bool, optional
-            If True (default), unmatched fields cause an error.
+            If True (default), use strict type validation and coercion rules.
+            If False, allow the documented lax-mode conversions.
         """
         if strict:
             decoder = self._decoder_strict
@@ -118,9 +119,11 @@ class StructAdapter:
         obj : Any
             A Python object to validate and convert.
         strict : bool, optional
-            If True (default), unmatched fields cause an error.
+            If True (default), use strict type validation and coercion rules.
+            If False, allow the documented lax-mode conversions.
         from_attributes : bool, optional
-            If True, accept objects with attributes instead of dict keys.
+            If True, accept non-dict objects by reading matching attributes.
+            Dict input continues to match fields by serialized alias names.
         """
         return _validate(
             obj,
