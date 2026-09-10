@@ -4534,6 +4534,13 @@ typedef struct {
     TypeNode *type;
 } TypedDictField;
 
+/* Initialization states for lazily-built `*Info` objects. `initialized` is an
+ * atomic flag so that concurrent readers can wait for, or detect the failure
+ * of, a build started by another thread. */
+#define MS_INFO_BUILDING 0
+#define MS_INFO_READY 1
+#define MS_INFO_FAILED 2
+
 typedef struct {
     PyObject_VAR_HEAD
     Py_ssize_t nrequired;
@@ -4581,6 +4588,10 @@ typedef struct {
     MS_StrView struct_tag_field_view; /* raw UTF-8 view of tag field, valid if tag_field set */
     PyObject *struct_module;          /* owning structtype module, or NULL */
     _Atomic(struct StructInfo *) struct_info;
+    /* Nonzero once `struct_info` has been fully built and published. Kept on
+     * the class so a lock-free reader can verify the pointer is safe to
+     * dereference without racing the error path that clears and frees it. */
+    _Atomic(uint8_t) struct_info_ready;
     Py_ssize_t nkwonly;
     Py_ssize_t n_trailing_defaults;
     PyObject *struct_tag_field;  /* str or NULL */
@@ -4682,18 +4693,49 @@ ms_is_struct_inst(PyObject *o) {
     return ms_is_struct_meta(Py_TYPE((PyObject *)Py_TYPE(o)));
 }
 
+static void
+ms_info_init_failed(PyObject *owner) {
+    /* A concurrent reader found a `*Info` object whose build failed. The
+     * original build error was raised on the thread that performed the build;
+     * here we only need to fail instead of spinning forever on a flag that
+     * will never reach `MS_INFO_READY`. */
+    if (owner != NULL) {
+        PyErr_Format(
+            PyExc_RuntimeError,
+            "Type information for %R failed to initialize due to an "
+            "earlier error",
+            owner
+        );
+    }
+    else {
+        PyErr_SetString(
+            PyExc_RuntimeError,
+            "Type information failed to initialize due to an earlier error"
+        );
+    }
+}
+
 static MS_INLINE StructInfo *
 TypeNode_get_struct_info(TypeNode *type) {
     /* Struct types are always first */
     StructInfo *info = type->details[0].pointer;
-    if (atomic_load(&info->initialized)) {
+    uint8_t state = atomic_load(&info->initialized);
+    if (MS_LIKELY(state == MS_INFO_READY)) {
         return info;
+    }
+    if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
+        ms_info_init_failed((PyObject *)info->class);
+        return NULL;
     }
     Py_BEGIN_ALLOW_THREADS
     /* wait for the StructInfo to be fully initialized by other thread */
-    while (!atomic_load(&info->initialized)) {
+    while ((state = atomic_load(&info->initialized)) == MS_INFO_BUILDING) {
     }
     Py_END_ALLOW_THREADS
+    if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
+        ms_info_init_failed((PyObject *)info->class);
+        return NULL;
+    }
     return info;
 }
 
@@ -4748,14 +4790,23 @@ static MS_INLINE TypedDictInfo *
 TypeNode_get_typeddict_info(TypeNode *type) {
     Py_ssize_t i = ms_popcount(type->types & (SLOT_00 | SLOT_01 | SLOT_02));
     TypedDictInfo *info = type->details[i].pointer;
-    if (atomic_load(&info->initialized)) {
+    uint8_t state = atomic_load(&info->initialized);
+    if (MS_LIKELY(state == MS_INFO_READY)) {
         return info;
+    }
+    if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
+        ms_info_init_failed(NULL);
+        return NULL;
     }
     Py_BEGIN_ALLOW_THREADS
     /* wait for the TypedDictInfo to be fully initialized by other thread */
-    while (!atomic_load(&info->initialized)) {
+    while ((state = atomic_load(&info->initialized)) == MS_INFO_BUILDING) {
     }
     Py_END_ALLOW_THREADS
+    if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
+        ms_info_init_failed(NULL);
+        return NULL;
+    }
     return info;
 }
 
@@ -4763,14 +4814,23 @@ static MS_INLINE DataclassInfo *
 TypeNode_get_dataclass_info(TypeNode *type) {
     Py_ssize_t i = ms_popcount(type->types & (SLOT_00 | SLOT_01 | SLOT_02));
     DataclassInfo *info = type->details[i].pointer;
-    if (atomic_load(&info->initialized)) {
+    uint8_t state = atomic_load(&info->initialized);
+    if (MS_LIKELY(state == MS_INFO_READY)) {
         return info;
+    }
+    if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
+        ms_info_init_failed(info->class);
+        return NULL;
     }
     Py_BEGIN_ALLOW_THREADS
     /* wait for the DataclassInfo to be fully initialized by other thread */
-    while (!atomic_load(&info->initialized)) {
+    while ((state = atomic_load(&info->initialized)) == MS_INFO_BUILDING) {
     }
     Py_END_ALLOW_THREADS
+    if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
+        ms_info_init_failed(info->class);
+        return NULL;
+    }
     return info;
 }
 
@@ -4782,14 +4842,23 @@ TypeNode_get_namedtuple_info(TypeNode *type) {
         )
     );
     NamedTupleInfo *info = type->details[i].pointer;
-    if (atomic_load(&info->initialized)) {
+    uint8_t state = atomic_load(&info->initialized);
+    if (MS_LIKELY(state == MS_INFO_READY)) {
         return info;
+    }
+    if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
+        ms_info_init_failed(info->class);
+        return NULL;
     }
     Py_BEGIN_ALLOW_THREADS
     /* wait for the NamedTupleInfo to be fully initialized by other thread */
-    while (!atomic_load(&info->initialized)) {
+    while ((state = atomic_load(&info->initialized)) == MS_INFO_BUILDING) {
     }
     Py_END_ALLOW_THREADS
+    if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
+        ms_info_init_failed(info->class);
+        return NULL;
+    }
     return info;
 }
 
@@ -8900,6 +8969,7 @@ StructMeta_new_inner(
     cls->struct_module = PyState_FindModule(&structtypemodule);
     Py_XINCREF(cls->struct_module);
 
+    atomic_store(&cls->struct_info_ready, 0);
     cls->hash_offset = info.hash_offset;
     cls->frozen = info.frozen;
     cls->eq = info.eq;
@@ -9027,7 +9097,7 @@ static PyTypeObject StructInfo_Type = {
 
 static PyObject *
 StructInfo_Convert_lock_held(PyObject *obj) {
-    StructspecState *mod = structtype_get_global_state();
+    StructspecState *mod = NULL;
     StructMetaObject *class;
     PyObject *annotations = NULL;
     StructInfo *info = NULL;
@@ -9037,13 +9107,22 @@ StructInfo_Convert_lock_held(PyObject *obj) {
     /* Check for a cached StructInfo, and return if one exists */
     if (MS_LIKELY(is_struct)) {
         class = (StructMetaObject *)obj;
+        if (atomic_load(&class->struct_info_ready)) {
+            StructInfo *cached = atomic_load(&class->struct_info);
+            Py_INCREF(cached);
+            return (PyObject *)cached;
+        }
         if (class->struct_info != NULL) {
+            /* Same-thread recursion: the info is currently being built
+             * higher up the call stack; return the partial info. */
             Py_INCREF(class->struct_info);
             return (PyObject *)(class->struct_info);
         }
+        /* Not built yet, or a previous build failed: build it now. */
         Py_INCREF(class);
     }
     else {
+        mod = structtype_get_global_state();
         PyObject *cached = NULL;
         if (get_structtype_cache(mod, obj, &StructInfo_Type, &cached)) {
             return cached;
@@ -9058,6 +9137,10 @@ StructInfo_Convert_lock_held(PyObject *obj) {
             return NULL;
         }
         class = (StructMetaObject *)origin;
+    }
+
+    if (mod == NULL) {
+        mod = structtype_get_global_state();
     }
 
     /* At this point `class` is a StructMetaObject, and `obj` is a
@@ -9088,7 +9171,7 @@ StructInfo_Convert_lock_held(PyObject *obj) {
     for (Py_ssize_t i = 0; i < nfields; i++) {
         info->types[i] = NULL;
     }
-    atomic_store(&info->initialized, 0);
+    atomic_store(&info->initialized, MS_INFO_BUILDING);
     Py_INCREF(class);
     info->class = class;
 
@@ -9115,10 +9198,26 @@ StructInfo_Convert_lock_held(PyObject *obj) {
     Py_DECREF(class);
     Py_DECREF(annotations);
     PyObject_GC_Track(info);
-    atomic_store(&info->initialized, 1);
+    atomic_store(&info->initialized, MS_INFO_READY);
+    if (is_struct) {
+        /* Publish the class-level flag only after the info is fully built and
+         * visible, so a lock-free reader that observes it can safely
+         * dereference `struct_info`. `class` stays alive via `info->class`. */
+        atomic_store(&class->struct_info_ready, 1);
+    }
     return (PyObject *)info;
 
 error:
+    if (is_struct) {
+        /* Clear the ready flag *before* dropping the pointer, so a lock-free
+         * reader never dereferences the soon-to-be-freed info. */
+        atomic_store(&class->struct_info_ready, 0);
+    }
+    if (info != NULL) {
+        /* Mark the partial struct info as failed so that any concurrent
+         * reader waiting on it fails instead of spinning forever. */
+        atomic_store(&info->initialized, MS_INFO_FAILED);
+    }
     if (cache_set) {
         /* An error occurred after the cache was created and set on the object.
          * We need to delete the cached value. */
@@ -9143,15 +9242,14 @@ error:
 static PyObject *
 StructInfo_Convert(PyObject *obj) {
     PyObject *res = NULL;
-    /* Fast path: lock-free read of an already-published, fully
-     * initialized StructInfo. Falls through to the critical section
-     * when the info is unset or still being built by another thread
-     * (rare: first concurrent use of a class). */
+    /* Lock-free fast path: once a class has fully published its StructInfo,
+     * the class keeps a strong reference to it for its lifetime. Since the
+     * caller already holds `obj` (the class), the pointer is stable and can be
+     * dereferenced without taking the object's critical section. */
     if (ms_is_struct_cls(obj)) {
-        StructInfo *info = atomic_load(
-            &((StructMetaObject *)obj)->struct_info
-        );
-        if (info != NULL && atomic_load(&info->initialized)) {
+        StructMetaObject *class = (StructMetaObject *)obj;
+        if (MS_LIKELY(atomic_load(&class->struct_info_ready))) {
+            StructInfo *info = atomic_load(&class->struct_info);
             Py_INCREF(info);
             return (PyObject *)info;
         }
@@ -9194,6 +9292,7 @@ StructMeta_clear(StructMetaObject *self)
     Py_CLEAR(self->post_init);
     Py_CLEAR(self->struct_field_codecs);
     Py_CLEAR(self->struct_info);
+    atomic_store(&self->struct_info_ready, 0);
     Py_CLEAR(self->match_args);
     if (self->struct_offsets != NULL) {
         PyMem_Free(self->struct_offsets);
@@ -9816,7 +9915,9 @@ Struct_hash(PyObject *self) {
     }
 
     if (MS_UNLIKELY(st_type->hash_offset != 0)) {
-        PyObject *cached_hash = *(PyObject **)((char *)self + st_type->hash_offset);
+        PyObject *cached_hash = atomic_load(
+            (_Atomic(PyObject *) *)((char *)self + st_type->hash_offset)
+        );
         if (cached_hash != NULL) {
             /* Use the cached hash */
             return PyLong_AsSsize_t(cached_hash);
@@ -9847,11 +9948,18 @@ Struct_hash(PyObject *self) {
     Py_uhash_t hash = (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 
     if (MS_UNLIKELY(st_type->hash_offset != 0)) {
-        /* Cache the hash */
-        char *addr = (char *)self + st_type->hash_offset;
+        /* Cache the hash. Use a compare-exchange so that two threads racing
+         * to hash the same instance don't leak the loser's `PyLong`. */
+        _Atomic(PyObject *) *slot = (_Atomic(PyObject *) *)(
+            (char *)self + st_type->hash_offset
+        );
         PyObject *cached_hash = PyLong_FromSsize_t(hash);
         if (cached_hash == NULL) return -1;
-        *(PyObject **)addr = cached_hash;
+        PyObject *expected = NULL;
+        if (!atomic_compare_exchange_strong(slot, &expected, cached_hash)) {
+            /* Another thread won the race; drop our now-unused value. */
+            Py_DECREF(cached_hash);
+        }
     }
 
     return hash;
@@ -10529,7 +10637,7 @@ TypedDictInfo_Convert_lock_held(PyObject *obj) {
     /* Initialize nrequired to -1 as a flag in case of a recursive TypedDict
     * definition. */
     info->nrequired = -1;
-    atomic_store(&info->initialized, 0);
+    atomic_store(&info->initialized, MS_INFO_BUILDING);
 
     /* If not already cached, then cache on TypedDict object _before_
     * traversing fields. This is to ensure self-referential TypedDicts work. */
@@ -10555,11 +10663,16 @@ TypedDictInfo_Convert_lock_held(PyObject *obj) {
     info->nrequired = PySet_GET_SIZE(required);
 
     PyObject_GC_Track(info);
-    atomic_store(&info->initialized, 1);
+    atomic_store(&info->initialized, MS_INFO_READY);
     succeeded = true;
 
 cleanup:
     if (!succeeded) {
+        if (info != NULL) {
+            /* Mark the partial info as failed so that any concurrent reader
+             * waiting on it fails instead of spinning forever. */
+            atomic_store(&info->initialized, MS_INFO_FAILED);
+        }
         Py_CLEAR(info);
         if (cache_set) {
             /* An error occurred after the cache was created and set on the
@@ -10729,7 +10842,7 @@ DataclassInfo_Convert_lock_held(PyObject *obj) {
         Py_INCREF(post_init);
         info->post_init = post_init;
     }
-    atomic_store(&info->initialized, 0);
+    atomic_store(&info->initialized, MS_INFO_BUILDING);
 
     /* If not already cached, then cache on Dataclass object _before_
     * traversing fields. This is to ensure self-referential Dataclasses work. */
@@ -10753,11 +10866,16 @@ DataclassInfo_Convert_lock_held(PyObject *obj) {
     }
 
     PyObject_GC_Track(info);
-    atomic_store(&info->initialized, 1);
+    atomic_store(&info->initialized, MS_INFO_READY);
     succeeded = true;
 
 cleanup:
     if (!succeeded) {
+        if (info != NULL) {
+            /* Mark the partial info as failed so that any concurrent reader
+             * waiting on it fails instead of spinning forever. */
+            atomic_store(&info->initialized, MS_INFO_FAILED);
+        }
         Py_CLEAR(info);
         if (cache_set) {
             /* An error occurred after the cache was created and set on the
@@ -10946,7 +11064,7 @@ NamedTupleInfo_Convert_lock_held(PyObject *obj) {
     for (Py_ssize_t i = 0; i < nfields; i++) {
         info->types[i] = NULL;
     }
-    atomic_store(&info->initialized, 0);
+    atomic_store(&info->initialized, MS_INFO_BUILDING);
 
     /* If not already cached, then cache on NamedTuple object _before_
     * traversing fields. This is to ensure self-referential NamedTuple work. */
@@ -10980,12 +11098,17 @@ NamedTupleInfo_Convert_lock_held(PyObject *obj) {
     info->defaults = PyList_AsTuple(defaults_list);
     if (info->defaults == NULL) goto cleanup;
     PyObject_GC_Track(info);
-    atomic_store(&info->initialized, 1);
+    atomic_store(&info->initialized, MS_INFO_READY);
 
     succeeded = true;
 
 cleanup:
     if (!succeeded) {
+        if (info != NULL) {
+            /* Mark the partial info as failed so that any concurrent reader
+             * waiting on it fails instead of spinning forever. */
+            atomic_store(&info->initialized, MS_INFO_FAILED);
+        }
         Py_CLEAR(info);
         if (cache_set) {
             /* An error occurred after the cache was created and set on the
@@ -16465,6 +16588,7 @@ json_decode_namedtuple(JSONDecoderState *self, TypeNode *type, PathNode *path) {
     bool first = true;
     Py_ssize_t nfields, ndefaults, nrequired;
     NamedTupleInfo *info = TypeNode_get_namedtuple_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
 
     nfields = Py_SIZE(info);
     ndefaults = info->defaults == NULL ? 0 : PyTuple_GET_SIZE(info->defaults);
@@ -16881,6 +17005,7 @@ json_decode_struct_array(
 ) {
     Py_ssize_t starting_index = 0;
     StructInfo *info = TypeNode_get_struct_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
 
     self->input_pos++; /* Skip '[' */
 
@@ -17071,6 +17196,7 @@ json_decode_typeddict(
     bool first = true;
     Py_ssize_t key_size, nrequired = 0, pos = 0;
     TypedDictInfo *info = TypeNode_get_typeddict_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
 
     self->input_pos++; /* Skip '{' */
 
@@ -17172,6 +17298,7 @@ json_decode_dataclass(
     bool first = true;
     Py_ssize_t key_size, pos = 0;
     DataclassInfo *info = TypeNode_get_dataclass_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
 
     if (Py_EnterRecursiveCall(" while deserializing an object")) return NULL;
 
@@ -17362,6 +17489,7 @@ json_decode_struct_map(
     JSONDecoderState *self, TypeNode *type, PathNode *path
 ) {
     StructInfo *info = TypeNode_get_struct_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
 
     self->input_pos++; /* Skip '{' */
 
@@ -19328,6 +19456,7 @@ validate_seq_to_namedtuple(
     TypeNode *type, PathNode *path
 ) {
     NamedTupleInfo *info = TypeNode_get_namedtuple_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
     Py_ssize_t nfields = Py_SIZE(info);
     Py_ssize_t ndefaults = info->defaults == NULL ? 0 : PyTuple_GET_SIZE(info->defaults);
     Py_ssize_t nrequired = nfields - ndefaults;
@@ -19539,8 +19668,10 @@ validate_seq_to_struct_array(
     ValidateState *self, PyObject **items, Py_ssize_t size,
     TypeNode *type, PathNode *path
 ) {
+    StructInfo *info = TypeNode_get_struct_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
     return validate_seq_to_struct_array_inner(
-        self, items, size, false, TypeNode_get_struct_info(type), path
+        self, items, size, false, info, path
     );
 }
 
@@ -19813,6 +19944,7 @@ validate_dict_to_typeddict(
     if (out == NULL) goto error;
 
     TypedDictInfo *info = TypeNode_get_typeddict_info(type);
+    if (MS_UNLIKELY(info == NULL)) goto error;
     Py_ssize_t nrequired = 0, pos = 0, pos_obj = 0;
     PyObject *key_obj, *val_obj;
     while (PyDict_Next(obj, &pos_obj, &key_obj, &val_obj)) {
@@ -19853,9 +19985,10 @@ static PyObject *
 validate_dict_to_dataclass(
     ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
-    if (Py_EnterRecursiveCall(" while deserializing an object")) return NULL;
-
     DataclassInfo *info = TypeNode_get_dataclass_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
+
+    if (Py_EnterRecursiveCall(" while deserializing an object")) return NULL;
 
     PyTypeObject *dataclass_type = (PyTypeObject *)(info->class);
     PyObject *out = dataclass_type->tp_alloc(dataclass_type, 0);
@@ -19912,7 +20045,12 @@ validate_dict(
 #endif
     else if (type->types & MS_TYPE_STRUCT) {
         StructInfo *info = TypeNode_get_struct_info(type);
-        res = validate_dict_to_struct(self, obj, info, path, false);
+        if (MS_UNLIKELY(info == NULL)) {
+            res = NULL;
+        }
+        else {
+            res = validate_dict_to_struct(self, obj, info, path, false);
+        }
     }
     else if (type->types & MS_TYPE_STRUCT_UNION) {
         res = validate_dict_to_struct_union(self, obj, type, path);
@@ -20071,6 +20209,7 @@ validate_object_to_dataclass(
     PyObject* (*getter)(PyObject *, PyObject *)
 ) {
     DataclassInfo *info = TypeNode_get_dataclass_info(type);
+    if (MS_UNLIKELY(info == NULL)) return NULL;
 
     Py_ssize_t nfields = Py_SIZE(info);
     Py_ssize_t ndefaults = PyTuple_GET_SIZE(info->defaults);
@@ -20191,6 +20330,7 @@ validate_other(
      * collection types. */
     if (type->types & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
         StructInfo *info = TypeNode_get_struct_info(type);
+        if (MS_UNLIKELY(info == NULL)) return NULL;
         if (pytype == (PyTypeObject *)(info->class)) {
             Py_INCREF(obj);
             return obj;
@@ -20205,6 +20345,7 @@ validate_other(
     }
     else if (type->types & MS_TYPE_DATACLASS) {
         DataclassInfo *info = TypeNode_get_dataclass_info(type);
+        if (MS_UNLIKELY(info == NULL)) return NULL;
         if (pytype == (PyTypeObject *)(info->class)) {
             Py_INCREF(obj);
             return obj;
@@ -20212,6 +20353,7 @@ validate_other(
     }
     else if (type->types & MS_TYPE_NAMEDTUPLE) {
         NamedTupleInfo *info = TypeNode_get_namedtuple_info(type);
+        if (MS_UNLIKELY(info == NULL)) return NULL;
         if (pytype == (PyTypeObject *)(info->class)) {
             Py_INCREF(obj);
             return obj;
@@ -20256,6 +20398,7 @@ validate_other(
 
         if (matches_struct) {
             StructInfo *info = TypeNode_get_struct_info(type);
+            if (MS_UNLIKELY(info == NULL)) return NULL;
             return validate_object_to_struct(self, obj, info, path, getter, false);
         }
         else if (matches_struct_union) {
@@ -20681,6 +20824,7 @@ struct_check_maybe_recurse(
     bool matches = false;
     if (field_type->types & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
         StructInfo *nested_info = TypeNode_get_struct_info(field_type);
+        if (MS_UNLIKELY(nested_info == NULL)) return -1;
         if (Py_TYPE(val) == (PyTypeObject *)nested_info->class) {
             matches = true;
         }
