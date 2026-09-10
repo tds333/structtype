@@ -176,6 +176,44 @@ def test_concurrent_sorted_encode_dict_mutation():
         t.join()
 
 
+def test_concurrent_encode_dict_clear_and_repopulate():
+    """Unsorted encoding remains valid while a dict becomes empty and grows."""
+    import json
+
+    from structtype import StructAdapter
+
+    shared = {"value": 1}
+    adapter = StructAdapter(dict)
+    stop = threading.Event()
+    errors = []
+
+    def encoder():
+        try:
+            while not stop.is_set():
+                result = adapter.struct_dump_json(shared)
+                assert isinstance(json.loads(result), dict)
+        except BaseException as e:
+            errors.append(e)
+
+    def mutator():
+        try:
+            for _ in range(20000):
+                shared.clear()
+                shared["value"] = 1
+        except BaseException as e:
+            errors.append(e)
+        finally:
+            stop.set()
+
+    threads = [threading.Thread(target=encoder) for _ in range(4)]
+    threads.append(threading.Thread(target=mutator))
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+
+
 def test_concurrent_self_referential_info_build():
     """Stress concurrent conversion of self-referential TypedDict/Dataclass/
     NamedTuple types. The info objects are cached before fields are built, so

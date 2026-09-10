@@ -14757,11 +14757,8 @@ static MS_NOINLINE int
 json_encode_dict(EncoderState *self, PyObject *obj)
 {
     PyObject *key, *val;
-    Py_ssize_t len, pos = 0;
+    Py_ssize_t pos = 0;
     int status = -1;
-
-    len = PyDict_GET_SIZE(obj);
-    if (len == 0) return ms_write(self, "{}", 2);
 
     if (MS_UNLIKELY(self->sort_keys)) {
         return json_encode_and_free_assoclist(self, AssocList_FromDict(obj), true);
@@ -14769,6 +14766,7 @@ json_encode_dict(EncoderState *self, PyObject *obj)
 
     if (ms_write(self, "{", 1) < 0) return -1;
     if (Py_EnterRecursiveCall(" while serializing an object")) return -1;
+    Py_ssize_t start_len = self->output_len;
     Py_BEGIN_CRITICAL_SECTION(obj);
     while (PyDict_Next(obj, &pos, &key, &val)) {
         if (json_encode_dict_key(self, key) < 0) goto cleanup;
@@ -14776,8 +14774,13 @@ json_encode_dict(EncoderState *self, PyObject *obj)
         if (json_encode_inline(self, val) < 0) goto cleanup;
         if (ms_write(self, ",", 1) < 0) goto cleanup;
     }
-    /* Overwrite trailing comma with } */
-    *(self->output_buffer_raw + self->output_len - 1) = '}';
+    if (self->output_len == start_len) {
+        if (ms_write(self, "}", 1) < 0) goto cleanup;
+    }
+    else {
+        /* Overwrite trailing comma with } */
+        *(self->output_buffer_raw + self->output_len - 1) = '}';
+    }
     status = 0;
 cleanup:;
     Py_END_CRITICAL_SECTION();
