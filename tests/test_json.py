@@ -2682,6 +2682,34 @@ class TestStructArrayUnion:
 
 
 class TestFieldCodecAPI:
+    def test_json_load_result_is_type_checked(self):
+        class Msg(Struct):
+            value: Annotated[
+                datetime.datetime,
+                Serializer(load=lambda value: "wrong"),
+            ]
+
+        with pytest.raises(structtype.ValidationError):
+            Msg.struct_validate_json(b'{"value": 0}')
+
+    def test_json_load_result_runs_user_validator(self):
+        def reject(value):
+            raise ValueError("rejected")
+
+        class Msg(Struct):
+            value: Annotated[
+                datetime.datetime,
+                Serializer(
+                    load=lambda value: datetime.datetime(
+                        2020, 1, 1, tzinfo=datetime.timezone.utc
+                    )
+                ),
+                structtype.Constraint(reject),
+            ]
+
+        with pytest.raises(structtype.ValidationError, match="rejected"):
+            Msg.struct_validate_json(b'{"value": 0}')
+
     def test_dump_load_construction(self):
         s = Serializer(dump=lambda c: (c.real, c.imag), load=lambda o: complex(*o))
         assert callable(s.dump)

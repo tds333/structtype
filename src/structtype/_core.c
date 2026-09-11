@@ -9291,8 +9291,8 @@ StructMeta_clear(StructMetaObject *self)
     Py_CLEAR(self->rename);
     Py_CLEAR(self->post_init);
     Py_CLEAR(self->struct_field_codecs);
-    Py_CLEAR(self->struct_info);
     atomic_store(&self->struct_info_ready, 0);
+    Py_CLEAR(self->struct_info);
     Py_CLEAR(self->match_args);
     if (self->struct_offsets != NULL) {
         PyMem_Free(self->struct_offsets);
@@ -15418,6 +15418,11 @@ typedef struct JSONDecoderState {
     unsigned char *input_end;
 } JSONDecoderState;
 
+static PyObject *
+validate_loaded_json_value(
+    JSONDecoderState *self, PyObject *obj, TypeNode *type, PathNode *path
+);
+
 typedef struct JSONDecoder {
     PyObject_HEAD
     PyObject *orig_type;
@@ -17705,7 +17710,7 @@ json_decode(
             }
             obj = temp;
         }
-        return obj;
+        return validate_loaded_json_value(self, obj, type, path);
     }
     obj = json_decode_nocustom(self, type, path);
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
@@ -20563,6 +20568,36 @@ validate_obj(
     }
     if (MS_UNLIKELY(type->types & MS_CONSTR_USER_VALIDATOR) && out != NULL) {
         return ms_call_user_validator(out, type, path);
+    }
+    return out;
+}
+
+static PyObject *
+validate_loaded_json_value(
+    JSONDecoderState *self, PyObject *obj, TypeNode *type, PathNode *path
+)
+{
+    StructspecState *mod = structtype_get_global_state();
+    if (mod == NULL) {
+        Py_DECREF(obj);
+        return NULL;
+    }
+    ValidateState state = {
+        .mod = mod,
+        .strict = self->strict,
+        .from_attributes = false,
+        .str_keys = !self->strict,
+        .builtin_types = 0,
+        .check_types_only = false,
+    };
+    PyObject *out = validate_obj_dispatch(&state, obj, type, path);
+    Py_DECREF(obj);
+    if (
+        out != NULL &&
+        !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC)) &&
+        (type->types & MS_CONSTR_USER_VALIDATOR)
+    ) {
+        out = ms_call_user_validator(out, type, path);
     }
     return out;
 }

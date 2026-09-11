@@ -2284,8 +2284,8 @@ class TestNativeTypeSerializerFunctional:
                 Serializer(dump=lambda x: x * 10, load=lambda x: x // 10),
             ]
 
-        msg = Msg.struct_validate_json(b'{"v": 50}')
-        assert msg.v == 5
+        msg = Msg.struct_validate_json(b'{"v": 30}')
+        assert msg.v == 3
 
     # -- Union[X, None] outside Annotated — load path ----------------------
 
@@ -2723,9 +2723,10 @@ class TestNonCustomTypeCodecs:
         assert Msg.struct_validate({"b": b"\x01\x02"}).b == b"\x01\x02"
         with pytest.raises(ValidationError):
             Msg.struct_validate({"b": b"\x01"})
-        # JSON path: load takes over, structural constraints are skipped.
+        # JSON path: constraints apply to the value returned by load.
         assert Msg.struct_validate_json(b'{"b":"0102"}').b == b"\x01\x02"
-        assert Msg.struct_validate_json(b'{"b":"01"}').b == b"\x01"
+        with pytest.raises(ValidationError):
+            Msg.struct_validate_json(b'{"b":"01"}')
 
     def test_check_types_on_codec_field(self):
         def dump(d):
