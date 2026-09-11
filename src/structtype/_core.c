@@ -7807,6 +7807,53 @@ codec_map_set(PyObject *codecs, PyObject *base_type, PyObject *dump, PyObject *c
     return PyDict_SetItem(codecs, base_type, dump);
 }
 
+/* Resolve the codec-map key for one Serializer target type.  Keys are matched
+ * against the runtime type by `codecs_lookup()`, so parameterized generics
+ * (`Box[int]`, `set[int]`, the members of `Optional[set[int]]`, ...) are
+ * normalized to their raw `__origin__`.  Returns a new reference. */
+static PyObject *
+codec_member_key(PyObject *member, StructspecState *mod) {
+    PyObject *oo = PyObject_GetAttr(member, mod->str___origin__);
+    if (oo != NULL) return oo;
+    PyErr_Clear();
+    Py_INCREF(member);
+    return member;
+}
+
+/* Return the number of non-None members in a union annotation, or zero when
+ * `origin` is not a union.  A Serializer attached to a union can only have
+ * one concrete target type; Optional[T] is the supported one-member case. */
+static int
+codec_union_member_count(PyObject *origin, StructspecState *mod) {
+    bool is_union = false;
+    PyObject *oo = PyObject_GetAttr(origin, mod->str___origin__);
+    if (oo != NULL) {
+        if (oo == mod->typing_union) is_union = true;
+        Py_DECREF(oo);
+    }
+    else {
+        PyErr_Clear();
+        if (mod->types_uniontype != NULL) {
+            int rc = PyObject_IsInstance(origin, mod->types_uniontype);
+            if (rc < 0) return -1;
+            is_union = rc > 0;
+        }
+    }
+    if (!is_union) return 0;
+
+    PyObject *args = PyObject_GetAttr(origin, mod->str___args__);
+    if (args == NULL) {
+        PyErr_Clear();
+        return 0;
+    }
+    int count = 0;
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(args); i++) {
+        if (PyTuple_GET_ITEM(args, i) != NONE_TYPE) count++;
+    }
+    Py_DECREF(args);
+    return count;
+}
+
 /* Classify a resolved type into its constraint kind for constraint-applicability
  * checks at class creation time.  Returns CK_OTHER for types whose kind cannot
  * be determined statically (unions, forward refs, unknown generics) so the
@@ -7961,6 +8008,24 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     goto error;
                 }
                 Serializer *serializer = (Serializer *)item;
+                int union_members = codec_union_member_count(origin, mod);
+                if (union_members < 0) {
+                    Py_DECREF(metadata);
+                    Py_DECREF(origin);
+                    goto error;
+                }
+                if (union_members > 0) {
+                    PyErr_Format(
+                        PyExc_TypeError,
+                        "`Serializer(load=...)`/`Serializer(dump=...)` must "
+                        "be applied to a concrete union member - type `%R` "
+                        "is invalid",
+                        origin
+                    );
+                    Py_DECREF(metadata);
+                    Py_DECREF(origin);
+                    goto error;
+                }
                 if (
                     serializer->dump == NULL &&
                     serializer->load == NULL &&
@@ -7980,79 +8045,18 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     goto error;
                 }
                 if (serializer->dump != NULL) {
-                    /* Resolve the codec map key: for Union/Optional types
-                     * pick the first non-None member; for parameterized
-                     * generics (e.g. Box[int]) use the raw origin class
-                     * so codecs_lookup() can match the runtime type. */
-                    PyObject *codec_key = origin;
-                    bool codec_key_is_new_ref = false;
-                    bool is_union = false;
-                    bool is_generic = false;
-                    PyObject *oo = PyObject_GetAttr(
-                        origin, mod->str___origin__
+                    /* Keys are normalized to the runtime class (via
+                     * codec_member_key) so codecs_lookup() can match. */
+                    PyObject *codec_key = codec_member_key(origin, mod);
+                    int rc = codec_map_set(
+                        codecs, codec_key, serializer->dump, ctx
                     );
-                    if (oo != NULL) {
-                        if (oo == mod->typing_union) {
-                            is_union = true;
-                            Py_DECREF(oo);
-                        }
-                        else {
-                            /* Parameterized generic
-                             * (e.g. Box[int]): oo is the raw
-                             * origin class. */
-                            is_generic = true;
-                            /* oo kept as new ref for codec_key */
-                        }
-                    }
-                    else {
-                        PyErr_Clear();
-                        /* Python 3.10+ types.UnionType (int | str)
-                         * may not have __origin__. */
-                        if (mod->types_uniontype != NULL) {
-                            int rc = PyObject_IsInstance(
-                                origin, mod->types_uniontype
-                            );
-                            if (rc > 0) is_union = true;
-                            else if (rc < 0) {
-                                Py_DECREF(metadata);
-                                Py_DECREF(origin);
-                                goto error;
-                            }
-                        }
-                    }
-                    if (is_union) {
-                        PyObject *args = PyObject_GetAttr(
-                            origin, mod->str___args__
-                        );
-                        if (args != NULL) {
-                            for (Py_ssize_t j = 0;
-                                 j < PyTuple_GET_SIZE(args); j++)
-                            {
-                                PyObject *arg = PyTuple_GET_ITEM(
-                                    args, j
-                                );
-                                if (arg != NONE_TYPE) {
-                                    codec_key = arg;
-                                    break;
-                                }
-                            }
-                            Py_DECREF(args);
-                        }
-                        else {
-                            PyErr_Clear();
-                        }
-                    }
-                    else if (is_generic) {
-                        codec_key = oo;
-                        codec_key_is_new_ref = true;
-                    }
-                    if (codec_map_set(codecs, codec_key, serializer->dump, ctx) < 0) {
-                        if (codec_key_is_new_ref) Py_DECREF(codec_key);
+                    Py_DECREF(codec_key);
+                    if (rc < 0) {
                         Py_DECREF(metadata);
                         Py_DECREF(origin);
                         goto error;
                     }
-                    if (codec_key_is_new_ref) Py_DECREF(codec_key);
                 }
             }
             else if (PyObject_TypeCheck(item, (PyTypeObject *)&Constraint_Type)) {
@@ -8063,6 +8067,23 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                         "Multiple `Constraint` annotations found, "
                         "type `%R` is invalid",
                         ctx
+                    );
+                    Py_DECREF(metadata);
+                    Py_DECREF(origin);
+                    goto error;
+                }
+                int union_members = codec_union_member_count(origin, mod);
+                if (union_members < 0) {
+                    Py_DECREF(metadata);
+                    Py_DECREF(origin);
+                    goto error;
+                }
+                if (union_members > 0) {
+                    PyErr_Format(
+                        PyExc_TypeError,
+                        "`Constraint` must be applied to a concrete union "
+                        "member - type `%R` is invalid",
+                        origin
                     );
                     Py_DECREF(metadata);
                     Py_DECREF(origin);
@@ -20560,9 +20581,11 @@ validate_obj(
 ) {
     PyObject *codec_temp = NULL;
     /* Non-custom types with a Serializer: apply the load callback first,
-     * then validate the transformed value normally. */
+     * then validate the transformed value normally.  `struct_check_types`
+     * is a pure type check and must never invoke `load`. */
     if (MS_UNLIKELY(
         (type->types & MS_CONSTR_CODEC) &&
+        !self->check_types_only &&
         !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))
     )) {
         /* `None` bypasses the codec for Optional types. */
@@ -20589,6 +20612,20 @@ validate_obj(
                 already_matches = true;
             else if (bits & MS_TYPE_UUID && PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->UUIDType)))
                 already_matches = true;
+            else if (bits & MS_TYPE_SET && PySet_Check(obj))
+                already_matches = true;
+            else if (bits & MS_TYPE_FROZENSET && PyFrozenSet_Check(obj))
+                already_matches = true;
+            else if (bits & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
+                StructInfo *info = TypeNode_get_struct_info(type);
+                if (info == NULL) { ms_maybe_wrap_validation_error(path); return NULL; }
+                if (pytype == (PyTypeObject *)info->class) already_matches = true;
+            }
+            else if (bits & MS_TYPE_DATACLASS) {
+                DataclassInfo *info = TypeNode_get_dataclass_info(type);
+                if (info == NULL) { ms_maybe_wrap_validation_error(path); return NULL; }
+                if (pytype == (PyTypeObject *)info->class) already_matches = true;
+            }
             else if (bits & (MS_TYPE_INTENUM | MS_TYPE_ENUM)) {
                 Lookup *lookup = NULL;
                 if (bits & MS_TYPE_INTENUM) {

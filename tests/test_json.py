@@ -12,7 +12,17 @@ import sys
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Annotated, Any, Literal, NamedTuple, Optional, TypedDict, Union
+from typing import (
+    Annotated,
+    Any,
+    Generic,
+    Literal,
+    NamedTuple,
+    Optional,
+    TypedDict,
+    TypeVar,
+    Union,
+)
 
 import pytest
 from structtype._core import (
@@ -2904,7 +2914,7 @@ class TestFieldCodecClassCreation:
             return complex(v[0], v[1])
 
         class Msg(Struct):
-            value: Annotated[complex | None, Serializer(dump=dump, load=load)]
+            value: Annotated[complex, Serializer(dump=dump, load=load)] | None
 
         assert Msg(complex(1, 2)).struct_dump_json() == b'{"value":[1.0,2.0]}'
         assert Msg(None).struct_dump_json() == b'{"value":null}'
@@ -2997,6 +3007,40 @@ class TestFieldCodecEncode:
 
         assert Msg(complex(1.0, 2.0), complex(3.0, 4.0)).struct_dump_json() == \
             b'{"a":[1.0,2.0],"b":3.0}'
+
+    def test_optional_parameterized_generic_dump(self):
+        class Msg(Struct):
+            values: Annotated[set[int], Serializer(dump=lambda s: {"w": sorted(s)})] | None = None
+
+        assert Msg({3, 1, 2}).struct_dump_json() == b'{"values":{"w":[1,2,3]}}'
+        assert Msg(None).struct_dump_json() == b'{"values":null}'
+
+    def test_union_multi_member_serializer_rejected(self):
+        def dump(x):
+            return type(x).__name__
+
+        with pytest.raises(TypeError, match="concrete union member"):
+
+            class Msg(Struct):
+                values: Annotated[
+                    Union[datetime.date, set[int]], Serializer(dump=dump)
+                ]
+
+    def test_optional_custom_generic_dump(self):
+        T = TypeVar("T")
+
+        class Box(Generic[T]):
+            def __init__(self, v):
+                self.v = v
+
+        def dump(b):
+            return {"v": b.v}
+
+        class Msg(Struct):
+            box: Annotated[Box[int], Serializer(dump=dump)] | None = None
+
+        assert Msg(Box(5)).struct_dump_json() == b'{"box":{"v":5}}'
+        assert Msg(None).struct_dump_json() == b'{"box":null}'
 
     def test_codec_miss_falls_through_to_protocol(self):
         class Point:

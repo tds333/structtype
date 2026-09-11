@@ -929,8 +929,8 @@ class TestSerializerCodecWiring:
 
         class Msg(Struct):
             ts: Annotated[
-                Optional[datetime.datetime], Serializer(load=load, dump=dump)
-            ]
+                datetime.datetime, Serializer(load=load, dump=dump)
+            ] | None
 
         msg = Msg.struct_validate_json(b'{"ts": "2024-01-15T10:30:00"}')
         assert msg.ts == datetime.datetime(2024, 1, 15, 10, 30, 0)
@@ -945,8 +945,8 @@ class TestSerializerCodecWiring:
 
         class Msg(Struct):
             ts: Annotated[
-                Optional[datetime.datetime], Serializer(load=load, dump=dump)
-            ]
+                datetime.datetime, Serializer(load=load, dump=dump)
+            ] | None
 
         msg = Msg(None)
         assert msg.ts is None
@@ -964,8 +964,8 @@ class TestSerializerCodecWiring:
 
         class Msg(Struct):
             id: Annotated[
-                Optional[uuid.UUID], Serializer(load=load, dump=dump)
-            ]
+                uuid.UUID, Serializer(load=load, dump=dump)
+            ] | None
 
         u = uuid.uuid4()
         msg = Msg(u)
@@ -987,8 +987,8 @@ class TestSerializerCodecWiring:
 
         class Msg(Struct):
             data: Annotated[
-                Optional[bytes], Serializer(load=load, dump=dump)
-            ]
+                bytes, Serializer(load=load, dump=dump)
+            ] | None
 
         msg = Msg(b"hello")
         assert msg.struct_dump_json() == b'{"data":"aGVsbG8="}'
@@ -1007,8 +1007,8 @@ class TestSerializerCodecWiring:
 
         class Msg(Struct):
             ts: Annotated[
-                Optional[datetime.datetime], Serializer(load=load, dump=dump)
-            ]
+                datetime.datetime, Serializer(load=load, dump=dump)
+            ] | None
 
         dt = datetime.datetime(2024, 1, 15, 10, 30, 0)
         msg = Msg.struct_validate({"ts": dt})
@@ -1023,7 +1023,7 @@ class TestSerializerCodecWiring:
 
         with pytest.raises(TypeError, match="native types"):
             class Msg(Struct):
-                v: Annotated[Optional[int], Serializer(load=f)]
+                v: Annotated[int, Serializer(load=f)] | None
 
     @pytest.mark.parametrize(
         "annotation",
@@ -1851,6 +1851,22 @@ class TestValidateSelfCheckTypesOnly:
             Ex("blue")
         assert calls == []  # load was NOT called on constructor
 
+    def test_non_custom_check_types_does_not_call_load(self):
+        """`struct_check_types` is a pure type-check: it must not invoke
+        `Serializer.load` for a non-custom field, even on a matching value."""
+        calls = []
+
+        def load(v):
+            calls.append(v)
+            return v
+
+        class Ex(Struct):
+            s: Annotated[set[int], Serializer(load=load)]
+
+        ex = Ex({1, 2})
+        ex.struct_check_types()
+        assert calls == []
+
 
 class TestCompositionRules:
     """Class-creation enforcement of at most one Field, Serializer, Constraint
@@ -1873,6 +1889,15 @@ class TestCompositionRules:
         with pytest.raises(TypeError, match="Multiple `Serializer` annotations"):
             class Bad(Struct):
                 x: Annotated[Color, Serializer(load=f), Serializer(dump=f)]
+
+    def test_serializer_on_multi_member_union_rejected(self):
+        def load(value):
+            return value
+
+        with pytest.raises(TypeError, match="concrete union member"):
+
+            class Bad(Struct):
+                x: Annotated[Color | datetime.date, Serializer(load=load)]
 
     def test_multiple_validators_rejected(self):
         with pytest.raises(TypeError, match="Multiple `Constraint` annotations"):
@@ -2002,17 +2027,18 @@ class TestConstraintApplicability:
 
         assert Good.__struct_fields__ == ("x",)
 
-    def test_union_deferred(self):
-        """Union types should NOT raise at class creation; defer to lazy decoder."""
-        class Good(Struct):
-            x: Annotated[Union[int, str], NumericConstraint(ge=0)]
+    @pytest.mark.parametrize("annotation", [
+        Annotated[Union[int, str], Constraint()],
+        Annotated[int | str, NumericConstraint(ge=0)],
+        Annotated[Optional[int], Constraint()],
+    ])
+    def test_constraint_on_union_rejected(self, annotation):
+        with pytest.raises(TypeError, match="union"):
+            type("Bad", (Struct,), {"__annotations__": {"x": annotation}})
 
-        assert Good.__struct_fields__ == ("x",)
-
-    def test_union_deferred_at_definition(self):
-        """Python 3.10+ union syntax should also defer."""
+    def test_constraint_on_union_member_allowed(self):
         class Good(Struct):
-            x: Annotated[int | str, NumericConstraint(ge=0)]
+            x: Annotated[int, NumericConstraint(ge=0)] | str
 
         assert Good.__struct_fields__ == ("x",)
 
@@ -2254,11 +2280,78 @@ class TestNativeTypeSerializerFunctional:
 
     def test_set_serializer_optional_none(self):
         class Msg(Struct):
-            v: Annotated[Optional[set[int]], Serializer(dump=sorted, load=set)]
+            v: Annotated[set[int], Serializer(dump=sorted, load=set)] | None
 
         msg = Msg.struct_validate_json(b'{"v": null}')
         assert msg.v is None
         assert msg.struct_dump_json() == b'{"v":null}'
+
+    def test_set_load_not_called_when_already_instance(self):
+        calls = []
+
+        def load(v):
+            calls.append(v)
+            return set(v)
+
+        class Msg(Struct):
+            v: Annotated[set[int], Serializer(load=load)]
+
+        value = {1, 2}
+        out = Msg.struct_validate({"v": value})
+        assert out.v == value
+        assert calls == []
+
+    def test_frozenset_load_not_called_when_already_instance(self):
+        calls = []
+
+        def load(v):
+            calls.append(v)
+            return frozenset(v)
+
+        class Msg(Struct):
+            v: Annotated[frozenset[int], Serializer(load=load)]
+
+        value = frozenset({1, 2})
+        out = Msg.struct_validate({"v": value})
+        assert out.v == value
+        assert calls == []
+
+    def test_struct_load_not_called_when_already_instance(self):
+        calls = []
+
+        class Inner(Struct):
+            x: int
+
+        def load(v):
+            calls.append(v)
+            return Inner(v["x"])
+
+        class Msg(Struct):
+            inner: Annotated[Inner, Serializer(load=load)]
+
+        value = Inner(3)
+        out = Msg.struct_validate({"inner": value})
+        assert out.inner is value
+        assert calls == []
+
+    def test_dataclass_load_not_called_when_already_instance(self):
+        calls = []
+
+        @dataclasses.dataclass
+        class Inner:
+            x: int
+
+        def load(v):
+            calls.append(v)
+            return Inner(**v)
+
+        class Msg(Struct):
+            inner: Annotated[Inner, Serializer(load=load)]
+
+        value = Inner(3)
+        out = Msg.struct_validate({"inner": value})
+        assert out.inner is value
+        assert calls == []
 
     # -- date / time / timedelta -------------------------------------------
 
@@ -2328,8 +2421,8 @@ class TestNativeTypeSerializerFunctional:
 
         class Msg(Struct):
             v: Annotated[
-                Optional[datetime.date], Serializer(dump=dump, load=load)
-            ]
+                datetime.date, Serializer(dump=dump, load=load)
+            ] | None
 
         msg = Msg.struct_validate_json(b'{"v": null}')
         assert msg.v is None
@@ -2428,9 +2521,9 @@ class TestNativeTypeSerializerFunctional:
     def test_struct_dump_optional_none_bypasses_codec(self):
         class Msg(Struct):
             v: Annotated[
-                Optional[datetime.datetime],
+                datetime.datetime,
                 Serializer(dump=lambda d: d.year, load=lambda v: datetime.datetime(v, 1, 1)),
-            ]
+            ] | None
 
         msg = Msg(None)
         assert msg.struct_dump() == {"v": None}
@@ -2544,15 +2637,13 @@ def _ser():
         lambda: Annotated[list, _ser()],
         lambda: Annotated[dict[str, int], _ser()],
         lambda: Annotated[tuple[int, ...], _ser()],
-        lambda: Annotated[int | str, _ser()],
-        lambda: Annotated[Optional[int], _ser()],
         lambda: Annotated[Literal[1], _ser()],
         lambda: Annotated[Literal["x"], _ser()],
         lambda: Annotated[Literal[True], _ser()],
     ],
     ids=[
         "bool", "int", "float", "str",
-        "list", "bare-list", "dict", "tuple", "union", "optional",
+        "list", "bare-list", "dict", "tuple",
         "literal-int", "literal-str", "literal-bool",
     ],
 )
@@ -2581,8 +2672,8 @@ def test_blocked_types_reject_serializer(ann_factory):
         lambda: Annotated[frozenset[int], _ser()],
         lambda: Annotated[_Color, _ser()],
         lambda: Annotated[_Point, _ser()],
-        lambda: Annotated[Optional[datetime.datetime], _ser()],
-        lambda: Annotated[Optional[_Point], _ser()],
+        lambda: Annotated[datetime.datetime, _ser()] | None,
+        lambda: Annotated[_Point, _ser()] | None,
     ],
     ids=[
         "bytes", "bytearray", "memoryview", "datetime", "date", "time",
@@ -2696,9 +2787,9 @@ class TestNonCustomTypeCodecs:
 
         class Msg(Struct):
             d: Annotated[
-                Optional[datetime.datetime],
+                datetime.datetime,
                 Serializer(dump=dump, load=load),
-            ]
+            ] | None
 
         assert Msg.struct_validate_json(b'{"d":null}').d is None
         assert Msg.struct_validate({"d": None}).d is None
@@ -2716,8 +2807,8 @@ class TestNonCustomTypeCodecs:
 
         class Msg(Struct):
             c: Annotated[
-                Optional[_Color], Serializer(dump=dump, load=load)
-            ]
+                _Color, Serializer(dump=dump, load=load)
+            ] | None
 
         msg = Msg(_Color.R)
         assert msg.struct_dump_json() == b'{"c":"R"}'

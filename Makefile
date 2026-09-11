@@ -71,7 +71,7 @@ DEBUG_VENV = .venv-debug
 .PHONY: test-debug
 test-debug: ## Build core with Py_DEBUG + ASan/UBSan + debug allocator and run all tests
 	uv venv --clear --python $(DEBUG_PY) $(DEBUG_VENV)
-	STRUCTTYPE_SANITIZE=1 uv pip install --python $(DEBUG_VENV) --reinstall --no-cache --group dev -e .
+	STRUCTTYPE_SANITIZE=1 uv pip install --python $(DEBUG_VENV) --reinstall --no-cache --group dev .
 	$(SANITIZE_PRELOAD) STRUCTTYPE_ASAN_RUNTIME=$(ASAN_RUNTIME) ASAN_OPTIONS=detect_leaks=0 \
 		PYTHONMALLOC=debug PYTHONFAULTHANDLER=1 PYTHONDEVMODE=1 \
 		$(DEBUG_VENV)/bin/python -m pytest
