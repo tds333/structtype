@@ -109,6 +109,10 @@ bench: ## run benchmarks
 bench-validators: ## run Serializer/Validator benchmarks
 	uv run -p 3.15 benchmarks/bench_validators.py
 
+.PHONY: bench-codecs
+bench-codecs: ## run Constraint + Serializer heavy benchmarks
+	uv run -p 3.15 benchmarks/bench_codecs.py
+
 ##@ Utility
 .PHONY: clean
 clean: ## Delete all temporary files
