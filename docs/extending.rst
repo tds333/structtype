@@ -195,6 +195,9 @@ accepted, and any of them may be made optional with ``| None``.)
 Serializers are only supported on :class:`Struct` fields.
 :class:`StructAdapter` rejects annotations containing a ``Serializer`` —
 use the protocol methods on the type there, or a :class:`Struct`:
+:class:`StructAdapter` does support ``Constraint`` annotations on concrete
+types, but rejects a ``Constraint`` attached to a union or optional type at
+construction (matching ``Struct`` class creation).
 
 .. code-block:: python
 

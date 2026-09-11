@@ -354,7 +354,8 @@ Constraint
     Like :class:`Serializer`, a `Constraint` must be attached to a concrete
     type inside `Annotated`. Attaching one to a union or optional type (e.g.
     ``Annotated[int | None, NumericConstraint(ge=0)]``) raises a ``TypeError``
-    at class creation. To make a constrained field optional, union the
+    at class creation for :class:`Struct`, and at construction for
+    :class:`StructAdapter`. To make a constrained field optional, union the
     annotated member with ``None``:
     ``Annotated[T, Constraint(...)] | None``.
 

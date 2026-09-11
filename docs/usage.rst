@@ -1405,6 +1405,13 @@ This is used throughout the :doc:`supported-types <supported-types>`
 documentation to demonstrate structtype's type handling without
 creating named ``Struct`` subclasses for every example.
 
+``Constraint`` annotations are supported on concrete types. A ``Constraint``
+attached to a union or optional type is rejected at construction, matching
+``Struct`` class creation; use ``Annotated[T, Constraint(...)] | None`` for
+optional fields. ``Serializer`` annotations are not supported on
+``StructAdapter`` (implement the ``struct_dump`` / ``struct_validate`` protocol
+instead).
+
 
 String-constructible custom types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

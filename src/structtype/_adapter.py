@@ -1,6 +1,9 @@
+import types
+import typing
 from typing import Any, get_args
 
 from ._core import (  # type: ignore
+    Constraint as _Constraint,
     JSONDecoder as _JSONDecoder,
     Serializer as _Serializer,
     _dump,
@@ -27,6 +30,38 @@ def _has_serializer(ann):
     return any(_has_serializer(arg) for arg in get_args(ann))
 
 
+def _is_union(t):
+    """True if ``t`` is ``typing.Union`` or a ``types.UnionType`` (``X | Y``)."""
+    if getattr(t, "__origin__", None) is typing.Union:
+        return True
+    return isinstance(t, types.UnionType)
+
+
+def _has_constraint_on_union(ann):
+    """True if a ``Constraint`` is attached to a union or optional type.
+
+    ``Struct`` rejects this at class creation; ``StructAdapter`` mirrors the
+    same rule at construction.  A concrete member may still be constrained and
+    then made optional, e.g. ``Annotated[T, Constraint(...)] | None``.
+    """
+    metadata = getattr(ann, "__metadata__", None)
+    if metadata is not None:
+        origin = getattr(ann, "__origin__", None)
+        if (
+            origin is not None
+            and _is_union(origin)
+            and any(isinstance(meta, _Constraint) for meta in metadata)
+        ):
+            return True
+    supertype = getattr(ann, "__supertype__", None)  # NewType
+    if supertype is not None and _has_constraint_on_union(supertype):
+        return True
+    value = getattr(ann, "__value__", None)  # PEP 695 type alias
+    if value is not None and _has_constraint_on_union(value):
+        return True
+    return any(_has_constraint_on_union(arg) for arg in get_args(ann))
+
+
 class StructAdapter:
     """Adapter for validating and serializing types without subclassing ``Struct``.
 
@@ -37,6 +72,11 @@ class StructAdapter:
     on ``StructAdapter`` — annotations carrying one are rejected. Implement the
     ``struct_dump`` / ``struct_validate`` protocol methods on the custom type,
     or use a ``Struct``.
+
+    ``Constraint`` annotations are supported on concrete types. A ``Constraint``
+    attached to a union or optional type is rejected at construction, matching
+    ``Struct`` class creation; make the field optional with
+    ``Annotated[T, Constraint(...)] | None``.
 
     >>> from structtype import StructAdapter
     >>> adapter = StructAdapter(list[int])
@@ -53,6 +93,12 @@ class StructAdapter:
                 "supported on StructAdapter; define `struct_dump`/"
                 "`struct_validate` methods on the custom type, or use a "
                 "`Struct` instead"
+            )
+        if _has_constraint_on_union(type):
+            raise TypeError(
+                "`Constraint` must be applied to a concrete type, not a union "
+                "or optional type; use `Annotated[T, Constraint(...)] | None` "
+                "for optional fields"
             )
         self._type = type
         self._decoder_loose = None

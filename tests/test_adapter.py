@@ -10,12 +10,14 @@ import pytest
 import structtype
 from structtype import (
     ALL_BUILTIN_TYPES,
+    Constraint,
     Field,
     NumericConstraint,
     Serializer,
     Struct,
     StructAdapter,
     StructConfig,
+    ValidationError,
 )
 
 
@@ -32,6 +34,30 @@ def test_validate_json_generic():
 def test_validate_json_constrained():
     ta = StructAdapter(Annotated[int, NumericConstraint(ge=0)])
     assert ta.struct_validate_json(b"42") == 42
+
+
+def test_adapter_rejects_constraint_on_optional():
+    with pytest.raises(TypeError, match="concrete type"):
+        StructAdapter(Annotated[int | None, NumericConstraint(ge=0)])
+
+
+def test_adapter_rejects_constraint_on_union():
+    with pytest.raises(TypeError, match="concrete type"):
+        StructAdapter(Annotated[int | str, Constraint(lambda v: None)])
+
+
+def test_adapter_rejects_constraint_on_optional_nested():
+    with pytest.raises(TypeError, match="concrete type"):
+        StructAdapter(list[Annotated[int | None, NumericConstraint(ge=0)]])
+
+
+def test_adapter_allows_constraint_on_member_optional():
+    ta = StructAdapter(Annotated[int, NumericConstraint(ge=0)] | None)
+    assert ta.struct_validate(5) == 5
+    assert ta.struct_validate(None) is None
+    assert ta.struct_validate_json(b"5") == 5
+    with pytest.raises(ValidationError):
+        ta.struct_validate(-1)
 
 
 def test_validate_json_tagged_union():

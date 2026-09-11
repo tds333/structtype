@@ -23,6 +23,10 @@
   `Annotated[Union[A, B], Constraint(...)]` are now rejected. Make a field
   optional by unioning the annotated member with `None`:
   `Annotated[T, Serializer(...)] | None` (likewise for `Constraint`).
+- `StructAdapter` now rejects a `Constraint` attached to a union or optional
+  type at construction, matching `Struct`'s class-creation behavior.
+  Constraints remain supported on concrete types; `Serializer` remains
+  unsupported on `StructAdapter`.
 - Fix Serializer correctness for already-valid enum instances and bytes
   subclasses, and preserve same-runtime-type results returned by `dump` across
   Python and JSON values and dictionary keys.
