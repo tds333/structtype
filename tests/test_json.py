@@ -3855,3 +3855,107 @@ class TestReinitReferenceLifecycle:
         # Old configuration and refcount are untouched
         assert dec.decode(b"[[1]]") == [[1]]
         assert sys.getrefcount(t) == base + 1
+
+
+class TestTimedeltaEdgeCases:
+    """ISO-8601 duration parsing/encoding edge cases (signs, all components,
+    fractional units, malformed input)."""
+
+    @staticmethod
+    def _msg():
+        class Msg(Struct):
+            t: datetime.timedelta
+
+        return Msg
+
+    def test_roundtrip(self):
+        Msg = self._msg()
+        cases = [
+            datetime.timedelta(0),
+            datetime.timedelta(microseconds=1),
+            datetime.timedelta(seconds=1),
+            datetime.timedelta(
+                days=1, hours=2, minutes=3, seconds=4, microseconds=500000
+            ),
+            datetime.timedelta(seconds=-5),
+            datetime.timedelta(days=-1, seconds=1),
+        ]
+        for value in cases:
+            buf = Msg(value).struct_dump_json()
+            assert Msg.struct_validate_json(buf).t == value
+
+    def test_encode_format(self):
+        Msg = self._msg()
+        assert Msg(datetime.timedelta(0)).struct_dump_json() == b'{"t":"P0D"}'
+        assert Msg(datetime.timedelta(seconds=1)).struct_dump_json() == b'{"t":"PT1S"}'
+        assert (
+            Msg(datetime.timedelta(seconds=-5)).struct_dump_json()
+            == b'{"t":"-PT5S"}'
+        )
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("PT0S", datetime.timedelta(0)),
+            ("P1D", datetime.timedelta(days=1)),
+            ("P1DT2H3M4.5S", datetime.timedelta(hours=26, minutes=3, seconds=4.5)),
+            ("+PT5S", datetime.timedelta(seconds=5)),
+            ("-PT5S", datetime.timedelta(seconds=-5)),
+            ("PT1.5H", datetime.timedelta(hours=1, minutes=30)),
+            ("PT1M", datetime.timedelta(minutes=1)),
+        ],
+    )
+    def test_decode(self, text, expected):
+        Msg = self._msg()
+        assert (
+            Msg.struct_validate_json(json.dumps({"t": text}).encode()).t == expected
+        )
+
+    @pytest.mark.parametrize(
+        "text", ["P1W", "P1Y", "junk", "", "P", "PT", "1S", "P1DT", "P1D1S", "P-1D"]
+    )
+    def test_decode_invalid(self, text):
+        Msg = self._msg()
+        with pytest.raises(structtype.ValidationError):
+            Msg.struct_validate_json(json.dumps({"t": text}).encode())
+
+    def test_wrong_type(self):
+        Msg = self._msg()
+        with pytest.raises(structtype.ValidationError):
+            Msg.struct_validate({"t": 5})
+
+
+class TestDataclassLifecycle:
+    """Dataclass fields with ``default_factory``, ``init=False`` and
+    ``__post_init__``, plus ``from_attributes`` input."""
+
+    def test_default_factory_init_false_post_init(self):
+        import dataclasses
+
+        @dataclass
+        class Inner:
+            x: int
+            y: list = dataclasses.field(default_factory=list)
+            z: int = dataclasses.field(init=False, default=0)
+
+            def __post_init__(self):
+                object.__setattr__(self, "z", self.x * 2)
+
+        class Msg(Struct):
+            d: Inner
+
+        msg = Msg.struct_validate({"d": {"x": 3}})
+        assert msg.d.y == []
+        assert msg.d.z == 6
+        assert Msg.struct_validate_json(msg.struct_dump_json()) == msg
+
+    def test_from_attributes(self):
+        @dataclass
+        class Inner:
+            x: int
+
+        class Msg(Struct):
+            d: Inner
+
+        src = type("Src", (), {"x": 7})()
+        assert Msg.struct_validate({"d": src}, from_attributes=True).d == Inner(7)

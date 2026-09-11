@@ -23,6 +23,7 @@ Use `make` targets where available. Targeted tests can be run directly with
 | Targeted tests | `uv run --reinstall pytest tests/test_json.py -k test_something` |
 | Coverage (Python) | `make test-cov` |
 | Coverage (Python + C) | `make test-cov-c` |
+| Coverage (Python + C, all Pythons, merged) | `make test-cov-c-all` |
 | Tests in all supported Pythons | `make test-all` |
 | Build docs | `make docs` |
 | Format | `make format` |

@@ -30,11 +30,41 @@ test-cov: ## Run tests with coverage
 test-cov-c: ## Run tests with Python + C coverage (lcov report in htmlcov-c/)
 	rm -rf build coverage-c.info coverage-c.info.* htmlcov-c
 	STRUCTTYPE_COVERAGE=1 uv run --with setuptools python setup.py build_ext --inplace --force
-	./.venv/bin/python -m pytest --cov-report=term-missing --cov-config=pyproject.toml --cov=structtype
-	lcov --capture --directory build --output-file coverage-c.info
-	lcov --extract coverage-c.info "*/src/structtype/*" --output-file coverage-c.info
-	lcov --summary coverage-c.info
-	genhtml coverage-c.info --output-directory htmlcov-c >/dev/null
+	./.venv/bin/python -m pytest --cov-report=term-missing --cov-config=pyproject.toml --cov=structtype \
+	  --deselect tests/test_json.py::TestEncoderMisc::test_encode_infinite_recursive_object_errors
+	lcov --capture --directory build --output-file coverage-c.info --rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1
+	lcov --extract coverage-c.info "*/src/structtype/*" --output-file coverage-c.info --rc branch_coverage=1
+	lcov --summary coverage-c.info --rc branch_coverage=1
+	genhtml coverage-c.info --output-directory htmlcov-c --branch-coverage >/dev/null
+
+# C coverage is version-dependent: `_core.c` has many `#if PY30x_PLUS` and
+# `#ifdef Py_GIL_DISABLED` regions, so a single build only covers part of the
+# code. This target builds an instrumented extension for every supported
+# Python, runs the suite under each, and merges the lcov data.
+.PHONY: test-cov-c-all
+test-cov-c-all: ## Run C coverage across all supported Pythons, merged (htmlcov-c/)
+	rm -rf build coverage-c.info coverage-c.info.* htmlcov-c
+	@set -e; \
+	for py in $(PY_VERSIONS); do \
+	  tag=$$(echo "$$py" | tr -d '.'); \
+	  venv=".venv-cov-$$tag"; \
+	  echo "=== C coverage: $$py ($$venv) ==="; \
+	  rm -rf build; \
+	  env -u VIRTUAL_ENV UV_PROJECT_ENVIRONMENT="$$venv" STRUCTTYPE_COVERAGE=1 \
+	    uv run -p "$$py" --with setuptools python setup.py build_ext --inplace --force; \
+	  "$$venv/bin/python" -m pytest -q \
+	    --deselect tests/test_json.py::TestEncoderMisc::test_encode_infinite_recursive_object_errors; \
+	  lcov --capture --directory build --output-file "coverage-c.info.$$tag" \
+	    --rc branch_coverage=1 --rc geninfo_unexecuted_blocks=1; \
+	  lcov --extract "coverage-c.info.$$tag" "*/src/structtype/*" \
+	    --output-file "coverage-c.info.$$tag" --rc branch_coverage=1; \
+	done; \
+	lcov $$(for f in coverage-c.info.*; do printf ' -a %s' "$$f"; done) \
+	  --output-file coverage-c.info --rc branch_coverage=1; \
+	lcov --summary coverage-c.info --rc branch_coverage=1; \
+	genhtml coverage-c.info --output-directory htmlcov-c --branch-coverage >/dev/null; \
+	env -u VIRTUAL_ENV uv run --reinstall-package structtype python -c "import structtype" >/dev/null; \
+	echo "Merged C coverage written to htmlcov-c/. Re-run 'make test-all' to restore the other optimized builds."
 
 .PHONY: test
 test: ## Run tests in current Python

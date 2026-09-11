@@ -51,6 +51,22 @@ def test_adapter_rejects_constraint_on_optional_nested():
         StructAdapter(list[Annotated[int | None, NumericConstraint(ge=0)]])
 
 
+def test_adapter_rejects_constraint_on_optional_through_newtype():
+    T = NewType("T", Annotated[int | None, NumericConstraint(ge=0)])
+    with pytest.raises(TypeError, match="concrete type"):
+        StructAdapter(T)
+
+
+def test_adapter_rejects_constraint_on_optional_through_type_alias():
+    if sys.version_info < (3, 12):
+        return
+    from typing import TypeAliasType
+
+    T = TypeAliasType("T", Annotated[int | None, NumericConstraint(ge=0)])
+    with pytest.raises(TypeError, match="concrete type"):
+        StructAdapter(T)
+
+
 def test_adapter_allows_constraint_on_member_optional():
     ta = StructAdapter(Annotated[int, NumericConstraint(ge=0)] | None)
     assert ta.struct_validate(5) == 5
