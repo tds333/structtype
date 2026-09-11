@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 (2026-09-11)
 
 - Fix concurrent unsorted dictionary JSON encoding on free-threaded Python so
   an empty snapshot produces valid ``{}`` output instead of corrupting the
