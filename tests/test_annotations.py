@@ -762,6 +762,19 @@ class TestSerializerCodecWiring:
             class Msg(Struct):
                 values: list[Annotated[str, Serializer(dump=str)]]
 
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            Annotated[Literal[1], Serializer()],
+            Annotated[Literal["x"], Serializer(load=f)],
+            Optional[Annotated[Literal[True], Serializer(dump=g)]],
+            list[Annotated[Literal[1], Serializer()]],
+        ],
+    )
+    def test_literal_serializer_rejected_in_direct_decoder(self, annotation):
+        with pytest.raises(TypeError, match="native types"):
+            JSONDecoder(annotation)
+
     def test_native_type_rejected_in_direct_decoder(self):
         def f(x):
             return x
@@ -845,16 +858,6 @@ class TestSerializerCodecWiring:
 
         msg = Msg.struct_validate_json(b'{"color": "red"}')
         assert msg.color is Color.RED
-
-    def test_allowed_type_literal_serializer(self):
-        def load(value):
-            return 1 if value == "one" else value
-
-        class Msg(Struct):
-            code: Annotated[Literal[1], Serializer(load=load)]
-
-        msg = Msg.struct_validate_json(b'{"code": "one"}')
-        assert msg.code == 1
 
     def test_optional_datetime_serializer_roundtrip(self):
         def load(value):
@@ -961,6 +964,24 @@ class TestSerializerCodecWiring:
             class Msg(Struct):
                 v: Annotated[Optional[int], Serializer(load=f)]
 
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            Annotated[int, Serializer()],
+            Annotated[str, Serializer()],
+            Annotated[float, Serializer()],
+            Annotated[bool, Serializer()],
+            Annotated[Literal[1], Serializer()],
+            Annotated[Literal["x"], Serializer(load=f)],
+            Annotated[Literal[True], Serializer(dump=g)],
+            Optional[Annotated[Literal[1], Serializer()]],
+            list[Annotated[Literal[1], Serializer()]],
+        ],
+    )
+    def test_empty_and_literal_serializers_rejected(self, annotation):
+        with pytest.raises(TypeError, match="native types"):
+            type("Msg", (Struct,), {"__annotations__": {"value": annotation}})
+
     def test_bare_none_rejected(self):
         """Bare `None` (as a union member) should not have a Serializer,
         but `type(None)` is a custom type and is accepted."""
@@ -975,18 +996,13 @@ class TestSerializerCodecWiring:
             JSONDecoder(Annotated[Color, Serializer(load=f), Serializer(load=f)])
 
     def test_serializer_without_callables_ignored(self):
-        # An empty Serializer is inert and applicable to any type, matching
-        # the old permissive `Field()` behavior.
+        # An empty Serializer remains inert on supported custom types.
         class MsgCustom(Struct):
             color: Annotated[Color, Serializer()]
-
-        class MsgNative(Struct):
-            value: Annotated[int, Serializer()]
 
         c = Color("red")
         out = MsgCustom.struct_validate({"color": c})
         assert out.color is c
-        assert MsgNative.struct_validate_json(b'{"value": 42}') == MsgNative(42)
 
     def test_nested_list_element_codec(self):
         def load(value):
@@ -2275,18 +2291,6 @@ class TestNativeTypeSerializerFunctional:
         msg = Msg.struct_validate({"v": "9.99"})
         assert msg.v == decimal.Decimal("9.99")
 
-    # -- Literal load ------------------------------------------------------
-
-    def test_literal_serializer_load(self):
-        class Msg(Struct):
-            v: Annotated[
-                Literal[1, 2, 3],
-                Serializer(dump=lambda x: x * 10, load=lambda x: x // 10),
-            ]
-
-        msg = Msg.struct_validate_json(b'{"v": 30}')
-        assert msg.v == 3
-
     # -- Union[X, None] outside Annotated — load path ----------------------
 
     def test_union_outside_annotated_load_path(self):
@@ -2474,10 +2478,14 @@ def _ser():
         lambda: Annotated[tuple[int, ...], _ser()],
         lambda: Annotated[int | str, _ser()],
         lambda: Annotated[Optional[int], _ser()],
+        lambda: Annotated[Literal[1], _ser()],
+        lambda: Annotated[Literal["x"], _ser()],
+        lambda: Annotated[Literal[True], _ser()],
     ],
     ids=[
         "bool", "int", "float", "str",
         "list", "bare-list", "dict", "tuple", "union", "optional",
+        "literal-int", "literal-str", "literal-bool",
     ],
 )
 def test_blocked_types_reject_serializer(ann_factory):
@@ -2505,14 +2513,13 @@ def test_blocked_types_reject_serializer(ann_factory):
         lambda: Annotated[frozenset[int], _ser()],
         lambda: Annotated[_Color, _ser()],
         lambda: Annotated[_Point, _ser()],
-        lambda: Annotated[Literal["x"], _ser()],
         lambda: Annotated[Optional[datetime.datetime], _ser()],
         lambda: Annotated[Optional[_Point], _ser()],
     ],
     ids=[
         "bytes", "bytearray", "memoryview", "datetime", "date", "time",
         "timedelta", "uuid", "decimal", "set", "frozenset", "enum",
-        "nested-struct", "literal", "optional-datetime", "optional-struct",
+        "nested-struct", "optional-datetime", "optional-struct",
     ],
 )
 def test_allowed_types_accept_serializer(ann_factory):

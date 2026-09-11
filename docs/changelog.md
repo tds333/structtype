@@ -7,13 +7,14 @@
   surrounding JSON buffer.
 - Allow `Serializer` annotations on most native types. Previously, `Serializer`
   could only be used on custom (user-defined) types. Now it is accepted on
-  `Literal` values, `bytes`, `bytearray`, `memoryview`, the `datetime`
-  family, `uuid.UUID`, `decimal.Decimal`, enums, `set`, `frozenset`, `Struct`
-  subclasses, `dataclass` / `attrs` types, and `Optional[allowed_type]`
+  `bytes`, `bytearray`, `memoryview`, the `datetime` family, `uuid.UUID`,
+  `decimal.Decimal`, enums, `set`, `frozenset`, `Struct` subclasses,
+  `dataclass` / `attrs` types, and `Optional[allowed_type]`
   (where `None` bypasses the codec). The blocked set is reduced to:
   `Any`, `bool`, `int`, `float`, `str`, `list`, `dict`, `tuple`, `TypedDict`,
-  `NamedTuple`, and `frozendict`. Unions containing any blocked type are also
-  rejected.
+  `NamedTuple`, `frozendict`, and `Literal`. Unions containing any blocked type
+  are also rejected. Empty `Serializer()` annotations are rejected on the
+  same blocked types; they remain inert only on supported types.
 
 ## 0.11.0 (2026-09-06)
 

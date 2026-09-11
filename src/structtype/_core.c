@@ -4388,13 +4388,15 @@ AssocList_Sort(AssocList* list) {
 #define MS_TYPE_FROZENDICT          ((1ull << 38) | (1ull << 39))
 
 /* Types that cannot have a Serializer annotation.  Everything else (bytes,
- * datetime, UUID, Enum, Struct subclasses, Literal, Optional[allowed], etc.)
- * is allowed. */
+ * datetime, UUID, Enum, Struct subclasses, Optional[allowed], etc.) is
+ * allowed. */
 #define MS_SERIALIZER_BLOCKED_TYPES ( \
     MS_TYPE_ANY | MS_TYPE_BOOL | MS_TYPE_INT | \
     MS_TYPE_FLOAT | MS_TYPE_STR | MS_TYPE_LIST | MS_TYPE_DICT | \
     MS_TYPE_VARTUPLE | MS_TYPE_FIXTUPLE | MS_TYPE_TYPEDDICT | \
-    MS_TYPE_NAMEDTUPLE | MS_TYPE_FROZENDICT \
+    MS_TYPE_NAMEDTUPLE | MS_TYPE_FROZENDICT | \
+    MS_TYPE_INTLITERAL | MS_TYPE_STRLITERAL | \
+    MS_TYPE_BOOLLITERAL_TRUE | MS_TYPE_BOOLLITERAL_FALSE \
 )
 
 /* Aliases for commonly used types */
@@ -6451,6 +6453,8 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
  * - `constraints`: Any constraints from `Constraint` objects and the
  *   `Serializer` / `Constraint` annotated on the type
  */
+static bool ms_is_single_custom_type(PyObject *, StructspecState *);
+
 static PyObject *
 typenode_origin_args_metadata(
     TypeNodeCollectState *state, PyObject *obj,
@@ -6494,9 +6498,6 @@ typenode_origin_args_metadata(
                     PyObject *annot = PyTuple_GET_ITEM(metadata, i);
                     if (Py_TYPE(annot) == &Serializer_Type) {
                         Serializer *ser = (Serializer *)annot;
-                        /* An empty Serializer carries no dump - ignore it,
-                         * matching the old inert `Field()` behavior. */
-                        if (ser->load == NULL && ser->dump == NULL) continue;
                         if (constraints->serializer != NULL) {
                             PyErr_Format(
                                 PyExc_TypeError,
@@ -6507,7 +6508,21 @@ typenode_origin_args_metadata(
                             Py_DECREF(metadata);
                             goto error;
                         }
-                         constraints->serializer = (PyObject *)ser;
+                        if (!ms_is_single_custom_type(origin, state->mod)) {
+                            PyErr_Format(
+                                PyExc_TypeError,
+                                "`Serializer(load=...)`/`Serializer(dump=...)` "
+                                "can not be used on native types - type `%R` "
+                                "is invalid",
+                                origin
+                            );
+                            Py_DECREF(metadata);
+                            goto error;
+                        }
+                        if (ser->load == NULL && ser->dump == NULL) {
+                            continue;
+                        }
+                        constraints->serializer = (PyObject *)ser;
                     }
                     else if (PyObject_TypeCheck(annot, (PyTypeObject *)&Constraint_Type)) {
                         if (constraints->validator != NULL) {
@@ -7762,6 +7777,10 @@ ms_is_single_custom_type(PyObject *t, StructspecState *mod) {
         PyErr_Clear();
         goto done;
     }
+    if (typenode_collect_validate_literals(&state) < 0) {
+        PyErr_Clear();
+        goto done;
+    }
     out = (state.types & MS_SERIALIZER_BLOCKED_TYPES) == 0;
 done:
     typenode_collect_clear_state(&state);
@@ -7942,7 +7961,13 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     goto error;
                 }
                 Serializer *serializer = (Serializer *)item;
-                if (serializer->dump == NULL && serializer->load == NULL) continue;
+                if (
+                    serializer->dump == NULL &&
+                    serializer->load == NULL &&
+                    ms_is_single_custom_type(origin, mod)
+                ) {
+                    continue;
+                }
                 if (!ms_is_single_custom_type(origin, mod)) {
                     PyErr_Format(
                         PyExc_TypeError,
