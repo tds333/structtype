@@ -3,6 +3,8 @@
 These reproduce a hang that occurred when a lazily-built ``*Info`` object
 failed to initialize while a previously-cached type still referenced it:
 readers busy-waited forever on an ``initialized`` flag that would never be set.
+
+Skipped on Emscripten/Pyodide, which cannot start threads.
 """
 
 import threading
@@ -12,6 +14,10 @@ from typing import NamedTuple, TypedDict
 import pytest
 
 from structtype import Struct, StructAdapter, StructConfig
+
+from .utils import requires_threads
+
+pytestmark = requires_threads
 
 # A valid annotation whose conversion fails deterministically on every supported
 # Python version: structtype rejects unions with more than one dict-like type.

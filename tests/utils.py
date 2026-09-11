@@ -18,6 +18,11 @@ requires_subprocess = pytest.mark.skipif(
     reason="subprocess support required",
 )
 
+requires_threads = pytest.mark.skipif(
+    sys.platform == "emscripten",
+    reason="threads are unavailable in Pyodide/WASM builds",
+)
+
 py315_or_later_only = pytest.mark.skipif(
     sys.version_info < (3, 15), reason="frozendict was added in 3.15"
 )
