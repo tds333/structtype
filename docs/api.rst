@@ -309,11 +309,12 @@ Serializer
         :doc:`natively supported <supported-types>` types. Used during
         encoding. Not valid on blocked types (``bool``, ``int``, ``float``,
         ``str``, ``list``, ``dict``, ``tuple``, ``TypedDict``, ``NamedTuple``,
-        ``frozendict``, ``Any``) or unions containing them — attaching a ``dump=`` Serializer
-        to a blocked type raises a ``TypeError`` at class creation time for
-        ``Struct``, at construction for ``StructAdapter``. All other types
-        (``Literal``, ``bytes``, ``datetime``, ``UUID``, ``Decimal``,
-        ``Enum``, ``Struct`` subclasses, etc.) are accepted. See :doc:`extending`.
+        ``frozendict``, ``Any``, ``Literal``) or unions containing them —
+        attaching a ``dump=`` Serializer to a blocked type raises a ``TypeError``
+        at class creation time for ``Struct``, at construction for
+        ``StructAdapter``. All other types (``bytes``, ``datetime``, ``UUID``,
+        ``Decimal``, ``Enum``, ``Struct`` subclasses, etc.) are accepted. See
+        :doc:`extending`.
 
     .. attribute:: load
         :no-index:
@@ -323,12 +324,16 @@ Serializer
         A callable converting a value composed of natively supported types
         back into a custom-type value. Called during decoding
         (``struct_validate`` / ``struct_validate_json``). In
-        ``struct_check_types`` / ``check_types_on_init``, if the field value is
-        not already an instance of the target type, a ``ValidationError`` is
-        raised instead — ``load`` is **not** called. Not valid on blocked
+        ``struct_validate``, an existing instance of the target type
+        bypasses ``load``; other Python values are passed to ``load``. JSON
+        input is always passed to ``load`` because it starts as a decoded
+        representation. In ``struct_check_types`` / ``check_types_on_init``,
+        if the field value is not already an instance of the target type, a
+        ``ValidationError`` is raised instead — ``load`` is **not** called. Not
+        valid on blocked
         types (``Any``, ``bool``, ``int``, ``float``, ``str``, ``list``,
-        ``dict``, ``tuple``, ``TypedDict``, ``NamedTuple``, ``frozendict``)
-        or unions containing them. ``None`` bypasses ``load`` for
+        ``dict``, ``tuple``, ``TypedDict``, ``NamedTuple``, ``frozendict``,
+        ``Literal``) or unions containing them. ``None`` bypasses ``load`` for
         ``Optional[allowed_type]`` fields. See :doc:`extending`.
 
 

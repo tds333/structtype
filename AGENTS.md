@@ -72,6 +72,7 @@ Struct instances support the mapping protocol:
 - `make check` runs static type and Ruff checks only; it does not run tests,
   documentation builds, or formatting.
 - Validation matches keys by the **alias** name only, except `struct_validate(obj, from_attributes=True)` on a **non-dict object**, which matches by both the python field name and the alias. Dict/JSON input (even with `from_attributes=True`) and all dump/serialization use only the alias name.
+- For `Annotated[MyType, Serializer(load=...)]`, an existing `MyType` instance bypasses `load`; other Python values and JSON representations are passed to `load`. Serializers remain rejected on `Any`, `bool`, `int`, `float`, `str`, `list`, `dict`, `tuple`, `TypedDict`, `NamedTuple`, `frozendict`, `Literal`, and unions containing those types.
 
 ## graphify
 

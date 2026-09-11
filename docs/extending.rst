@@ -159,8 +159,8 @@ applies even when the annotation uses an empty ``Serializer()`` with no
 
 - the type is one of the blocked native types: ``bool``, ``int``, ``float``,
   ``str``, ``list``, ``dict``, ``tuple`` (parameterized or not),
-  ``TypedDict``, ``NamedTuple``, ``frozendict``, or a ``Literal`` value — e.g.
-  ``Annotated[int, Serializer(dump=...)]``,
+  ``TypedDict``, ``NamedTuple``, ``frozendict``, ``Any``, or a ``Literal``
+  value — e.g. ``Annotated[int, Serializer(dump=...)]``,
 - the type is a union containing a blocked type — including optional types
   such as ``Annotated[int | None, Serializer(dump=...)]``
   (``Annotated[int | str, Serializer(dump=...)]``),
@@ -172,6 +172,13 @@ All other types are allowed, including ``bytes``, ``bytearray``,
 ``uuid.UUID``, ``decimal.Decimal``, enums, ``set``, ``frozenset``,
 ``Struct`` subclasses, ``dataclass`` / ``attrs`` types,
 and ``Optional[allowed_type]`` (``None`` bypasses the codec).
+
+For a custom subclass such as ``MyStr(str)``, ``load`` is skipped when
+``struct_validate`` receives an existing ``MyStr`` instance. A plain ``str``
+value, and every JSON string, is passed to ``load`` so it can produce the
+``MyStr`` value. ``dump`` is applied consistently by both ``struct_dump`` and
+``struct_dump_json``; this also applies when a dump callback returns another
+value of the same runtime type.
 
 *Subclasses* of natively supported types are classified as custom types, so
 Serializers attach fine to them — see :ref:`native-subclass-formats` below for the
@@ -210,8 +217,8 @@ Recipes
 -------
 
 The escape hatch can be defined once as an annotated alias and reused across a
-project. These are the common Python stdlib types that ``structtype`` doesn't
-:natively support <supported-types>`, with a ``Serializer`` for each:
+project. These are common Python stdlib types that ``structtype`` doesn't
+:doc:`natively support <supported-types>`, with a ``Serializer`` for each:
 
 .. code-block:: python
 

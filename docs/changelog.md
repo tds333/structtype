@@ -15,6 +15,9 @@
   `NamedTuple`, `frozendict`, and `Literal`. Unions containing any blocked type
   are also rejected. Empty `Serializer()` annotations are rejected on the
   same blocked types; they remain inert only on supported types.
+- Fix Serializer correctness for already-valid enum instances and bytes
+  subclasses, and preserve same-runtime-type results returned by `dump` across
+  Python and JSON values and dictionary keys.
 
 ## 0.11.0 (2026-09-06)
 
