@@ -19,7 +19,7 @@ docs-serve: ## Open built docs in browser
 
 .PHONY: wheels
 wheels: ## build wheels (musllinux skipped; unset CIBW_SKIP or run cibuildwheel directly to include it)
-	CIBW_SKIP='*-musllinux_*' uvx --from cibuildwheel==4.2.0 cibuildwheel
+	CIBW_SKIP='*-musllinux_*' uvx --from cibuildwheel==4.2.1 cibuildwheel
 
 ##@ Quality
 .PHONY: test-cov
