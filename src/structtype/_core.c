@@ -14776,7 +14776,7 @@ codecs_lookup(PyObject *codecs, PyTypeObject *type) {
 
 static MS_INLINE int
 json_encode_dict_key(EncoderState *self, PyObject *key) {
-    if (MS_LIKELY(PyUnicode_Check(key))) {
+    if (MS_LIKELY(PyUnicode_CheckExact(key))) {
         return json_encode_str(self, key);
     }
     return json_encode_dict_key_noinline(self, key);
@@ -14796,6 +14796,9 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
             Py_DECREF(temp);
             return status;
         }
+    }
+    if (PyUnicode_Check(obj)) {
+        return json_encode_str(self, obj);
     }
     if (type == &PyLong_Type) {
         return json_encode_long_as_str(self, obj);
@@ -15192,6 +15195,9 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
             Py_DECREF(temp);
         }
     }
+    if (PyUnicode_Check(obj)) {
+        return json_encode_str(self, obj);
+    }
     if (PyTuple_Check(obj)) {
         return json_encode_tuple(self, obj);
     }
@@ -15325,7 +15331,7 @@ json_encode_inline(EncoderState *self, PyObject *obj)
     else if (obj == Py_False) {
         return ms_write(self, "false", 5);
     }
-    else if (PyUnicode_Check(obj)) {
+    else if (PyUnicode_CheckExact(obj)) {
         return json_encode_str(self, obj);
     }
     else if (type == &PyLong_Type) {
@@ -18643,7 +18649,7 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         type == &PyBool_Type ||
         type == &PyLong_Type ||
         type == &PyFloat_Type ||
-        PyUnicode_Check(obj)
+        PyUnicode_CheckExact(obj)
     ) {
         goto builtin;
     }
@@ -18660,6 +18666,9 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
             }
             Py_DECREF(temp);
         }
+    }
+    if (PyUnicode_Check(obj)) {
+        goto builtin;
     }
     if (PyList_Check(obj)) {
         return dump_list(self, obj);

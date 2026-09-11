@@ -3097,6 +3097,45 @@ class TestCodecBeforeNativePriority:
     (the builtins path), since dump_obj checks codecs before native type
     dispatch."""
 
+    def test_str_subclass_codec_overrides_native_dump(self):
+        class Lower(str):
+            pass
+
+        def custom_dump(value):
+            return value.upper()
+
+        class Msg(Struct):
+            value: Annotated[Lower, Serializer(dump=custom_dump)]
+
+        msg = Msg(Lower("alice"))
+        assert msg.struct_dump() == {"value": "ALICE"}
+        assert msg.struct_dump_json() == b'{"value":"ALICE"}'
+
+    def test_str_subclass_codec_applies_to_dict_keys(self):
+        class Lower(str):
+            pass
+
+        class Msg(Struct):
+            values: dict[
+                Annotated[Lower, Serializer(dump=lambda value: value.upper())],
+                int,
+            ]
+
+        msg = Msg({Lower("alice"): 1})
+        assert msg.struct_dump() == {"values": {"ALICE": 1}}
+        assert msg.struct_dump_json() == b'{"values":{"ALICE":1}}'
+
+    def test_str_subclass_without_codec_uses_native_dump(self):
+        class Lower(str):
+            pass
+
+        class Msg(Struct):
+            value: Lower
+
+        msg = Msg(Lower("alice"))
+        assert msg.struct_dump() == {"value": "alice"}
+        assert msg.struct_dump_json() == b'{"value":"alice"}'
+
     def test_datetime_codec_overrides_native_struct_dump(self):
         def custom_dump(d):
             return {"year": d.year, "month": d.month}
