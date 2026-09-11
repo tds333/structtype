@@ -39,6 +39,7 @@ Use `make` targets where available. Targeted tests can be run directly with
 - Type stubs (`.pyi`) alongside public modules
 - Sentinel values: `NODEFAULT`, `UNSET`, `_NoDefault`, `UnsetType`
 - never do git commit
+- check for performance regressions, speed is a goal
 
 ## Key API
 
@@ -46,7 +47,6 @@ Use `make` targets where available. Targeted tests can be run directly with
 - `structtype.Field` — field metadata (alias, title, description, examples, deprecated, json_schema_extra)
 - `structtype.Constraint` — base constraint (callable `fn`); subclasses: `NumericConstraint`, `StrConstraint`, `BytesConstraint`, `CollectionConstraint`, `TimezoneConstraint`
 - `structtype.Serializer` — load/dump codecs for supported custom and native types
-- `structtype.Raw` — lazy JSON passthrough
 - `structtype.fields(type_or_instance)` — get FieldInfo tuple for a struct type/instance
 - `structtype._inspect.type_info()` / `multi_type_info()` — type introspection
 - `structtype.StructAdapter` — validate and serialize values against arbitrary types
