@@ -14817,7 +14817,16 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
         if (dump != NULL) {
             PyObject *temp = PyObject_CallOneArg(dump, obj);
             if (temp == NULL) return -1;
-            int status = json_encode_dict_key(self, temp);
+            int status;
+            if (Py_TYPE(temp) == type) {
+                PyObject *codecs = self->codecs;
+                self->codecs = NULL;
+                status = json_encode_dict_key(self, temp);
+                self->codecs = codecs;
+            }
+            else {
+                status = json_encode_dict_key(self, temp);
+            }
             Py_DECREF(temp);
             return status;
         }
@@ -15217,7 +15226,12 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
                 Py_DECREF(temp);
                 return status;
             }
+            PyObject *codecs = self->codecs;
+            self->codecs = NULL;
+            int status = json_encode_inline(self, temp);
+            self->codecs = codecs;
             Py_DECREF(temp);
+            return status;
         }
     }
     if (PyUnicode_Check(obj)) {
@@ -18689,7 +18703,12 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
                 Py_DECREF(temp);
                 return result;
             }
+            PyObject *codecs = self->codecs;
+            self->codecs = NULL;
+            PyObject *result = dump_obj(self, temp, is_key);
+            self->codecs = codecs;
             Py_DECREF(temp);
+            return result;
         }
     }
     if (PyUnicode_Check(obj)) {
@@ -20562,7 +20581,7 @@ validate_obj(
                 already_matches = true;
             else if (bits & MS_TYPE_DECIMAL && pytype == (PyTypeObject *)(self->mod->DecimalType))
                 already_matches = true;
-            else if (bits & MS_TYPE_BYTES && pytype == &PyBytes_Type)
+            else if (bits & MS_TYPE_BYTES && PyBytes_Check(obj))
                 already_matches = true;
             else if (bits & MS_TYPE_BYTEARRAY && pytype == &PyByteArray_Type)
                 already_matches = true;
@@ -20571,8 +20590,14 @@ validate_obj(
             else if (bits & MS_TYPE_UUID && PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->UUIDType)))
                 already_matches = true;
             else if (bits & (MS_TYPE_INTENUM | MS_TYPE_ENUM)) {
-                PyObject *cls = (PyObject *)TypeNode_get_int_enum_or_literal(type);
-                if (cls == NULL) cls = (PyObject *)TypeNode_get_str_enum_or_literal(type);
+                Lookup *lookup = NULL;
+                if (bits & MS_TYPE_INTENUM) {
+                    lookup = (Lookup *)TypeNode_get_int_enum_or_literal(type);
+                }
+                else if (bits & MS_TYPE_ENUM) {
+                    lookup = (Lookup *)TypeNode_get_str_enum_or_literal(type);
+                }
+                PyObject *cls = lookup == NULL ? NULL : lookup->cls;
                 if (cls != NULL) {
                     int is_inst = PyObject_IsInstance(obj, cls);
                     if (is_inst < 0) { ms_maybe_wrap_validation_error(path); return NULL; }

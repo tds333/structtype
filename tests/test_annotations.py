@@ -679,6 +679,67 @@ class TestSerializerCodecWiring:
         assert out.color is c
         assert calls == []
 
+    @pytest.mark.parametrize("enum_type", [enum.Enum, enum.IntEnum])
+    def test_load_not_called_when_already_enum_instance(self, enum_type):
+        calls = []
+
+        class Color(enum_type):
+            RED = 1 if enum_type is enum.IntEnum else "red"
+
+        def load(value):
+            calls.append(value)
+            return Color(value)
+
+        class Msg(Struct):
+            color: Annotated[Color, Serializer(load=load)]
+
+        value = Color.RED
+        out = Msg.struct_validate({"color": value})
+        assert out.color is value
+        assert calls == []
+
+    @pytest.mark.parametrize("enum_type", [enum.Enum, enum.IntEnum])
+    @pytest.mark.parametrize("from_json", [False, True])
+    def test_load_called_for_raw_enum_value(self, enum_type, from_json):
+        calls = []
+
+        class Color(enum_type):
+            RED = 1 if enum_type is enum.IntEnum else "red"
+
+        def load(value):
+            calls.append(value)
+            return Color(value)
+
+        class Msg(Struct):
+            color: Annotated[Color, Serializer(load=load)]
+
+        if from_json:
+            raw = b'{"color": 1}' if enum_type is enum.IntEnum else b'{"color":"red"}'
+            out = Msg.struct_validate_json(raw)
+        else:
+            raw = 1 if enum_type is enum.IntEnum else "red"
+            out = Msg.struct_validate({"color": raw})
+        assert out.color is Color.RED
+        assert calls == [raw if not from_json else (1 if enum_type is enum.IntEnum else "red")]
+
+    def test_load_not_called_for_bytes_subclass(self):
+        calls = []
+
+        class SubBytes(bytes):
+            pass
+
+        def load(value):
+            calls.append(value)
+            return bytes(value)
+
+        class Msg(Struct):
+            value: Annotated[bytes, Serializer(load=load)]
+
+        value = SubBytes(b"value")
+        out = Msg.struct_validate({"value": value})
+        assert out.value == value
+        assert calls == []
+
     def test_load_used_by_struct_validate(self):
         def load(value):
             return Color(value.upper())
@@ -1003,6 +1064,13 @@ class TestSerializerCodecWiring:
         c = Color("red")
         out = MsgCustom.struct_validate({"color": c})
         assert out.color is c
+
+        class MsgNative(Struct):
+            value: Annotated[bytes, Serializer()]
+
+        native = MsgNative.struct_validate({"value": b"value"})
+        assert native.value == b"value"
+        assert native.struct_dump() == {"value": "dmFsdWU="}
 
     def test_nested_list_element_codec(self):
         def load(value):

@@ -3125,6 +3125,37 @@ class TestCodecBeforeNativePriority:
         assert msg.struct_dump() == {"values": {"ALICE": 1}}
         assert msg.struct_dump_json() == b'{"values":{"ALICE":1}}'
 
+    def test_same_type_str_subclass_codec_transforms_value(self):
+        class Upper(str):
+            pass
+
+        def custom_dump(value):
+            return Upper(value.upper())
+
+        class Msg(Struct):
+            value: Annotated[Upper, Serializer(dump=custom_dump)]
+
+        msg = Msg(Upper("alice"))
+        assert msg.struct_dump() == {"value": "ALICE"}
+        assert msg.struct_dump_json() == b'{"value":"ALICE"}'
+
+    def test_same_type_str_subclass_codec_transforms_dict_key(self):
+        class Upper(str):
+            pass
+
+        def custom_dump(value):
+            return Upper(value.upper())
+
+        class Msg(Struct):
+            values: dict[
+                Annotated[Upper, Serializer(dump=custom_dump)],
+                int,
+            ]
+
+        msg = Msg({Upper("alice"): 1})
+        assert msg.struct_dump() == {"values": {"ALICE": 1}}
+        assert msg.struct_dump_json() == b'{"values":{"ALICE":1}}'
+
     def test_str_subclass_without_codec_uses_native_dump(self):
         class Lower(str):
             pass
