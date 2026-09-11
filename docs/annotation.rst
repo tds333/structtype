@@ -126,6 +126,12 @@ At most one ``Field``, one ``Serializer``, and one ``Constraint`` may apply to a
 single field, across all nesting levels. Using two of the same kind (e.g. two
 ``Field`` wrappers) raises a ``TypeError``.
 
+A ``Serializer`` or ``Constraint`` must be attached to a concrete type —
+attaching one directly to a union or optional type (e.g.
+``Annotated[int | None, Constraint(...)]``) raises a ``TypeError`` at class
+creation. To make such a field optional, union the *annotated* member with
+``None``: ``Annotated[T, Constraint(...)] | None``.
+
 The following constraints are supported:
 
 Numeric Constraints

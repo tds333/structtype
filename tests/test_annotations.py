@@ -1894,10 +1894,25 @@ class TestCompositionRules:
         def load(value):
             return value
 
-        with pytest.raises(TypeError, match="concrete union member"):
+        with pytest.raises(TypeError, match="concrete type"):
 
             class Bad(Struct):
                 x: Annotated[Color | datetime.date, Serializer(load=load)]
+
+    def test_serializer_on_optional_rejected(self):
+        def load(value):
+            return value
+
+        with pytest.raises(TypeError, match="concrete type"):
+
+            class Bad(Struct):
+                x: Annotated[Optional[set[int]], Serializer(load=load)]
+
+    def test_empty_serializer_on_optional_rejected(self):
+        with pytest.raises(TypeError, match="concrete type"):
+
+            class Bad(Struct):
+                x: Annotated[Optional[set[int]], Serializer()]
 
     def test_multiple_validators_rejected(self):
         with pytest.raises(TypeError, match="Multiple `Constraint` annotations"):
@@ -2033,7 +2048,7 @@ class TestConstraintApplicability:
         Annotated[Optional[int], Constraint()],
     ])
     def test_constraint_on_union_rejected(self, annotation):
-        with pytest.raises(TypeError, match="union"):
+        with pytest.raises(TypeError, match="concrete type"):
             type("Bad", (Struct,), {"__annotations__": {"x": annotation}})
 
     def test_constraint_on_union_member_allowed(self):

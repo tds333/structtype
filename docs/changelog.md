@@ -9,12 +9,20 @@
   could only be used on custom (user-defined) types. Now it is accepted on
   `bytes`, `bytearray`, `memoryview`, the `datetime` family, `uuid.UUID`,
   `decimal.Decimal`, enums, `set`, `frozenset`, `Struct` subclasses,
-  `dataclass` / `attrs` types, and `Optional[allowed_type]`
-  (where `None` bypasses the codec). The blocked set is reduced to:
+  `dataclass` / `attrs` types, and any of those made optional with
+  `Annotated[T, Serializer(...)] | None` (where `None` bypasses the codec).
+  The blocked set is reduced to:
   `Any`, `bool`, `int`, `float`, `str`, `list`, `dict`, `tuple`, `TypedDict`,
-  `NamedTuple`, `frozendict`, and `Literal`. Unions containing any blocked type
-  are also rejected. Empty `Serializer()` annotations are rejected on the
-  same blocked types; they remain inert only on supported types.
+  `NamedTuple`, `frozendict`, and `Literal`. Empty `Serializer()` annotations
+  are rejected on the same blocked types; they remain inert only on supported
+  types.
+- **Breaking:** `Serializer` and `Constraint` annotations must be attached to a
+  concrete type inside `Annotated`; attaching either directly to a union or an
+  optional type raises `TypeError` at class creation. Previously accepted forms
+  such as `Annotated[int | None, Serializer(...)]` and
+  `Annotated[Union[A, B], Constraint(...)]` are now rejected. Make a field
+  optional by unioning the annotated member with `None`:
+  `Annotated[T, Serializer(...)] | None` (likewise for `Constraint`).
 - Fix Serializer correctness for already-valid enum instances and bytes
   subclasses, and preserve same-runtime-type results returned by `dump` across
   Python and JSON values and dictionary keys.

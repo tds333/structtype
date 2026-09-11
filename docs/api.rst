@@ -309,11 +309,15 @@ Serializer
         :doc:`natively supported <supported-types>` types. Used during
         encoding. Not valid on blocked types (``bool``, ``int``, ``float``,
         ``str``, ``list``, ``dict``, ``tuple``, ``TypedDict``, ``NamedTuple``,
-        ``frozendict``, ``Any``, ``Literal``) or unions containing them —
-        attaching a ``dump=`` Serializer to a blocked type raises a ``TypeError``
+        ``frozendict``, ``Any``, ``Literal``) — attaching a ``dump=``
+        Serializer to a blocked type raises a ``TypeError``
         at class creation time for ``Struct``, at construction for
         ``StructAdapter``. All other types (``bytes``, ``datetime``, ``UUID``,
-        ``Decimal``, ``Enum``, ``Struct`` subclasses, etc.) are accepted. See
+        ``Decimal``, ``Enum``, ``Struct`` subclasses, etc.) are accepted. The
+        Serializer must be attached to a concrete type; attaching it to a union
+        or optional type (e.g. ``Annotated[int | None, Serializer(dump=...)]``)
+        raises a ``TypeError``. To make a field optional, union the annotated
+        member with ``None``: ``Annotated[T, Serializer(...)] | None``. See
         :doc:`extending`.
 
     .. attribute:: load
@@ -333,8 +337,12 @@ Serializer
         valid on blocked
         types (``Any``, ``bool``, ``int``, ``float``, ``str``, ``list``,
         ``dict``, ``tuple``, ``TypedDict``, ``NamedTuple``, ``frozendict``,
-        ``Literal``) or unions containing them. ``None`` bypasses ``load`` for
-        ``Optional[allowed_type]`` fields. See :doc:`extending`.
+        ``Literal``). The Serializer must be attached
+        to a concrete type; attaching it to a union or optional type (e.g.
+        ``Annotated[int | None, Serializer(load=...)]``) raises a ``TypeError``.
+        To make the field optional, union the annotated member with ``None``:
+        ``Annotated[T, Serializer(load=...)] | None``; ``None`` bypasses
+        ``load``. See :doc:`extending`.
 
 
 Constraint
@@ -342,6 +350,13 @@ Constraint
 
 .. autoclass:: Constraint
     :members:
+
+    Like :class:`Serializer`, a `Constraint` must be attached to a concrete
+    type inside `Annotated`. Attaching one to a union or optional type (e.g.
+    ``Annotated[int | None, NumericConstraint(ge=0)]``) raises a ``TypeError``
+    at class creation. To make a constrained field optional, union the
+    annotated member with ``None``:
+    ``Annotated[T, Constraint(...)] | None``.
 
 
 NumericConstraint

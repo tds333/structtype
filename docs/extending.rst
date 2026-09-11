@@ -161,17 +161,21 @@ applies even when the annotation uses an empty ``Serializer()`` with no
   ``str``, ``list``, ``dict``, ``tuple`` (parameterized or not),
   ``TypedDict``, ``NamedTuple``, ``frozendict``, ``Any``, or a ``Literal``
   value — e.g. ``Annotated[int, Serializer(dump=...)]``,
-- the type is a union containing a blocked type — including optional types
-  such as ``Annotated[int | None, Serializer(dump=...)]``
-  (``Annotated[int | str, Serializer(dump=...)]``),
+- the annotation attaches the Serializer to a union or optional type rather
+  than a concrete type — e.g. ``Annotated[int | None, Serializer(dump=...)]``
+  or ``Annotated[int | str, Serializer(dump=...)]``. Attach the Serializer to
+  the concrete member instead; to make the field optional, union the
+  *annotated* member with ``None``:
+  ``Annotated[set[int], Serializer(...)] | None`` (``None`` bypasses the codec),
 - two different ``dump=`` Serializers apply within a single field, e.g.
   ``tuple[Annotated[complex, Serializer(dump=a)], Annotated[complex, Serializer(dump=b)]]``.
 
 All other types are allowed, including ``bytes``, ``bytearray``,
 ``memoryview``, the ``datetime`` family,
 ``uuid.UUID``, ``decimal.Decimal``, enums, ``set``, ``frozenset``,
-``Struct`` subclasses, ``dataclass`` / ``attrs`` types,
-and ``Optional[allowed_type]`` (``None`` bypasses the codec).
+``Struct`` subclasses, and ``dataclass`` / ``attrs`` types. A Serializer must
+be attached to a concrete type; make a field optional by unioning the annotated
+member with ``None``: ``Annotated[T, Serializer(...)] | None``.
 
 For a custom subclass such as ``MyStr(str)``, ``load`` is skipped when
 ``struct_validate`` receives an existing ``MyStr`` instance. A plain ``str``
@@ -186,8 +190,8 @@ recommended pattern.  (Direct use of the base type is also fine for most types
 now — only ``bool``, ``int``, ``float``, ``str``, ``list``, ``dict``,
 ``tuple``, ``TypedDict``, ``NamedTuple``, ``frozendict``, and ``Literal``
 remain blocked. ``bytes``, ``datetime``, ``UUID``, ``Decimal``,
-``Enum``, ``set``, ``frozenset``, ``Struct`` subclasses,
-``Optional[allowed_type]``, etc. are all accepted.)
+``Enum``, ``set``, ``frozenset``, ``Struct`` subclasses, etc. are all
+accepted, and any of them may be made optional with ``| None``.)
 Serializers are only supported on :class:`Struct` fields.
 :class:`StructAdapter` rejects annotations containing a ``Serializer`` —
 use the protocol methods on the type there, or a :class:`Struct`:

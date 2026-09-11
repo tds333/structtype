@@ -3019,7 +3019,7 @@ class TestFieldCodecEncode:
         def dump(x):
             return type(x).__name__
 
-        with pytest.raises(TypeError, match="concrete union member"):
+        with pytest.raises(TypeError, match="concrete type"):
 
             class Msg(Struct):
                 values: Annotated[

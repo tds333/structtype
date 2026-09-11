@@ -7809,8 +7809,8 @@ codec_map_set(PyObject *codecs, PyObject *base_type, PyObject *dump, PyObject *c
 
 /* Resolve the codec-map key for one Serializer target type.  Keys are matched
  * against the runtime type by `codecs_lookup()`, so parameterized generics
- * (`Box[int]`, `set[int]`, the members of `Optional[set[int]]`, ...) are
- * normalized to their raw `__origin__`.  Returns a new reference. */
+ * (e.g. `Box[int]`, `set[int]`) are normalized to their raw `__origin__`.
+ * Returns a new reference. */
 static PyObject *
 codec_member_key(PyObject *member, StructspecState *mod) {
     PyObject *oo = PyObject_GetAttr(member, mod->str___origin__);
@@ -7820,15 +7820,19 @@ codec_member_key(PyObject *member, StructspecState *mod) {
     return member;
 }
 
-/* Return the number of non-None members in a union annotation, or zero when
- * `origin` is not a union.  A Serializer attached to a union can only have
- * one concrete target type; Optional[T] is the supported one-member case. */
+/* Return 0 when `origin` is a concrete (non-union) type, or -1 with a
+ * ``TypeError`` when it is a union or optional type (or when detection fails).
+ * A Serializer/Constraint must be attached to a concrete type; the supported
+ * optional form is ``Annotated[T, codec] | None``.  `label` names the
+ * annotation, e.g. "`Serializer`". */
 static int
-codec_union_member_count(PyObject *origin, StructspecState *mod) {
+codec_require_concrete_type(
+    const char *label, PyObject *origin, StructspecState *mod
+) {
     bool is_union = false;
     PyObject *oo = PyObject_GetAttr(origin, mod->str___origin__);
     if (oo != NULL) {
-        if (oo == mod->typing_union) is_union = true;
+        is_union = (oo == mod->typing_union);
         Py_DECREF(oo);
     }
     else {
@@ -7839,19 +7843,16 @@ codec_union_member_count(PyObject *origin, StructspecState *mod) {
             is_union = rc > 0;
         }
     }
-    if (!is_union) return 0;
-
-    PyObject *args = PyObject_GetAttr(origin, mod->str___args__);
-    if (args == NULL) {
-        PyErr_Clear();
-        return 0;
+    if (is_union) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "%s must be applied to a concrete type, not a union or optional "
+            "type - type `%R` is invalid",
+            label, origin
+        );
+        return -1;
     }
-    int count = 0;
-    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(args); i++) {
-        if (PyTuple_GET_ITEM(args, i) != NONE_TYPE) count++;
-    }
-    Py_DECREF(args);
-    return count;
+    return 0;
 }
 
 /* Classify a resolved type into its constraint kind for constraint-applicability
@@ -8008,20 +8009,10 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     goto error;
                 }
                 Serializer *serializer = (Serializer *)item;
-                int union_members = codec_union_member_count(origin, mod);
-                if (union_members < 0) {
-                    Py_DECREF(metadata);
-                    Py_DECREF(origin);
-                    goto error;
-                }
-                if (union_members > 0) {
-                    PyErr_Format(
-                        PyExc_TypeError,
-                        "`Serializer(load=...)`/`Serializer(dump=...)` must "
-                        "be applied to a concrete union member - type `%R` "
-                        "is invalid",
-                        origin
-                    );
+                if (codec_require_concrete_type(
+                        "`Serializer(load=...)`/`Serializer(dump=...)`",
+                        origin, mod
+                    ) < 0) {
                     Py_DECREF(metadata);
                     Py_DECREF(origin);
                     goto error;
@@ -8072,19 +8063,7 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     Py_DECREF(origin);
                     goto error;
                 }
-                int union_members = codec_union_member_count(origin, mod);
-                if (union_members < 0) {
-                    Py_DECREF(metadata);
-                    Py_DECREF(origin);
-                    goto error;
-                }
-                if (union_members > 0) {
-                    PyErr_Format(
-                        PyExc_TypeError,
-                        "`Constraint` must be applied to a concrete union "
-                        "member - type `%R` is invalid",
-                        origin
-                    );
+                if (codec_require_concrete_type("`Constraint`", origin, mod) < 0) {
                     Py_DECREF(metadata);
                     Py_DECREF(origin);
                     goto error;
