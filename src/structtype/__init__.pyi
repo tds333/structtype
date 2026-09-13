@@ -1,6 +1,6 @@
 # ruff: noqa: PYI041, PYI015
 import enum
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from inspect import Signature
 from typing import (
     Any,
@@ -85,6 +85,7 @@ class Struct(metaclass=StructMeta):
         uuid_as_hex: bool = False,
         sort_keys: bool = False,
     ) -> bytes: ...
+    def struct_dump_csv(self, writer: Any) -> None: ...
     def struct_dump(
         self,
         *,
@@ -100,6 +101,13 @@ class Struct(metaclass=StructMeta):
         *,
         strict: bool = True,
     ) -> Self: ...
+    @classmethod
+    def struct_validate_csv(
+        cls,
+        reader: Iterable[Sequence[str]],
+        *,
+        null_values: Sequence[str] = ("",),
+    ) -> Iterator[Self]: ...
     @classmethod
     def struct_validate(
         cls,

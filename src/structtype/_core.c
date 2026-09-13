@@ -10295,6 +10295,8 @@ static PyObject *Struct_dump_json(PyObject *, PyObject *const *, Py_ssize_t, PyO
 static PyObject *Struct_validate_json(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_dump(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_validate(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
+static PyObject *Struct_validate_csv(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
+static PyObject *Struct_dump_csv(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 static PyObject *Struct_check(PyObject *, PyObject *const *, Py_ssize_t, PyObject *);
 
 PyDoc_STRVAR(Struct_copy__doc__,
@@ -10474,6 +10476,28 @@ PyDoc_STRVAR(Struct_check_types__doc__,
 "check is also performed at construction time.\n"
 );
 
+PyDoc_STRVAR(Struct_validate_csv__doc__,
+"struct_validate_csv(cls, reader, *, null_values=('',))\n"
+"\n"
+"Return an iterator that pulls one row at a time from a stdlib csv.reader and\n"
+"decodes it into a Struct instance, so callers can write\n"
+"``for rec in User.struct_validate_csv(reader):``. Cells are matched\n"
+"positionally to fields in declaration order and coerced with lax string\n"
+"rules. Cells listed in `null_values` become None. The caller owns the\n"
+"delimiter, quoting, dialect, encoding, and stream.\n"
+"Reader errors (including csv.Error) propagate unchanged; an exhausted reader\n"
+"simply ends iteration.\n"
+);
+
+PyDoc_STRVAR(Struct_dump_csv__doc__,
+"struct_dump_csv(writer)\n"
+"\n"
+"Write this Struct as a single CSV row through a stdlib csv.writer, one cell\n"
+"per field in declaration order. None -> empty, bools -> true/false, bytes ->\n"
+"base64. The caller owns the delimiter, quoting, dialect, encoding, and\n"
+"stream.\n"
+);
+
 static PyMethodDef Struct_methods[] = {
     {"__copy__", Struct_copy, METH_NOARGS, Struct_copy__doc__},
     {"__replace__", (PyCFunction) Struct_replace, METH_FASTCALL | METH_KEYWORDS, Struct_replace__doc__},
@@ -10483,6 +10507,8 @@ static PyMethodDef Struct_methods[] = {
     {"struct_validate_json", (PyCFunction) Struct_validate_json, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate_json__doc__},
     {"struct_dump", (PyCFunction) Struct_dump, METH_FASTCALL | METH_KEYWORDS, Struct_dump__doc__},
     {"struct_validate", (PyCFunction) Struct_validate, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate__doc__},
+    {"struct_validate_csv", (PyCFunction) Struct_validate_csv, METH_FASTCALL | METH_KEYWORDS | METH_CLASS, Struct_validate_csv__doc__},
+    {"struct_dump_csv", (PyCFunction) Struct_dump_csv, METH_FASTCALL | METH_KEYWORDS, Struct_dump_csv__doc__},
     {"struct_check_types", (PyCFunction) Struct_check, METH_FASTCALL | METH_KEYWORDS, Struct_check_types__doc__},
     {NULL, NULL},
 };
@@ -18974,6 +19000,69 @@ structtype_dump(PyObject *self, PyObject *args, PyObject *kwargs)
     return out;
 }
 
+/* Return one normalized value per declared field, in declaration order, for
+ * CSV encoding. Unlike dump_struct, this never omits defaulted/UNSET fields
+ * and never produces an array_like shape, since CSV needs every field as a
+ * fixed, positionally decodable column. */
+static PyObject *
+csv_fields(PyObject *obj) {
+    StructspecState *mod = structtype_get_global_state();
+    if (mod == NULL) return NULL;
+    if (!ms_is_struct_inst(obj)) {
+        PyErr_SetString(PyExc_TypeError, "expected a Struct instance");
+        return NULL;
+    }
+
+    DumpState state;
+    state.mod = mod;
+    state.codecs = NULL;
+    state.str_keys = false;
+    state.sort_keys = false;
+    state.builtin_types = 0;
+    state.builtin_types_seq = NULL;
+
+    StructMetaObject *st = (StructMetaObject *)Py_TYPE(obj);
+    PyObject *field_codecs = st->struct_field_codecs;
+    bool has_codecs = (field_codecs != NULL);
+    Py_ssize_t nfields = PyTuple_GET_SIZE(st->struct_fields);
+    PyObject *out = PyList_New(nfields);
+    if (out == NULL) return NULL;
+
+    for (Py_ssize_t i = 0; i < nfields; i++) {
+        PyObject *val = Struct_get_index(obj, i);
+        if (val == NULL) goto error;
+        PyObject *val2;
+        if (MS_UNLIKELY(val == UNSET)) {
+            val2 = Py_NewRef(Py_None);
+        }
+        else {
+            if (has_codecs) state.codecs = PyTuple_GET_ITEM(field_codecs, i);
+            val2 = dump_obj(&state, val, false);
+            if (has_codecs) state.codecs = NULL;
+            if (val2 == NULL) goto error;
+        }
+        PyList_SET_ITEM(out, i, val2);
+    }
+    return out;
+
+error:
+    Py_DECREF(out);
+    return NULL;
+}
+
+static PyObject *
+structtype_csv_fields(
+    PyObject *module, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames
+) {
+    if (nargs != 1 || kwnames != NULL) {
+        return PyErr_Format(
+            PyExc_TypeError,
+            "_csv_fields() takes exactly 1 positional argument"
+        );
+    }
+    return csv_fields(args[0]);
+}
+
 /*************************************************************************
  * validate                                                               *
  *************************************************************************/
@@ -20921,6 +21010,263 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
     return out;
 }
 
+static PyObject *
+csv_decode(PyObject *cls, PyObject *cells, PyObject *null_values) {
+    StructspecState *mod = structtype_get_global_state();
+    if (mod == NULL) return NULL;
+    if (!ms_is_struct_cls(cls)) {
+        PyErr_SetString(PyExc_TypeError, "expected a Struct type");
+        return NULL;
+    }
+
+    PyObject *info_obj = StructInfo_Convert(cls);
+    if (info_obj == NULL) return NULL;
+    StructInfo *info = (StructInfo *)info_obj;
+    StructMetaObject *st = info->class;
+
+    PyObject *seq = PySequence_Fast(cells, "CSV cells must be a sequence");
+    if (seq == NULL) { Py_DECREF(info_obj); return NULL; }
+    PyObject **cellv = PySequence_Fast_ITEMS(seq);
+    Py_ssize_t ncells = PySequence_Fast_GET_SIZE(seq);
+    Py_ssize_t nfields = PyTuple_GET_SIZE(st->struct_alias_fields);
+
+    ValidateState state;
+    state.mod = mod;
+    state.builtin_types = 0;
+    state.str_keys = false;
+    state.from_attributes = false;
+    state.strict = false;
+    state.check_types_only = false;
+
+    PyObject *inst = Struct_alloc((PyTypeObject *)st);
+    if (inst == NULL) { Py_DECREF(seq); Py_DECREF(info_obj); return NULL; }
+
+    Py_ssize_t n = ncells < nfields ? ncells : nfields;
+    for (Py_ssize_t j = 0; j < n; j++) {
+        int is_null = PySet_Contains(null_values, cellv[j]);
+        if (is_null < 0) goto error;
+        PathNode field_path = {NULL, j, (PyObject *)st};
+        PyObject *val = validate_obj(
+            &state, is_null ? Py_None : cellv[j], info->types[j], &field_path
+        );
+        if (val == NULL) goto error;
+        Struct_set_index(inst, j, val);
+    }
+    Py_DECREF(seq);
+    if (Struct_fill_in_defaults(st, inst, NULL) < 0) goto error_inst;
+    Py_DECREF(info_obj);
+    return inst;
+
+error:
+    Py_DECREF(seq);
+error_inst:
+    Py_DECREF(inst);
+    Py_DECREF(info_obj);
+    return NULL;
+}
+
+static PyObject *
+structtype_csv_decode(
+    PyObject *module, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames
+) {
+    if (nargs != 3 || kwnames != NULL) {
+        return PyErr_Format(
+            PyExc_TypeError, "_csv_decode() takes exactly 3 positional arguments"
+        );
+    }
+    return csv_decode(args[0], args[1], args[2]);
+}
+
+typedef struct {
+    PyObject_HEAD
+    PyObject *cls;
+    PyObject *iterator;
+    PyObject *null_values;
+} CSVIterator;
+
+static void
+CSVIterator_dealloc(CSVIterator *self) {
+    PyObject_GC_UnTrack(self);
+    Py_CLEAR(self->cls);
+    Py_CLEAR(self->iterator);
+    Py_CLEAR(self->null_values);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static int
+CSVIterator_traverse(CSVIterator *self, visitproc visit, void *arg) {
+    Py_VISIT(self->cls);
+    Py_VISIT(self->iterator);
+    Py_VISIT(self->null_values);
+    return 0;
+}
+
+static int
+CSVIterator_clear(CSVIterator *self) {
+    Py_CLEAR(self->cls);
+    Py_CLEAR(self->iterator);
+    Py_CLEAR(self->null_values);
+    return 0;
+}
+
+static PyObject *
+CSVIterator_iternext(CSVIterator *self) {
+    PyObject *cells = (*Py_TYPE(self->iterator)->tp_iternext)(self->iterator);
+    if (cells == NULL) {
+        return NULL;
+    }
+    PyObject *rec = csv_decode(self->cls, cells, self->null_values);
+    Py_DECREF(cells);
+    /* A StopIteration escaping user validation code (e.g. __post_init__) must
+     * not masquerade as reader exhaustion, or the rest of the stream is
+     * silently dropped. Mirror PEP 479 by converting it to RuntimeError. */
+    if (rec == NULL && PyErr_ExceptionMatches(PyExc_StopIteration)) {
+        PyErr_SetString(
+            PyExc_RuntimeError, "CSV decode raised StopIteration"
+        );
+    }
+    return rec;
+}
+
+static PyTypeObject CSVIterator_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "structtype._core.CSVIterator",
+    .tp_basicsize = sizeof(CSVIterator),
+    .tp_dealloc = (destructor) CSVIterator_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,
+    .tp_traverse = (traverseproc) CSVIterator_traverse,
+    .tp_clear = (inquiry) CSVIterator_clear,
+    .tp_iter = PyObject_SelfIter,
+    .tp_iternext = (iternextfunc) CSVIterator_iternext,
+};
+
+static PyObject *
+Struct_validate_csv(
+    PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames
+) {
+    if (nargs != 1) {
+        return PyErr_Format(
+            PyExc_TypeError,
+            "struct_validate_csv() takes exactly 1 positional argument (%zd given)",
+            nargs
+        );
+    }
+    PyObject *reader = args[0];
+    PyObject *null_values = NULL;
+    if (kwnames != NULL) {
+        Py_ssize_t nkw = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < nkw; i++) {
+            PyObject *name = PyTuple_GET_ITEM(kwnames, i);
+            if (PyUnicode_CompareWithASCIIString(name, "null_values") == 0) {
+                null_values = args[nargs + i];
+            }
+            else {
+                return PyErr_Format(
+                    PyExc_TypeError,
+                    "struct_validate_csv() got an unexpected keyword argument '%U'",
+                    name
+                );
+            }
+        }
+    }
+
+    PyObject *nv;
+    if (null_values == NULL) {
+        nv = PySet_New(NULL);
+        if (nv == NULL) return NULL;
+        PyObject *empty = PyUnicode_FromString("");
+        if (empty == NULL || PySet_Add(nv, empty) < 0) {
+            Py_XDECREF(empty);
+            Py_DECREF(nv);
+            return NULL;
+        }
+        Py_DECREF(empty);
+    }
+    else {
+        if (PyUnicode_Check(null_values) || PyBytes_Check(null_values)) {
+            return PyErr_Format(
+                PyExc_TypeError,
+                "null_values must be a sequence of strings, not a single string"
+            );
+        }
+        nv = PySet_New(null_values);
+        if (nv == NULL) return NULL;
+    }
+
+    PyObject *it = PyObject_GetIter(reader);
+    if (it == NULL) { Py_DECREF(nv); return NULL; }
+    CSVIterator *iter = PyObject_GC_New(CSVIterator, &CSVIterator_Type);
+    if (iter == NULL) { Py_DECREF(it); Py_DECREF(nv); return NULL; }
+    Py_INCREF(cls);
+    iter->cls = cls;
+    iter->iterator = it;
+    iter->null_values = nv;
+    PyObject_GC_Track(iter);
+    return (PyObject *)iter;
+}
+
+static PyObject *
+csv_render_cell(StructspecState *mod, PyObject *value) {
+    if (value == Py_None) {
+        return PyUnicode_FromString("");
+    }
+    if (value == Py_True) {
+        return PyUnicode_FromString("true");
+    }
+    if (value == Py_False) {
+        return PyUnicode_FromString("false");
+    }
+    int is_enum = PyObject_IsInstance(value, mod->EnumType);
+    if (is_enum < 0) return NULL;
+    if (is_enum) {
+        PyObject *inner = dump_enum_value(mod, value);
+        if (inner == NULL) return NULL;
+        PyObject *out = PyObject_Str(inner);
+        Py_DECREF(inner);
+        return out;
+    }
+    if (
+        PyList_Check(value) || PyTuple_Check(value) ||
+        PyDict_Check(value) || PyAnySet_Check(value)
+    ) {
+        PyErr_SetString(PyExc_TypeError, "CSV supports flat scalar fields only");
+        return NULL;
+    }
+    return PyObject_Str(value);
+}
+
+static PyObject *
+Struct_dump_csv(
+    PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames
+) {
+    if (nargs != 1 || kwnames != NULL) {
+        return PyErr_Format(
+            PyExc_TypeError,
+            "struct_dump_csv() takes exactly 1 positional argument (%zd given)",
+            nargs
+        );
+    }
+    PyObject *writer = args[0];
+    StructspecState *mod = structtype_get_global_state();
+    if (mod == NULL) return NULL;
+    PyObject *values = csv_fields(self);
+    if (values == NULL) return NULL;
+    Py_ssize_t n = PyList_GET_SIZE(values);
+    PyObject *row = PyList_New(n);
+    if (row == NULL) { Py_DECREF(values); return NULL; }
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *cell = csv_render_cell(mod, PyList_GET_ITEM(values, i));
+        if (cell == NULL) { Py_DECREF(values); Py_DECREF(row); return NULL; }
+        PyList_SET_ITEM(row, i, cell);
+    }
+    Py_DECREF(values);
+    PyObject *res = PyObject_CallMethod(writer, "writerow", "O", row);
+    Py_DECREF(row);
+    if (res == NULL) return NULL;
+    Py_DECREF(res);
+    Py_RETURN_NONE;
+}
+
 /* If `val` is a struct instance matching `field_type` (a direct struct or a
  * struct union member), recurse into it. Returns 1 if recursed, 0 if the value
  * isn't a matching struct, and -1 on error. When `apply_validator` is true, a
@@ -21135,6 +21481,8 @@ static struct PyMethodDef structtype_methods[] = {
     {"_json_encode", (PyCFunction) structtype_json_encode, METH_FASTCALL | METH_KEYWORDS, ""},
     {"_json_decode", (PyCFunction) structtype_json_decode, METH_FASTCALL | METH_KEYWORDS, ""},
     {"_dump", (PyCFunction) structtype_dump, METH_VARARGS | METH_KEYWORDS, ""},
+    {"_csv_fields", (PyCFunction) structtype_csv_fields, METH_FASTCALL | METH_KEYWORDS, ""},
+    {"_csv_decode", (PyCFunction) structtype_csv_decode, METH_FASTCALL | METH_KEYWORDS, ""},
     {"_validate", (PyCFunction) structtype_validate, METH_VARARGS | METH_KEYWORDS, ""},
     {NULL, NULL} /* sentinel */
 };
@@ -21336,6 +21684,8 @@ PyInit__core(void)
     if (PyType_Ready(&JSONEncoder_Type) < 0)
         return NULL;
     if (PyType_Ready(&JSONDecoder_Type) < 0)
+        return NULL;
+    if (PyType_Ready(&CSVIterator_Type) < 0)
         return NULL;
 
     /* Create the module */

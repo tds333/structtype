@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.13.0 (unreleased)
+
+- Add `Struct.struct_validate_csv()` and `Struct.struct_dump_csv()` for
+  CSV encoding/decoding. These operate on the standard library's
+  `csv` module: `struct_validate_csv()` returns an iterator that pulls one row
+  at a time from a `csv.reader` (so it can drive a `for` loop and `list(...)`
+  collects all records), and `struct_dump_csv()` writes one row through a
+  `csv.writer` (returning `None`). The caller owns the delimiter, quoting,
+  dialect, encoding, and stream; structtype does no buffer/bytes/encoding
+  handling. CSV is positional
+  — each cell is matched to a field by its position in `__struct_fields__`
+  declaration order, with no header row and no `alias` / `rename` support.
+  Decoding is always lax, and only flat scalar fields are supported (nested
+  `Struct` values and `list` / `tuple` / `dict` / `set` cells raise
+  `ValidationError` on decode and `TypeError` on dump). ``null_values`` is the
+  only structtype option; `bytes` are dumped as base64 and the `datetime`
+  family, `uuid.UUID`, `decimal.Decimal`, enums, `bool`, and `None` use their
+  standard string forms. An exhausted/empty reader ends iteration (`list(...)`
+  is `[]`) and reader errors (including `csv.Error`) propagate unchanged; the
+  written row round-trips through `struct_validate_csv()`.
+
 ## 0.12.0 (2026-09-11)
 
 - Fix concurrent unsorted dictionary JSON encoding on free-threaded Python so

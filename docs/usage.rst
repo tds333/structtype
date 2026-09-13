@@ -1029,9 +1029,10 @@ array, and is used to determine which type in the union to use when decoding.
 
 
 
-``structtype`` provides a single serialization protocol: JSON. All JSON
+``structtype`` provides JSON as its primary serialization protocol. All JSON
 operations are available as methods on ``Struct`` instances, or via
-``StructAdapter`` for encoding non-struct objects.
+``StructAdapter`` for encoding non-struct objects. A row-iterating CSV codec is
+also available; see :ref:`csv` below.
 
 Encoding
 --------
@@ -1167,6 +1168,81 @@ string-to-type conversion regardless of the ``strict`` setting.
      query strings, form data, CSV) where everything arrives as strings.
 
 See :doc:`supported-types` for per-type details.
+
+.. _csv:
+
+CSV
+---
+
+``Struct`` can also encode and decode CSV with ``struct_validate_csv()`` and
+``struct_dump_csv()``. These methods work with the standard library's
+:mod:`csv` module: ``struct_validate_csv()`` returns an iterator that pulls one
+row at a time from a ``csv.reader``, and ``struct_dump_csv()`` writes one row
+through a ``csv.writer``. structtype does no buffer, bytes, or encoding
+handling — the caller owns the delimiter, quoting, dialect, encoding, and
+stream.
+
+CSV is positional: cell ``j`` is matched to field ``j`` in ``__struct_fields__``
+declaration order. There is no header row, and ``alias`` / ``rename`` do not
+apply.
+
+.. code-block:: python
+
+    import csv
+    import io
+    from structtype import Struct
+
+    class User(Struct):
+        user_id: int
+        name: str
+        active: bool | None = None
+
+    reader = csv.reader(io.StringIO("1,alice,true\n", newline=""))
+    for user in User.struct_validate_csv(reader):
+        print(user)
+
+    records = list(User.struct_validate_csv(csv.reader(io.StringIO(text))))
+
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\n")
+    user.struct_dump_csv(writer)
+    assert out.getvalue() == "1,alice,true\n"
+
+``struct_validate_csv()`` returns an iterator yielding one validated ``Struct``
+per row. An exhausted (or empty) reader simply ends iteration, so ``list(...)``
+of an empty reader is ``[]``; errors raised by the reader (including
+``csv.Error``) propagate unchanged. ``struct_dump_csv()`` writes exactly one
+``\n``-terminated row that round-trips through ``struct_validate_csv()``.
+
+CSV cells are always strings, so decoding is always **lax** (equivalent to
+``strict=False``): ``"1"`` coerces to ``1``, ``"true"`` to ``True``, and so on.
+There is no ``strict`` parameter. A cell whose text is in ``null_values`` (by
+default just the empty string) decodes to ``None``; ``Optional`` fields accept
+it, while required fields raise a ``ValidationError``. Extra cells beyond the
+field count are ignored, and missing trailing cells use field defaults (or
+raise if required).
+
+Only **flat scalar** fields are supported. Nested ``Struct`` values and
+``list`` / ``tuple`` / ``dict`` / ``set`` cells are rejected: a
+``ValidationError`` on decode, and a ``TypeError`` on dump. On dump, ``None``
+becomes an empty cell, ``True`` / ``False`` become ``true`` / ``false``,
+``bytes`` become base64 strings, ``Enum`` members use their value, and the
+``datetime`` family, ``uuid.UUID``, and ``decimal.Decimal`` use their standard
+string forms.
+
+``null_values`` is the only structtype option; everything else belongs to the
+caller's reader/writer. Change the delimiter or quoting by configuring the
+``csv`` object, and decode bytes yourself before wrapping them in a
+``StringIO`` (or open the file in text mode with the desired encoding):
+
+.. code-block:: python
+
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=";")
+    users = list(User.struct_validate_csv(reader, null_values=("", "NA")))
+
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\n")
+    user.struct_dump_csv(writer)  # returns None
 
 .. _to-builtins-vs-asdict:
 
