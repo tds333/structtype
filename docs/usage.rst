@@ -1230,6 +1230,11 @@ becomes an empty cell, ``True`` / ``False`` become ``true`` / ``false``,
 ``datetime`` family, ``uuid.UUID``, and ``decimal.Decimal`` use their standard
 string forms.
 
+``Serializer`` codecs and ``Constraint`` validators attached to flat scalar
+fields are honored. Decoding runs ``Serializer.load`` and enforces
+constraints; dumping runs ``Serializer.dump``. As with the JSON codecs,
+constraints are validation-time only and are not re-checked on dump.
+
 ``null_values`` is the only structtype option; everything else belongs to the
 caller's reader/writer. Change the delimiter or quoting by configuring the
 ``csv`` object, and decode bytes yourself before wrapping them in a

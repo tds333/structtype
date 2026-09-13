@@ -101,6 +101,12 @@ def test_validate_csv_rejects_bare_string_null_values():
         User.struct_validate_csv(_reader("3,carol,NA\n"), null_values="NA")
 
 
+def test_validate_csv_explicit_empty_null_values_matches_default():
+    assert next(
+        User.struct_validate_csv(_reader("2,bob,\n"), null_values=("",))
+    ) == User(2, "bob", None)
+
+
 def test_validate_csv_iterates_rows():
     assert list(User.struct_validate_csv(_reader("1,alice,\n2,bob,\n"))) == [
         User(1, "alice"),
@@ -201,6 +207,27 @@ def test_dump_csv_enum_and_bytes_roundtrip():
     assert _one(T, stream.getvalue()) == t
 
 
+def test_dump_csv_int_and_plain_enum_roundtrip():
+    from enum import Enum, IntEnum
+
+    class Level(IntEnum):
+        LOW = 1
+        HIGH = 2
+
+    class Flavor(Enum):
+        SWEET = "sweet"
+
+    class E(st.Struct):
+        level: Level
+        flavor: Flavor
+
+    e = E(Level.HIGH, Flavor.SWEET)
+    stream = io.StringIO(newline="")
+    e.struct_dump_csv(_writer(stream))
+    assert stream.getvalue() == "2,sweet\n"
+    assert _one(E, stream.getvalue()) == e
+
+
 def test_dump_csv_rejects_nested():
     class W(st.Struct):
         items: list[int]
@@ -293,3 +320,36 @@ def test_csv_ignores_aliases_uses_declaration_order():
     Aliased(1, "x").struct_dump_csv(_writer(stream))
     assert stream.getvalue() == "1,x\n"
     assert _one(Aliased, stream.getvalue()) == Aliased(1, "x")
+
+
+def test_csv_honors_serializer_load_and_dump():
+    class S(st.Struct):
+        d: Annotated[
+            date,
+            st.Serializer(
+                load=lambda s: datetime.strptime(s, "%Y/%m/%d").date(),
+                dump=lambda d: d.strftime("%Y/%m/%d"),
+            ),
+        ]
+        n: int
+
+    s = _one(S, "2020/01/02,7\n")
+    assert s == S(date(2020, 1, 2), 7)
+
+    stream = io.StringIO(newline="")
+    s.struct_dump_csv(_writer(stream))
+    assert stream.getvalue() == "2020/01/02,7\n"
+    assert _one(S, stream.getvalue()) == s
+
+
+def test_validate_csv_enforces_constraints():
+    class C(st.Struct):
+        n: Annotated[int, st.NumericConstraint(ge=0)]
+        code: Annotated[str, st.StrConstraint(min_length=3)]
+
+    assert _one(C, "5,abc\n") == C(5, "abc")
+
+    with pytest.raises(st.ValidationError, match=r"\$\.n"):
+        _one(C, "-1,abc\n")
+    with pytest.raises(st.ValidationError, match=r"\$\.code"):
+        _one(C, "5,ab\n")

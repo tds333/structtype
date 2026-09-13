@@ -19000,12 +19000,44 @@ structtype_dump(PyObject *self, PyObject *args, PyObject *kwargs)
     return out;
 }
 
-/* Return one normalized value per declared field, in declaration order, for
- * CSV encoding. Unlike dump_struct, this never omits defaulted/UNSET fields
- * and never produces an array_like shape, since CSV needs every field as a
- * fixed, positionally decodable column. */
 static PyObject *
-csv_fields(PyObject *obj) {
+csv_render_cell(StructspecState *mod, PyObject *value) {
+    if (value == Py_None) {
+        return PyUnicode_FromString("");
+    }
+    if (value == Py_True) {
+        return PyUnicode_FromString("true");
+    }
+    if (value == Py_False) {
+        return PyUnicode_FromString("false");
+    }
+    if (PyUnicode_CheckExact(value)) {
+        return Py_NewRef(value);
+    }
+    if (PyType_IsSubtype(Py_TYPE(value), (PyTypeObject *)mod->EnumType)) {
+        PyObject *inner = dump_enum_value(mod, value);
+        if (inner == NULL) return NULL;
+        PyObject *out = PyObject_Str(inner);
+        Py_DECREF(inner);
+        return out;
+    }
+    if (
+        PyList_Check(value) || PyTuple_Check(value) ||
+        PyDict_Check(value) || PyAnySet_Check(value)
+    ) {
+        PyErr_SetString(PyExc_TypeError, "CSV supports flat scalar fields only");
+        return NULL;
+    }
+    return PyObject_Str(value);
+}
+
+/* Return one value per declared field, in declaration order. Unlike
+ * dump_struct, this never omits defaulted/UNSET fields and never produces an
+ * array_like shape, since CSV needs every field as a fixed, positionally
+ * decodable column. When `render` is true each value is also converted to a
+ * CSV cell string in the same pass, avoiding a second list. */
+static PyObject *
+csv_fields_inner(PyObject *obj, bool render) {
     StructspecState *mod = structtype_get_global_state();
     if (mod == NULL) return NULL;
     if (!ms_is_struct_inst(obj)) {
@@ -19041,6 +19073,12 @@ csv_fields(PyObject *obj) {
             if (has_codecs) state.codecs = NULL;
             if (val2 == NULL) goto error;
         }
+        if (render) {
+            PyObject *cell = csv_render_cell(mod, val2);
+            Py_DECREF(val2);
+            if (cell == NULL) goto error;
+            val2 = cell;
+        }
         PyList_SET_ITEM(out, i, val2);
     }
     return out;
@@ -19048,6 +19086,11 @@ csv_fields(PyObject *obj) {
 error:
     Py_DECREF(out);
     return NULL;
+}
+
+static PyObject *
+csv_fields(PyObject *obj) {
+    return csv_fields_inner(obj, false);
 }
 
 static PyObject *
@@ -21011,21 +21054,20 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
 }
 
 static PyObject *
-csv_decode(PyObject *cls, PyObject *cells, PyObject *null_values) {
-    StructspecState *mod = structtype_get_global_state();
-    if (mod == NULL) return NULL;
-    if (!ms_is_struct_cls(cls)) {
-        PyErr_SetString(PyExc_TypeError, "expected a Struct type");
-        return NULL;
-    }
-
-    PyObject *info_obj = StructInfo_Convert(cls);
-    if (info_obj == NULL) return NULL;
-    StructInfo *info = (StructInfo *)info_obj;
+csv_decode_info(
+    StructInfo *info, StructspecState *mod, PyObject *cells,
+    PyObject *null_values, bool null_empty_only
+) {
     StructMetaObject *st = info->class;
 
-    PyObject *seq = PySequence_Fast(cells, "CSV cells must be a sequence");
-    if (seq == NULL) { Py_DECREF(info_obj); return NULL; }
+    PyObject *seq;
+    if (PyList_CheckExact(cells)) {
+        seq = Py_NewRef(cells);
+    }
+    else {
+        seq = PySequence_Fast(cells, "CSV cells must be a sequence");
+        if (seq == NULL) return NULL;
+    }
     PyObject **cellv = PySequence_Fast_ITEMS(seq);
     Py_ssize_t ncells = PySequence_Fast_GET_SIZE(seq);
     Py_ssize_t nfields = PyTuple_GET_SIZE(st->struct_alias_fields);
@@ -21039,30 +21081,53 @@ csv_decode(PyObject *cls, PyObject *cells, PyObject *null_values) {
     state.check_types_only = false;
 
     PyObject *inst = Struct_alloc((PyTypeObject *)st);
-    if (inst == NULL) { Py_DECREF(seq); Py_DECREF(info_obj); return NULL; }
+    if (inst == NULL) { Py_DECREF(seq); return NULL; }
 
     Py_ssize_t n = ncells < nfields ? ncells : nfields;
     for (Py_ssize_t j = 0; j < n; j++) {
-        int is_null = PySet_Contains(null_values, cellv[j]);
-        if (is_null < 0) goto error;
+        PyObject *cell = cellv[j];
+        bool is_null;
+        if (null_empty_only) {
+            is_null = PyUnicode_Check(cell) && PyUnicode_GET_LENGTH(cell) == 0;
+        }
+        else {
+            int r = PySet_Contains(null_values, cell);
+            if (r < 0) goto error;
+            is_null = r;
+        }
         PathNode field_path = {NULL, j, (PyObject *)st};
         PyObject *val = validate_obj(
-            &state, is_null ? Py_None : cellv[j], info->types[j], &field_path
+            &state, is_null ? Py_None : cell, info->types[j], &field_path
         );
         if (val == NULL) goto error;
         Struct_set_index(inst, j, val);
     }
     Py_DECREF(seq);
     if (Struct_fill_in_defaults(st, inst, NULL) < 0) goto error_inst;
-    Py_DECREF(info_obj);
     return inst;
 
 error:
     Py_DECREF(seq);
 error_inst:
     Py_DECREF(inst);
-    Py_DECREF(info_obj);
     return NULL;
+}
+
+static PyObject *
+csv_decode(PyObject *cls, PyObject *cells, PyObject *null_values) {
+    StructspecState *mod = structtype_get_global_state();
+    if (mod == NULL) return NULL;
+    if (!ms_is_struct_cls(cls)) {
+        PyErr_SetString(PyExc_TypeError, "expected a Struct type");
+        return NULL;
+    }
+    PyObject *info_obj = StructInfo_Convert(cls);
+    if (info_obj == NULL) return NULL;
+    PyObject *out = csv_decode_info(
+        (StructInfo *)info_obj, mod, cells, null_values, false
+    );
+    Py_DECREF(info_obj);
+    return out;
 }
 
 static PyObject *
@@ -21079,15 +21144,17 @@ structtype_csv_decode(
 
 typedef struct {
     PyObject_HEAD
-    PyObject *cls;
-    PyObject *iterator;
-    PyObject *null_values;
+    StructInfo *info;       /* owned; keeps the class (and module) alive */
+    StructspecState *mod;   /* borrowed via info->class->struct_module */
+    PyObject *iterator;     /* owned */
+    PyObject *null_values;  /* owned, or NULL for the {""} default */
+    bool null_empty_only;
 } CSVIterator;
 
 static void
 CSVIterator_dealloc(CSVIterator *self) {
     PyObject_GC_UnTrack(self);
-    Py_CLEAR(self->cls);
+    Py_CLEAR(self->info);
     Py_CLEAR(self->iterator);
     Py_CLEAR(self->null_values);
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -21095,7 +21162,7 @@ CSVIterator_dealloc(CSVIterator *self) {
 
 static int
 CSVIterator_traverse(CSVIterator *self, visitproc visit, void *arg) {
-    Py_VISIT(self->cls);
+    Py_VISIT(self->info);
     Py_VISIT(self->iterator);
     Py_VISIT(self->null_values);
     return 0;
@@ -21103,7 +21170,7 @@ CSVIterator_traverse(CSVIterator *self, visitproc visit, void *arg) {
 
 static int
 CSVIterator_clear(CSVIterator *self) {
-    Py_CLEAR(self->cls);
+    Py_CLEAR(self->info);
     Py_CLEAR(self->iterator);
     Py_CLEAR(self->null_values);
     return 0;
@@ -21115,7 +21182,9 @@ CSVIterator_iternext(CSVIterator *self) {
     if (cells == NULL) {
         return NULL;
     }
-    PyObject *rec = csv_decode(self->cls, cells, self->null_values);
+    PyObject *rec = csv_decode_info(
+        self->info, self->mod, cells, self->null_values, self->null_empty_only
+    );
     Py_DECREF(cells);
     /* A StopIteration escaping user validation code (e.g. __post_init__) must
      * not masquerade as reader exhaustion, or the rest of the stream is
@@ -21170,17 +21239,10 @@ Struct_validate_csv(
         }
     }
 
-    PyObject *nv;
+    PyObject *nv = NULL;
+    bool null_empty_only = false;
     if (null_values == NULL) {
-        nv = PySet_New(NULL);
-        if (nv == NULL) return NULL;
-        PyObject *empty = PyUnicode_FromString("");
-        if (empty == NULL || PySet_Add(nv, empty) < 0) {
-            Py_XDECREF(empty);
-            Py_DECREF(nv);
-            return NULL;
-        }
-        Py_DECREF(empty);
+        null_empty_only = true;
     }
     else {
         if (PyUnicode_Check(null_values) || PyBytes_Check(null_values)) {
@@ -21193,46 +21255,32 @@ Struct_validate_csv(
         if (nv == NULL) return NULL;
     }
 
-    PyObject *it = PyObject_GetIter(reader);
-    if (it == NULL) { Py_DECREF(nv); return NULL; }
-    CSVIterator *iter = PyObject_GC_New(CSVIterator, &CSVIterator_Type);
-    if (iter == NULL) { Py_DECREF(it); Py_DECREF(nv); return NULL; }
-    Py_INCREF(cls);
-    iter->cls = cls;
-    iter->iterator = it;
-    iter->null_values = nv;
-    PyObject_GC_Track(iter);
-    return (PyObject *)iter;
-}
+    StructspecState *mod = structtype_get_global_state();
+    if (mod == NULL) { Py_XDECREF(nv); return NULL; }
 
-static PyObject *
-csv_render_cell(StructspecState *mod, PyObject *value) {
-    if (value == Py_None) {
-        return PyUnicode_FromString("");
-    }
-    if (value == Py_True) {
-        return PyUnicode_FromString("true");
-    }
-    if (value == Py_False) {
-        return PyUnicode_FromString("false");
-    }
-    int is_enum = PyObject_IsInstance(value, mod->EnumType);
-    if (is_enum < 0) return NULL;
-    if (is_enum) {
-        PyObject *inner = dump_enum_value(mod, value);
-        if (inner == NULL) return NULL;
-        PyObject *out = PyObject_Str(inner);
-        Py_DECREF(inner);
-        return out;
-    }
-    if (
-        PyList_Check(value) || PyTuple_Check(value) ||
-        PyDict_Check(value) || PyAnySet_Check(value)
-    ) {
-        PyErr_SetString(PyExc_TypeError, "CSV supports flat scalar fields only");
+    PyObject *info_obj = StructInfo_Convert(cls);
+    if (info_obj == NULL) { Py_XDECREF(nv); return NULL; }
+
+    PyObject *it = PyObject_GetIter(reader);
+    if (it == NULL) {
+        Py_DECREF(info_obj);
+        Py_XDECREF(nv);
         return NULL;
     }
-    return PyObject_Str(value);
+    CSVIterator *iter = PyObject_GC_New(CSVIterator, &CSVIterator_Type);
+    if (iter == NULL) {
+        Py_DECREF(it);
+        Py_DECREF(info_obj);
+        Py_XDECREF(nv);
+        return NULL;
+    }
+    iter->info = (StructInfo *)info_obj;
+    iter->mod = mod;
+    iter->iterator = it;
+    iter->null_values = nv;
+    iter->null_empty_only = null_empty_only;
+    PyObject_GC_Track(iter);
+    return (PyObject *)iter;
 }
 
 static PyObject *
@@ -21247,19 +21295,8 @@ Struct_dump_csv(
         );
     }
     PyObject *writer = args[0];
-    StructspecState *mod = structtype_get_global_state();
-    if (mod == NULL) return NULL;
-    PyObject *values = csv_fields(self);
-    if (values == NULL) return NULL;
-    Py_ssize_t n = PyList_GET_SIZE(values);
-    PyObject *row = PyList_New(n);
-    if (row == NULL) { Py_DECREF(values); return NULL; }
-    for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *cell = csv_render_cell(mod, PyList_GET_ITEM(values, i));
-        if (cell == NULL) { Py_DECREF(values); Py_DECREF(row); return NULL; }
-        PyList_SET_ITEM(row, i, cell);
-    }
-    Py_DECREF(values);
+    PyObject *row = csv_fields_inner(self, true);
+    if (row == NULL) return NULL;
     PyObject *res = PyObject_CallMethod(writer, "writerow", "O", row);
     Py_DECREF(row);
     if (res == NULL) return NULL;
