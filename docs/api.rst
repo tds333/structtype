@@ -8,7 +8,7 @@ Structs
 
 .. autoclass:: Struct
     :members: struct_dump_json, struct_validate_json, struct_dump, struct_validate,
-              struct_check_types
+              struct_validate_csv, struct_dump_csv, struct_check_types
 
     .. attribute:: __struct_fields__
 

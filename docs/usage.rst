@@ -1197,22 +1197,25 @@ apply.
         name: str
         active: bool | None = None
 
-    reader = csv.reader(io.StringIO("1,alice,true\n", newline=""))
-    for user in User.struct_validate_csv(reader):
+    text = "1,alice,true\n2,bob,\n"
+
+    # Decode: one validated Struct per reader row.
+    for user in User.struct_validate_csv(csv.reader(io.StringIO(text, newline=""))):
         print(user)
 
-    records = list(User.struct_validate_csv(csv.reader(io.StringIO(text))))
+    records = list(User.struct_validate_csv(csv.reader(io.StringIO(text, newline=""))))
 
+    # Encode: one row per Struct (returns None).
     out = io.StringIO(newline="")
     writer = csv.writer(out, lineterminator="\n")
-    user.struct_dump_csv(writer)
+    records[0].struct_dump_csv(writer)
     assert out.getvalue() == "1,alice,true\n"
 
 ``struct_validate_csv()`` returns an iterator yielding one validated ``Struct``
 per row. An exhausted (or empty) reader simply ends iteration, so ``list(...)``
 of an empty reader is ``[]``; errors raised by the reader (including
 ``csv.Error``) propagate unchanged. ``struct_dump_csv()`` writes exactly one
-``\n``-terminated row that round-trips through ``struct_validate_csv()``.
+``\n``-terminated row.
 
 CSV cells are always strings, so decoding is always **lax** (equivalent to
 ``strict=False``): ``"1"`` coerces to ``1``, ``"true"`` to ``True``, and so on.
@@ -1230,6 +1233,10 @@ becomes an empty cell, ``True`` / ``False`` become ``true`` / ``false``,
 ``datetime`` family, ``uuid.UUID``, and ``decimal.Decimal`` use their standard
 string forms.
 
+``struct_dump_csv()`` always writes every field, in declaration order, as one
+positional column — ``omit_defaults``, ``array_like``, and ``tag`` do not apply
+to CSV.
+
 ``Serializer`` codecs and ``Constraint`` validators attached to flat scalar
 fields are honored. Decoding runs ``Serializer.load`` and enforces
 constraints; dumping runs ``Serializer.dump``. As with the JSON codecs,
@@ -1242,12 +1249,13 @@ caller's reader/writer. Change the delimiter or quoting by configuring the
 
 .. code-block:: python
 
+    text = "1;alice;true\n2;bob;\n"
     reader = csv.reader(io.StringIO(text, newline=""), delimiter=";")
     users = list(User.struct_validate_csv(reader, null_values=("", "NA")))
 
     out = io.StringIO(newline="")
     writer = csv.writer(out, lineterminator="\n")
-    user.struct_dump_csv(writer)  # returns None
+    users[0].struct_dump_csv(writer)  # returns None
 
 .. _to-builtins-vs-asdict:
 

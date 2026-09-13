@@ -9,17 +9,19 @@
   collects all records), and `struct_dump_csv()` writes one row through a
   `csv.writer` (returning `None`). The caller owns the delimiter, quoting,
   dialect, encoding, and stream; structtype does no buffer/bytes/encoding
-  handling. CSV is positional
-  — each cell is matched to a field by its position in `__struct_fields__`
-  declaration order, with no header row and no `alias` / `rename` support.
-  Decoding is always lax, and only flat scalar fields are supported (nested
-  `Struct` values and `list` / `tuple` / `dict` / `set` cells raise
-  `ValidationError` on decode and `TypeError` on dump). ``null_values`` is the
-  only structtype option; `bytes` are dumped as base64 and the `datetime`
-  family, `uuid.UUID`, `decimal.Decimal`, enums, `bool`, and `None` use their
-  standard string forms. An exhausted/empty reader ends iteration (`list(...)`
-  is `[]`) and reader errors (including `csv.Error`) propagate unchanged; the
-  written row round-trips through `struct_validate_csv()`.
+  handling. CSV is positional — each cell is matched to a field by its position
+  in `__struct_fields__` declaration order, with no header row and no `alias` /
+  `rename` support. Decoding is always lax, and only flat scalar fields are
+  supported (nested `Struct` values and `list` / `tuple` / `dict` / `set` cells
+  raise `ValidationError` on decode and `TypeError` on dump). Encoding always
+  writes every field positionally, so `omit_defaults`, `array_like`, and `tag`
+  do not apply. `null_values` is the only structtype option; `bytes` are dumped
+  as base64, `None` as an empty cell, `bool` as `true`/`false`, enum members as
+  their value, and the `datetime` family, `uuid.UUID`, and `decimal.Decimal` as
+  their standard string forms. `Serializer` codecs and `Constraint` validators
+  on flat scalar fields are honored (load and constraints on decode, dump on
+  encode). An exhausted/empty reader ends iteration (`list(...)` is `[]`) and
+  reader errors (including `csv.Error`) propagate unchanged.
 
 ## 0.12.0 (2026-09-11)
 
