@@ -3,27 +3,25 @@
 ## 0.13.0 (unreleased)
 
 - Add `Struct.struct_validate_csv()` and `Struct.struct_dump_csv()` for
-  CSV encoding/decoding. These operate on the standard library's
-  `csv` module: `struct_validate_csv()` returns an iterator that pulls one row
-  at a time from a `csv.reader` (so it can drive a `for` loop and `list(...)`
-  collects all records), and `struct_dump_csv()` returns one row as a
-  `list[str]` for the caller to pass to `csv.writer.writerow()`. The caller
-  owns the delimiter, quoting,
-  dialect, encoding, and stream; structtype does no buffer/bytes/encoding
-  handling. CSV is positional — each cell is matched to a field by its position
-  in `__struct_fields__` declaration order, with no header row and no `alias` /
-  `rename` support. Decoding is always lax, and only flat scalar fields are
-  supported (nested `Struct` values and `list` / `tuple` / `dict` / `set` cells
-  raise `ValidationError` on decode and `TypeError` on dump). Encoding always
-  returns every field positionally, so `omit_defaults` does not apply. For
-  `array_like=True`, a configured `tag` is written as the first cell and
-  validated on decode, matching the JSON codec; other structs ignore `tag`. `null_values` is the only structtype option; `bytes` are dumped
-  as base64, `None` as an empty cell, `bool` as `true`/`false`, enum members as
-  their value, and the `datetime` family, `uuid.UUID`, and `decimal.Decimal` as
-  their standard string forms. `Serializer` codecs and `Constraint` validators
-  on flat scalar fields are honored (load and constraints on decode, dump on
-  encode). An exhausted/empty reader ends iteration (`list(...)` is `[]`) and
-  reader errors (including `csv.Error`) propagate unchanged.
+  CSV encoding/decoding. These operate on the standard library's `csv` module:
+  `struct_validate_csv(row)` decodes one row (a sequence of cell strings) into
+  a Struct, and `struct_dump_csv()` returns one row as a `list[str]` for the
+  caller to pass to `csv.writer.writerow()`. The caller owns the delimiter,
+  quoting, dialect, encoding, and stream; structtype does no buffer/bytes/
+  encoding handling. CSV is positional — each cell is matched to a field by its
+  position in `__struct_fields__` declaration order, with no header row and no
+  `alias` / `rename` support. Decoding is always lax, and only flat scalar
+  fields are supported (nested `Struct` values and `list` / `tuple` / `dict` /
+  `set` cells raise `ValidationError` on decode and `TypeError` on dump).
+  Encoding always returns every field positionally, so `omit_defaults` does not
+  apply. For `array_like=True`, a configured `tag` is written as the first cell
+  and validated on decode, matching the JSON codec; other structs ignore `tag`.
+  `null_values` is the only structtype option; `bytes` are dumped as base64,
+  `None` as an empty cell, `bool` as `true`/`false`, enum members as their
+  value, and the `datetime` family, `uuid.UUID`, and `decimal.Decimal` as their
+  standard string forms. `Serializer` codecs and `Constraint` validators on
+  flat scalar fields are honored (load and constraints on decode, dump on
+  encode).
 
 ## 0.12.0 (2026-09-11)
 

@@ -5,7 +5,6 @@ from typing import Annotated
 from uuid import UUID
 
 import pytest
-from structtype._core import _csv_decode, _csv_fields
 
 import structtype as st
 
@@ -16,25 +15,21 @@ class Row(st.Struct):
     score: float | None = None
 
 
-def test_c_primitive_decodes_and_fills_defaults():
-    assert _csv_decode(Row, ["1", "alice", "1.5"], frozenset({""})) == Row(
+def test_validate_csv_fills_defaults():
+    assert Row.struct_validate_csv(["1", "alice", "1.5"], null_values=("",)) == Row(
         1, "alice", 1.5
     )
-    assert _csv_decode(Row, ["2", "bob", ""], frozenset({""})) == Row(2, "bob", None)
-
-
-def test_c_primitive_ignores_extra_cells():
-    assert _csv_decode(Row, ["1", "alice", "2.0", "junk"], frozenset()) == Row(
-        1, "alice", 2.0
+    assert Row.struct_validate_csv(["2", "bob", ""], null_values=("",)) == Row(
+        2, "bob", None
     )
 
 
-def test_c_primitive_missing_required_errors():
+def test_validate_csv_missing_required_errors():
     with pytest.raises(st.ValidationError):
-        _csv_decode(Row, ["1"], frozenset())
+        Row.struct_validate_csv(["1"], null_values=())
 
 
-def test_c_primitive_fields_normalized_in_declaration_order():
+def test_dump_csv_cells_in_declaration_order():
     from enum import Enum
 
     class Level(Enum):
@@ -45,10 +40,13 @@ def test_c_primitive_fields_normalized_in_declaration_order():
         lvl: Level
         b: bytes
         s: str | None
-        items: list[int]
 
-    fields = _csv_fields(T(1, Level.HIGH, b"\x00\x01", None, [1, 2]))
-    assert list(fields) == [1, "high", "AAE=", None, [1, 2]]
+    assert T(1, Level.HIGH, b"\x00\x01", None).struct_dump_csv() == [
+        "1",
+        "high",
+        "AAE=",
+        "",
+    ]
 
 
 def _reader(text, **fmt):
@@ -64,7 +62,7 @@ def _writer(stream):
 
 
 def _one(cls, buf, **fmt):
-    return next(cls.struct_validate_csv(_reader(buf, **fmt)))
+    return cls.struct_validate_csv(next(_reader(buf, **fmt)))
 
 
 class User(st.Struct):
@@ -82,8 +80,8 @@ def test_validate_csv_empty_cell_null():
 
 
 def test_validate_csv_null_values_option():
-    assert next(
-        User.struct_validate_csv(_reader("3,carol,NA\n"), null_values=("NA",))
+    assert User.struct_validate_csv(
+        next(_reader("3,carol,NA\n")), null_values=("NA",)
     ) == User(3, "carol", None)
 
 
@@ -91,31 +89,29 @@ def test_validate_csv_null_values_empty_disables_mapping():
     class T(st.Struct):
         name: str
 
-    assert next(T.struct_validate_csv(_reader('""\n'), null_values=())) == T("")
+    assert T.struct_validate_csv(next(_reader('""\n')), null_values=()) == T("")
     with pytest.raises(st.ValidationError):
-        next(T.struct_validate_csv(_reader('""\n')))
+        T.struct_validate_csv(next(_reader('""\n')))
 
 
 def test_validate_csv_rejects_bare_string_null_values():
     with pytest.raises(TypeError, match="sequence of strings"):
-        User.struct_validate_csv(_reader("3,carol,NA\n"), null_values="NA")
+        User.struct_validate_csv(next(_reader("3,carol,NA\n")), null_values="NA")
 
 
 def test_validate_csv_explicit_empty_null_values_matches_default():
-    assert next(
-        User.struct_validate_csv(_reader("2,bob,\n"), null_values=("",))
+    assert User.struct_validate_csv(
+        next(_reader("2,bob,\n")), null_values=("",)
     ) == User(2, "bob", None)
 
 
 def test_validate_csv_iterates_rows():
-    assert list(User.struct_validate_csv(_reader("1,alice,\n2,bob,\n"))) == [
-        User(1, "alice"),
-        User(2, "bob"),
-    ]
+    records = [User.struct_validate_csv(row) for row in _reader("1,alice,\n2,bob,\n")]
+    assert records == [User(1, "alice"), User(2, "bob")]
 
 
 def test_validate_csv_empty_reader_is_empty():
-    assert list(User.struct_validate_csv(_reader(""))) == []
+    assert [User.struct_validate_csv(row) for row in _reader("")] == []
 
 
 def test_validate_csv_propagates_reader_error():
@@ -129,18 +125,18 @@ def test_validate_csv_propagates_reader_error():
             raise csv.Error("boom")
 
     with pytest.raises(csv.Error, match="boom"):
-        list(User.struct_validate_csv(Boom()))
+        [User.struct_validate_csv(row) for row in Boom()]
 
 
-def test_validate_csv_decode_stopiteration_is_not_exhaustion():
+def test_validate_csv_propagates_decode_stopiteration():
     class Boom(st.Struct):
         x: int
 
         def __post_init__(self):
             raise StopIteration
 
-    with pytest.raises(RuntimeError, match="StopIteration"):
-        list(Boom.struct_validate_csv(_reader("1\n")))
+    with pytest.raises(StopIteration):
+        Boom.struct_validate_csv(["1"])
 
 
 def test_validate_csv_custom_delimiter():
@@ -166,7 +162,7 @@ def test_validate_csv_rejects_nested_field():
         items: list[int]
 
     with pytest.raises(st.ValidationError):
-        list(W.struct_validate_csv(_reader("1\n")))
+        W.struct_validate_csv(next(_reader("1\n")))
 
 
 class Rec(st.Struct):
@@ -270,12 +266,12 @@ def test_validate_csv_ignores_extra_cells():
 
 def test_validate_csv_required_empty_cell_errors():
     with pytest.raises(st.ValidationError):
-        next(Row.struct_validate_csv(_reader("1,,\n")))
+        Row.struct_validate_csv(next(_reader("1,,\n")))
 
 
 def test_validate_csv_error_path_includes_field_name():
     with pytest.raises(st.ValidationError, match=r"\$\.name"):
-        next(Row.struct_validate_csv(_reader("1,,\n")))
+        Row.struct_validate_csv(next(_reader("1,,\n")))
 
 
 def test_validate_csv_uuid_decimal_datetime_timedelta_roundtrip():
@@ -305,7 +301,7 @@ def test_validate_csv_rejects_struct_typed_field():
         y: int
 
     with pytest.raises(st.ValidationError):
-        list(Outer.struct_validate_csv(_reader("1,2\n")))
+        Outer.struct_validate_csv(next(_reader("1,2\n")))
     with pytest.raises(TypeError):
         Outer(Inner(1), 2).struct_dump_csv()
 
@@ -383,7 +379,7 @@ def test_csv_array_like_missing_tag():
         key: str
 
     with pytest.raises(st.ValidationError):
-        next(Get.struct_validate_csv(_reader("\n")))
+        Get.struct_validate_csv(next(_reader("\n")))
 
 
 def test_csv_object_form_tag_ignored():

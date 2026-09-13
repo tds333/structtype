@@ -1176,12 +1176,11 @@ CSV
 
 ``Struct`` can also encode and decode CSV with ``struct_validate_csv()`` and
 ``struct_dump_csv()``. These methods work with the standard library's
-:mod:`csv` module: ``struct_validate_csv()`` returns an iterator that pulls one
-row at a time from a ``csv.reader``, and ``struct_dump_csv()`` returns one row
-as a list of cell strings to pass to ``csv.writer.writerow()``. structtype does
-no buffer, bytes, or encoding
-handling — the caller owns the delimiter, quoting, dialect, encoding, and
-stream.
+:mod:`csv` module: ``struct_validate_csv(row)`` decodes one row (a sequence of
+cell strings) into a ``Struct``, and ``struct_dump_csv()`` returns one row as a
+list of cell strings to pass to ``csv.writer.writerow()``. structtype does no
+buffer, bytes, or encoding handling — the caller owns the delimiter, quoting,
+dialect, encoding, and stream.
 
 CSV is positional: cell ``j`` is matched to field ``j`` in ``__struct_fields__``
 declaration order. There is no header row, and ``alias`` / ``rename`` do not
@@ -1201,10 +1200,13 @@ apply.
     text = "1,alice,true\n2,bob,\n"
 
     # Decode: one validated Struct per reader row.
-    for user in User.struct_validate_csv(csv.reader(io.StringIO(text, newline=""))):
-        print(user)
+    for row in csv.reader(io.StringIO(text, newline="")):
+        print(User.struct_validate_csv(row))
 
-    records = list(User.struct_validate_csv(csv.reader(io.StringIO(text, newline=""))))
+    records = [
+        User.struct_validate_csv(row)
+        for row in csv.reader(io.StringIO(text, newline=""))
+    ]
 
     # Encode: one row per Struct.
     out = io.StringIO(newline="")
@@ -1212,11 +1214,8 @@ apply.
     writer.writerow(records[0].struct_dump_csv())
     assert out.getvalue() == "1,alice,true\n"
 
-``struct_validate_csv()`` returns an iterator yielding one validated ``Struct``
-per row. An exhausted (or empty) reader simply ends iteration, so ``list(...)``
-of an empty reader is ``[]``; errors raised by the reader (including
-``csv.Error``) propagate unchanged. ``struct_dump_csv()`` returns exactly one
-row as a list of cell strings.
+``struct_validate_csv()`` decodes one row and returns a ``Struct``;
+``struct_dump_csv()`` returns one row as a list of cell strings.
 
 CSV cells are always strings, so decoding is always **lax** (equivalent to
 ``strict=False``): ``"1"`` coerces to ``1``, ``"true"`` to ``True``, and so on.
@@ -1254,7 +1253,9 @@ caller's reader/writer. Change the delimiter or quoting by configuring the
 
     text = "1;alice;true\n2;bob;\n"
     reader = csv.reader(io.StringIO(text, newline=""), delimiter=";")
-    users = list(User.struct_validate_csv(reader, null_values=("", "NA")))
+    users = [
+        User.struct_validate_csv(row, null_values=("", "NA")) for row in reader
+    ]
 
     out = io.StringIO(newline="")
     writer = csv.writer(out, lineterminator="\n")

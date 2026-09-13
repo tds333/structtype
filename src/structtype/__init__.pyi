@@ -104,10 +104,10 @@ class Struct(metaclass=StructMeta):
     @classmethod
     def struct_validate_csv(
         cls,
-        reader: Iterable[Sequence[str]],
+        row: Sequence[str],
         *,
         null_values: Sequence[str] = ("",),
-    ) -> Iterator[Self]: ...
+    ) -> Self: ...
     @classmethod
     def struct_validate(
         cls,

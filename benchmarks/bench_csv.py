@@ -123,8 +123,10 @@ wide_body = _wide_layout.getvalue()
 
 
 def decode_structs():
-    reader = csv.reader(io.StringIO(body, newline=""))
-    return list(Record.struct_validate_csv(reader))
+    return [
+        Record.struct_validate_csv(row)
+        for row in csv.reader(io.StringIO(body, newline=""))
+    ]
 
 
 def decode_rows():
@@ -159,8 +161,10 @@ def decode_str_manual():
 
 
 def decode_str_structs():
-    reader = csv.reader(io.StringIO(str_body, newline=""))
-    return list(StrRecord.struct_validate_csv(reader))
+    return [
+        StrRecord.struct_validate_csv(row)
+        for row in csv.reader(io.StringIO(str_body, newline=""))
+    ]
 
 
 def _coerce_wide(cell, t):
@@ -183,8 +187,10 @@ def decode_wide_manual():
 
 
 def decode_wide_structs():
-    reader = csv.reader(io.StringIO(wide_body, newline=""))
-    return list(WideRecord.struct_validate_csv(reader))
+    return [
+        WideRecord.struct_validate_csv(row)
+        for row in csv.reader(io.StringIO(wide_body, newline=""))
+    ]
 
 
 def dump_structs():
