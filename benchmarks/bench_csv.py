@@ -85,7 +85,7 @@ aliases = Record.__struct_alias_fields__
 _layout = io.StringIO(newline="")
 _layout_writer = csv.writer(_layout, lineterminator="\n")
 for _rec in records:
-    _rec.struct_dump_csv(_layout_writer)
+    _layout_writer.writerow(_rec.struct_dump_csv())
 body = _layout.getvalue()
 header = ",".join(aliases) + "\n"
 
@@ -99,7 +99,7 @@ str_records = [StrRecord(f"a{i}", f"b{i}", f"c{i}", f"d{i}", f"e{i}") for i in r
 _str_layout = io.StringIO(newline="")
 _str_writer = csv.writer(_str_layout, lineterminator="\n")
 for _rec in str_records:
-    _rec.struct_dump_csv(_str_writer)
+    _str_writer.writerow(_rec.struct_dump_csv())
 str_body = _str_layout.getvalue()
 
 
@@ -118,7 +118,7 @@ wide_records = [WideRecord(*[_wide_value(i) for i in range(50)]) for _ in range(
 _wide_layout = io.StringIO(newline="")
 _wide_writer = csv.writer(_wide_layout, lineterminator="\n")
 for _rec in wide_records:
-    _rec.struct_dump_csv(_wide_writer)
+    _wide_writer.writerow(_rec.struct_dump_csv())
 wide_body = _wide_layout.getvalue()
 
 
@@ -191,7 +191,7 @@ def dump_structs():
     stream = io.StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
     for rec in records:
-        rec.struct_dump_csv(writer)
+        writer.writerow(rec.struct_dump_csv())
     return stream.getvalue()
 
 
@@ -233,7 +233,7 @@ def dump_wide_structs():
     stream = io.StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
     for rec in wide_records:
-        rec.struct_dump_csv(writer)
+        writer.writerow(rec.struct_dump_csv())
     return stream.getvalue()
 
 

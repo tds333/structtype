@@ -179,14 +179,14 @@ class Rec(st.Struct):
 def test_dump_csv_one_row_and_roundtrip():
     rec = Rec(1, "alice", True, date(2020, 1, 2))
     stream = io.StringIO(newline="")
-    rec.struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(rec.struct_dump_csv())
     assert stream.getvalue() == "1,alice,true,2020-01-02\n"
     assert _one(Rec, stream.getvalue()) == rec
 
 
 def test_dump_csv_quoting_and_none():
     stream = io.StringIO(newline="")
-    Rec(2, 'x,y"z', False, None).struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(Rec(2, 'x,y"z', False, None).struct_dump_csv())
     assert stream.getvalue() == '2,"x,y""z",false,\n'
 
 
@@ -202,7 +202,7 @@ def test_dump_csv_enum_and_bytes_roundtrip():
 
     t = T(Color.RED, b"\x00\x01")
     stream = io.StringIO(newline="")
-    t.struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(t.struct_dump_csv())
     assert stream.getvalue() == "red,AAE=\n"
     assert _one(T, stream.getvalue()) == t
 
@@ -223,7 +223,7 @@ def test_dump_csv_int_and_plain_enum_roundtrip():
 
     e = E(Level.HIGH, Flavor.SWEET)
     stream = io.StringIO(newline="")
-    e.struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(e.struct_dump_csv())
     assert stream.getvalue() == "2,sweet\n"
     assert _one(E, stream.getvalue()) == e
 
@@ -233,7 +233,7 @@ def test_dump_csv_rejects_nested():
         items: list[int]
 
     with pytest.raises(TypeError):
-        W([1, 2]).struct_dump_csv(_writer(io.StringIO(newline="")))
+        W([1, 2]).struct_dump_csv()
 
 
 def test_dump_csv_omit_defaults_emits_all_columns():
@@ -245,7 +245,7 @@ def test_dump_csv_omit_defaults_emits_all_columns():
 
     d = D(1)
     stream = io.StringIO(newline="")
-    d.struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(d.struct_dump_csv())
     assert stream.getvalue() == "1,7\n"
     assert _one(D, stream.getvalue()) == d
 
@@ -259,7 +259,7 @@ def test_dump_csv_array_like_emits_single_row():
 
     x = A(1, "x")
     stream = io.StringIO(newline="")
-    x.struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(x.struct_dump_csv())
     assert stream.getvalue() == "1,x\n"
     assert _one(A, stream.getvalue()) == x
 
@@ -292,7 +292,7 @@ def test_validate_csv_uuid_decimal_datetime_timedelta_roundtrip():
         timedelta(seconds=90),
     )
     stream = io.StringIO(newline="")
-    t.struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(t.struct_dump_csv())
     assert _one(T, stream.getvalue()) == t
 
 
@@ -307,7 +307,7 @@ def test_validate_csv_rejects_struct_typed_field():
     with pytest.raises(st.ValidationError):
         list(Outer.struct_validate_csv(_reader("1,2\n")))
     with pytest.raises(TypeError):
-        Outer(Inner(1), 2).struct_dump_csv(_writer(io.StringIO(newline="")))
+        Outer(Inner(1), 2).struct_dump_csv()
 
 
 def test_csv_ignores_aliases_uses_declaration_order():
@@ -317,7 +317,7 @@ def test_csv_ignores_aliases_uses_declaration_order():
 
     assert _one(Aliased, "1,x\n") == Aliased(1, "x")
     stream = io.StringIO(newline="")
-    Aliased(1, "x").struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(Aliased(1, "x").struct_dump_csv())
     assert stream.getvalue() == "1,x\n"
     assert _one(Aliased, stream.getvalue()) == Aliased(1, "x")
 
@@ -337,7 +337,7 @@ def test_csv_honors_serializer_load_and_dump():
     assert s == S(date(2020, 1, 2), 7)
 
     stream = io.StringIO(newline="")
-    s.struct_dump_csv(_writer(stream))
+    _writer(stream).writerow(s.struct_dump_csv())
     assert stream.getvalue() == "2020/01/02,7\n"
     assert _one(S, stream.getvalue()) == s
 

@@ -10490,12 +10490,12 @@ PyDoc_STRVAR(Struct_validate_csv__doc__,
 );
 
 PyDoc_STRVAR(Struct_dump_csv__doc__,
-"struct_dump_csv(writer)\n"
+"struct_dump_csv()\n"
 "\n"
-"Write this Struct as a single CSV row through a stdlib csv.writer, one cell\n"
-"per field in declaration order. None -> empty, bools -> true/false, bytes ->\n"
-"base64. The caller owns the delimiter, quoting, dialect, encoding, and\n"
-"stream.\n"
+"Return this Struct as a single CSV row: a list of cell strings in field\n"
+"declaration order, ready to pass to csv.writer.writerow(). None -> empty,\n"
+"bools -> true/false, bytes -> base64. The caller owns the delimiter, quoting,\n"
+"dialect, encoding, and stream.\n"
 );
 
 static PyMethodDef Struct_methods[] = {
@@ -21299,21 +21299,14 @@ static PyObject *
 Struct_dump_csv(
     PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames
 ) {
-    if (nargs != 1 || kwnames != NULL) {
+    if (nargs != 0 || kwnames != NULL) {
         return PyErr_Format(
             PyExc_TypeError,
-            "struct_dump_csv() takes exactly 1 positional argument (%zd given)",
+            "struct_dump_csv() takes no arguments (%zd given)",
             nargs
         );
     }
-    PyObject *writer = args[0];
-    PyObject *row = csv_fields_inner(self, true);
-    if (row == NULL) return NULL;
-    PyObject *res = PyObject_CallMethod(writer, "writerow", "O", row);
-    Py_DECREF(row);
-    if (res == NULL) return NULL;
-    Py_DECREF(res);
-    Py_RETURN_NONE;
+    return csv_fields_inner(self, true);
 }
 
 /* If `val` is a struct instance matching `field_type` (a direct struct or a

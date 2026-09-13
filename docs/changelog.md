@@ -6,15 +6,16 @@
   CSV encoding/decoding. These operate on the standard library's
   `csv` module: `struct_validate_csv()` returns an iterator that pulls one row
   at a time from a `csv.reader` (so it can drive a `for` loop and `list(...)`
-  collects all records), and `struct_dump_csv()` writes one row through a
-  `csv.writer` (returning `None`). The caller owns the delimiter, quoting,
+  collects all records), and `struct_dump_csv()` returns one row as a
+  `list[str]` for the caller to pass to `csv.writer.writerow()`. The caller
+  owns the delimiter, quoting,
   dialect, encoding, and stream; structtype does no buffer/bytes/encoding
   handling. CSV is positional — each cell is matched to a field by its position
   in `__struct_fields__` declaration order, with no header row and no `alias` /
   `rename` support. Decoding is always lax, and only flat scalar fields are
   supported (nested `Struct` values and `list` / `tuple` / `dict` / `set` cells
   raise `ValidationError` on decode and `TypeError` on dump). Encoding always
-  writes every field positionally, so `omit_defaults`, `array_like`, and `tag`
+  returns every field positionally, so `omit_defaults`, `array_like`, and `tag`
   do not apply. `null_values` is the only structtype option; `bytes` are dumped
   as base64, `None` as an empty cell, `bool` as `true`/`false`, enum members as
   their value, and the `datetime` family, `uuid.UUID`, and `decimal.Decimal` as

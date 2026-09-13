@@ -1177,8 +1177,9 @@ CSV
 ``Struct`` can also encode and decode CSV with ``struct_validate_csv()`` and
 ``struct_dump_csv()``. These methods work with the standard library's
 :mod:`csv` module: ``struct_validate_csv()`` returns an iterator that pulls one
-row at a time from a ``csv.reader``, and ``struct_dump_csv()`` writes one row
-through a ``csv.writer``. structtype does no buffer, bytes, or encoding
+row at a time from a ``csv.reader``, and ``struct_dump_csv()`` returns one row
+as a list of cell strings to pass to ``csv.writer.writerow()``. structtype does
+no buffer, bytes, or encoding
 handling — the caller owns the delimiter, quoting, dialect, encoding, and
 stream.
 
@@ -1205,17 +1206,17 @@ apply.
 
     records = list(User.struct_validate_csv(csv.reader(io.StringIO(text, newline=""))))
 
-    # Encode: one row per Struct (returns None).
+    # Encode: one row per Struct.
     out = io.StringIO(newline="")
     writer = csv.writer(out, lineterminator="\n")
-    records[0].struct_dump_csv(writer)
+    writer.writerow(records[0].struct_dump_csv())
     assert out.getvalue() == "1,alice,true\n"
 
 ``struct_validate_csv()`` returns an iterator yielding one validated ``Struct``
 per row. An exhausted (or empty) reader simply ends iteration, so ``list(...)``
 of an empty reader is ``[]``; errors raised by the reader (including
-``csv.Error``) propagate unchanged. ``struct_dump_csv()`` writes exactly one
-``\n``-terminated row.
+``csv.Error``) propagate unchanged. ``struct_dump_csv()`` returns exactly one
+row as a list of cell strings.
 
 CSV cells are always strings, so decoding is always **lax** (equivalent to
 ``strict=False``): ``"1"`` coerces to ``1``, ``"true"`` to ``True``, and so on.
@@ -1233,7 +1234,7 @@ becomes an empty cell, ``True`` / ``False`` become ``true`` / ``false``,
 ``datetime`` family, ``uuid.UUID``, and ``decimal.Decimal`` use their standard
 string forms.
 
-``struct_dump_csv()`` always writes every field, in declaration order, as one
+``struct_dump_csv()`` always returns every field, in declaration order, as one
 positional column — ``omit_defaults``, ``array_like``, and ``tag`` do not apply
 to CSV.
 
@@ -1255,7 +1256,7 @@ caller's reader/writer. Change the delimiter or quoting by configuring the
 
     out = io.StringIO(newline="")
     writer = csv.writer(out, lineterminator="\n")
-    users[0].struct_dump_csv(writer)  # returns None
+    writer.writerow(users[0].struct_dump_csv())
 
 .. _to-builtins-vs-asdict:
 
