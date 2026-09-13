@@ -21085,6 +21085,18 @@ csv_decode_info(
 
     Py_ssize_t n = ncells < nfields ? ncells : nfields;
     for (Py_ssize_t j = 0; j < n; j++) {
+        /* A `StructInfo` obtained via `StructInfo_Convert` during same-thread
+         * recursion can still be mid-build, with not-yet-processed type slots
+         * set to NULL. Fail cleanly rather than dereferencing NULL. */
+        TypeNode *field_type = info->types[j];
+        if (MS_UNLIKELY(field_type == NULL)) {
+            PyErr_Format(
+                PyExc_RuntimeError,
+                "Type information for %R isn't fully initialized",
+                (PyObject *)st
+            );
+            goto error;
+        }
         PyObject *cell = cellv[j];
         bool is_null;
         if (null_empty_only) {
@@ -21097,7 +21109,7 @@ csv_decode_info(
         }
         PathNode field_path = {NULL, j, (PyObject *)st};
         PyObject *val = validate_obj(
-            &state, is_null ? Py_None : cell, info->types[j], &field_path
+            &state, is_null ? Py_None : cell, field_type, &field_path
         );
         if (val == NULL) goto error;
         Struct_set_index(inst, j, val);
