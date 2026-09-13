@@ -15,8 +15,9 @@
   `rename` support. Decoding is always lax, and only flat scalar fields are
   supported (nested `Struct` values and `list` / `tuple` / `dict` / `set` cells
   raise `ValidationError` on decode and `TypeError` on dump). Encoding always
-  returns every field positionally, so `omit_defaults`, `array_like`, and `tag`
-  do not apply. `null_values` is the only structtype option; `bytes` are dumped
+  returns every field positionally, so `omit_defaults` does not apply. For
+  `array_like=True`, a configured `tag` is written as the first cell and
+  validated on decode, matching the JSON codec; other structs ignore `tag`. `null_values` is the only structtype option; `bytes` are dumped
   as base64, `None` as an empty cell, `bool` as `true`/`false`, enum members as
   their value, and the `datetime` family, `uuid.UUID`, and `decimal.Decimal` as
   their standard string forms. `Serializer` codecs and `Constraint` validators

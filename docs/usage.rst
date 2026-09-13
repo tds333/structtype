@@ -1235,8 +1235,10 @@ becomes an empty cell, ``True`` / ``False`` become ``true`` / ``false``,
 string forms.
 
 ``struct_dump_csv()`` always returns every field, in declaration order, as one
-positional column — ``omit_defaults``, ``array_like``, and ``tag`` do not apply
-to CSV.
+positional column, so ``omit_defaults`` does not apply to CSV. For
+``array_like=True`` structs a configured ``tag`` is written as the first cell
+and validated on decode, matching the JSON codec; other structs ignore
+``tag``.
 
 ``Serializer`` codecs and ``Constraint`` validators attached to flat scalar
 fields are honored. Decoding runs ``Serializer.load`` and enforces

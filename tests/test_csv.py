@@ -353,3 +353,43 @@ def test_validate_csv_enforces_constraints():
         _one(C, "-1,abc\n")
     with pytest.raises(st.ValidationError, match=r"\$\.code"):
         _one(C, "5,ab\n")
+
+
+def test_csv_array_like_tag_first_cell_and_roundtrip():
+    class Get(st.Struct):
+        struct_config = st.StructConfig(tag=True, array_like=True)
+        key: str
+
+    g = Get("my key")
+    assert g.struct_dump_csv() == ["Get", "my key"]
+    stream = io.StringIO(newline="")
+    _writer(stream).writerow(g.struct_dump_csv())
+    assert stream.getvalue() == "Get,my key\n"
+    assert _one(Get, stream.getvalue()) == g
+
+
+def test_csv_array_like_tag_mismatch():
+    class Get(st.Struct):
+        struct_config = st.StructConfig(tag=True, array_like=True)
+        key: str
+
+    with pytest.raises(st.ValidationError, match=r"\$\[0\]"):
+        _one(Get, "Put,my key\n")
+
+
+def test_csv_array_like_missing_tag():
+    class Get(st.Struct):
+        struct_config = st.StructConfig(tag=True, array_like=True)
+        key: str
+
+    with pytest.raises(st.ValidationError):
+        next(Get.struct_validate_csv(_reader("\n")))
+
+
+def test_csv_object_form_tag_ignored():
+    class Get(st.Struct):
+        struct_config = st.StructConfig(tag=True)
+        key: str
+
+    assert Get("my key").struct_dump_csv() == ["my key"]
+    assert _one(Get, "my key\n") == Get("my key")

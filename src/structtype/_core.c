@@ -19057,8 +19057,24 @@ csv_fields_inner(PyObject *obj, bool render) {
     PyObject *field_codecs = st->struct_field_codecs;
     bool has_codecs = (field_codecs != NULL);
     Py_ssize_t nfields = PyTuple_GET_SIZE(st->struct_fields);
-    PyObject *out = PyList_New(nfields);
+    /* Array-like tagged structs encode the tag as the first item, matching
+     * struct_dump / struct_dump_json. Other structs ignore the tag. */
+    bool tagged = (st->array_like == OPT_TRUE && st->struct_tag_value != NULL);
+    Py_ssize_t offset = tagged ? 1 : 0;
+    PyObject *out = PyList_New(nfields + offset);
     if (out == NULL) return NULL;
+
+    if (tagged) {
+        PyObject *tag = st->struct_tag_value;
+        if (render) {
+            tag = csv_render_cell(mod, tag);
+            if (tag == NULL) goto error;
+        }
+        else {
+            Py_INCREF(tag);
+        }
+        PyList_SET_ITEM(out, 0, tag);
+    }
 
     for (Py_ssize_t i = 0; i < nfields; i++) {
         PyObject *val = Struct_get_index(obj, i);
@@ -19079,7 +19095,7 @@ csv_fields_inner(PyObject *obj, bool render) {
             if (cell == NULL) goto error;
             val2 = cell;
         }
-        PyList_SET_ITEM(out, i, val2);
+        PyList_SET_ITEM(out, i + offset, val2);
     }
     return out;
 
@@ -21083,7 +21099,41 @@ csv_decode_info(
     PyObject *inst = Struct_alloc((PyTypeObject *)st);
     if (inst == NULL) { Py_DECREF(seq); return NULL; }
 
-    Py_ssize_t n = ncells < nfields ? ncells : nfields;
+    /* Array-like tagged structs carry the tag as the first cell, matching
+     * struct_dump_json / struct_dump; validate it and offset the fields. */
+    Py_ssize_t offset = 0;
+    if (st->array_like == OPT_TRUE && st->struct_tag_value != NULL) {
+        if (MS_UNLIKELY(ncells < 1)) {
+            PyErr_Format(
+                mod->ValidationError,
+                "Expected a tag cell for %R, got an empty row",
+                (PyObject *)st
+            );
+            goto error;
+        }
+        PyObject *expected = st->struct_tag_value;
+        bool owned = false;
+        if (!PyUnicode_CheckExact(expected)) {
+            expected = PyObject_Str(expected);
+            if (expected == NULL) goto error;
+            owned = true;
+        }
+        int ok = PyUnicode_Check(cellv[0]) &&
+                 PyUnicode_Compare(cellv[0], expected) == 0;
+        if (owned) Py_DECREF(expected);
+        if (!ok) {
+            Py_ssize_t size;
+            const char *view = unicode_str_and_size(cellv[0], &size);
+            PathNode tag_path = {NULL, 0, NULL};
+            if (view != NULL) {
+                ms_invalid_cstr_value(view, size, &tag_path);
+            }
+            goto error;
+        }
+        offset = 1;
+    }
+
+    Py_ssize_t n = (ncells - offset) < nfields ? (ncells - offset) : nfields;
     for (Py_ssize_t j = 0; j < n; j++) {
         /* A `StructInfo` obtained via `StructInfo_Convert` during same-thread
          * recursion can still be mid-build, with not-yet-processed type slots
@@ -21097,7 +21147,7 @@ csv_decode_info(
             );
             goto error;
         }
-        PyObject *cell = cellv[j];
+        PyObject *cell = cellv[j + offset];
         bool is_null;
         if (null_empty_only) {
             is_null = PyUnicode_Check(cell) && PyUnicode_GET_LENGTH(cell) == 0;
