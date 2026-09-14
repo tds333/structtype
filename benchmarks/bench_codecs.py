@@ -164,7 +164,7 @@ class Record_st(Struct):
     blob: Annotated[
         bytes,
         BytesConstraint(min_length=2),
-        Serializer(dump=lambda b: b.hex(), load=bytes.fromhex),
+        Serializer(dump=bytes.hex, load=bytes.fromhex),
     ]
     zips: Annotated[
         set[PostalCode],
@@ -179,7 +179,7 @@ class Record_st(Struct):
     uid: Annotated[uuid.UUID, Serializer(dump=str, load=uuid.UUID)]
     price: Annotated[decimal.Decimal, Serializer(dump=str, load=decimal.Decimal)]
     when: Annotated[
-        dt.date, Serializer(dump=lambda d: d.isoformat(), load=dt.date.fromisoformat)
+        dt.date, Serializer(dump=dt.date.isoformat, load=dt.date.fromisoformat)
     ]
     color: Annotated[Color, Serializer(dump=lambda c: c.value, load=Color)]
 

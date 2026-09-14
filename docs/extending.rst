@@ -247,23 +247,23 @@ project. These are common Python stdlib types that ``structtype`` doesn't
         load=lambda o: fractions.Fraction(o[0], o[1]))]
 
     Deque = Annotated[deque, Serializer(
-        dump=lambda d: list(d),
-        load=lambda o: deque(o))]
+        dump=list,
+        load=deque)]
 
     Path = Annotated[pathlib.Path, Serializer(
-        dump=lambda p: str(p),
-        load=lambda o: pathlib.Path(o))]
+        dump=str,
+        load=pathlib.Path)]
 
     Pattern = Annotated[re.Pattern, Serializer(
         dump=lambda p: p.pattern,
-        load=lambda o: re.compile(o))]
+        load=re.compile)]
 
     Range = Annotated[range, Serializer(
         dump=lambda r: (r.start, r.stop, r.step),
         load=lambda o: range(o[0], o[1], o[2]))]
 
     SimpleNamespace = Annotated[types.SimpleNamespace, Serializer(
-        dump=lambda n: vars(n),
+        dump=vars,
         load=lambda o: types.SimpleNamespace(**o))]
 
     IPv4Address = Annotated[ipaddress.IPv4Address, Serializer(
