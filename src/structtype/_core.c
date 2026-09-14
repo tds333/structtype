@@ -13294,7 +13294,7 @@ enum timedelta_parse_state {
 static PyObject *
 ms_decode_timedelta(
     const char *p, Py_ssize_t size,
-    TypeNode *type, PathNode *path
+    PathNode *path
 ) {
     bool neg = false;
     const char *end = p + size;
@@ -14913,7 +14913,7 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
 }
 
 static int
-json_encode_and_free_assoclist(EncoderState *self, AssocList *list, bool escape) {
+json_encode_and_free_assoclist(EncoderState *self, AssocList *list) {
     if (list == NULL) return -1;
 
     int status = -1;
@@ -14924,23 +14924,12 @@ json_encode_and_free_assoclist(EncoderState *self, AssocList *list, bool escape)
 
     if (ms_write(self, "{", 1) < 0) goto cleanup;
     Py_ssize_t start_len = self->output_len;
-    if (escape) {
-        for (Py_ssize_t i = 0; i < list->size; i++) {
-            AssocItem *item = &(list->items[i]);
-            if (json_encode_cstr(self, item->key, item->key_size) < 0) goto cleanup;
-            if (ms_write(self, ":", 1) < 0) goto cleanup;
-            if (json_encode_inline(self, item->val) < 0) goto cleanup;
-            if (ms_write(self, ",", 1) < 0) goto cleanup;
-        }
-    }
-    else {
-        for (Py_ssize_t i = 0; i < list->size; i++) {
-            AssocItem *item = &(list->items[i]);
-            if (json_encode_cstr_noescape(self, item->key, item->key_size) < 0) goto cleanup;
-            if (ms_write(self, ":", 1) < 0) goto cleanup;
-            if (json_encode_inline(self, item->val) < 0) goto cleanup;
-            if (ms_write(self, ",", 1) < 0) goto cleanup;
-        }
+    for (Py_ssize_t i = 0; i < list->size; i++) {
+        AssocItem *item = &(list->items[i]);
+        if (json_encode_cstr(self, item->key, item->key_size) < 0) goto cleanup;
+        if (ms_write(self, ":", 1) < 0) goto cleanup;
+        if (json_encode_inline(self, item->val) < 0) goto cleanup;
+        if (ms_write(self, ",", 1) < 0) goto cleanup;
     }
     if (MS_UNLIKELY(start_len == self->output_len)) {
         /* Empty, append "}" */
@@ -14966,7 +14955,7 @@ json_encode_dict(EncoderState *self, PyObject *obj)
     int status = -1;
 
     if (MS_UNLIKELY(self->sort_keys)) {
-        return json_encode_and_free_assoclist(self, AssocList_FromDict(obj), true);
+        return json_encode_and_free_assoclist(self, AssocList_FromDict(obj));
     }
 
     if (ms_write(self, "{", 1) < 0) return -1;
@@ -16295,19 +16284,7 @@ json_decode_string(JSONDecoderState *self, TypeNode *type, PathNode *path) {
     Py_ssize_t size = json_decode_string_view(self, &view, &is_ascii);
     if (size < 0) return NULL;
 
-    if (MS_LIKELY(type->types & (MS_TYPE_STR | MS_TYPE_ANY))) {
-        PyObject *out;
-        if (MS_LIKELY(is_ascii)) {
-            out = PyUnicode_New(size, 127);
-            if (MS_UNLIKELY(out == NULL)) return NULL;
-            memcpy(ascii_get_buffer(out), view, size);
-        }
-        else {
-            out = PyUnicode_DecodeUTF8(view, size, NULL);
-        }
-        return ms_check_str_constraints(out, type, path);
-    }
-    else if (MS_UNLIKELY(!self->strict)) {
+    if (MS_UNLIKELY(!self->strict)) {
         bool invalid = false;
         PyObject *out = ms_decode_str_lax(view, size, type, path, &invalid);
         if (!invalid) return out;
@@ -16323,7 +16300,7 @@ json_decode_string(JSONDecoderState *self, TypeNode *type, PathNode *path) {
         return ms_decode_time(view, size, type, path);
     }
     else if (MS_UNLIKELY(type->types & MS_TYPE_TIMEDELTA)) {
-        return ms_decode_timedelta(view, size, type, path);
+        return ms_decode_timedelta(view, size, path);
     }
     else if (MS_UNLIKELY(type->types & MS_TYPE_UUID)) {
         return ms_decode_uuid_from_str(view, size, path);
@@ -16419,7 +16396,7 @@ json_decode_dict_key_fallback(
         return ms_decode_time(view, size, type, path);
     }
     else if (type->types & MS_TYPE_TIMEDELTA) {
-        return ms_decode_timedelta(view, size, type, path);
+        return ms_decode_timedelta(view, size, path);
     }
     else if (type->types & (MS_TYPE_BYTES | MS_TYPE_MEMORYVIEW)) {
         return json_decode_binary(view, size, type, path);
@@ -19305,7 +19282,7 @@ validate_str_uncommon(
         (type->types & MS_TYPE_TIMEDELTA)
         && !(self->builtin_types & MS_BUILTIN_TIMEDELTA)
     ) {
-        return ms_decode_timedelta(view, size, type, path);
+        return ms_decode_timedelta(view, size, path);
     }
     else if (
         (type->types & MS_TYPE_UUID)
