@@ -526,6 +526,7 @@ typedef struct {
     PyObject *concrete_types;
     PyObject *get_type_hints;
     PyObject *get_class_annotations;
+    PyObject *call_annotate_forwardref;
     PyObject *resolve_annotations_dict;
     PyObject *get_typeddict_info;
     PyObject *get_dataclass_info;
@@ -7588,7 +7589,12 @@ structmeta_process_rename(
         ((Field *)default_value)->alias != NULL
     ) {
         Field *field = (Field *)default_value;
-        if (PyUnicode_Compare(name, field->alias) == 0) return 0;
+        if (PyUnicode_Compare(name, field->alias) == 0) {
+            if (PyDict_GetItem(info->renamed_fields, name) != NULL) {
+                return PyDict_DelItem(info->renamed_fields, name);
+            }
+            return 0;
+        }
         return PyDict_SetItem(info->renamed_fields, name, field->alias);
     }
 
@@ -7598,7 +7604,12 @@ structmeta_process_rename(
         if (annotation != NULL) {
             Field *field = extract_field_from_annotated(annotation, mod);
             if (field != NULL && field->alias != NULL) {
-                if (PyUnicode_Compare(name, field->alias) == 0) return 0;
+                if (PyUnicode_Compare(name, field->alias) == 0) {
+                    if (PyDict_GetItem(info->renamed_fields, name) != NULL) {
+                        return PyDict_DelItem(info->renamed_fields, name);
+                    }
+                    return 0;
+                }
                 return PyDict_SetItem(info->renamed_fields, name, field->alias);
             }
         }
@@ -7644,6 +7655,9 @@ structmeta_process_rename(
     int out = 0;
     if (PyUnicode_Compare(name, temp) != 0) {
         out = PyDict_SetItem(info->renamed_fields, name, temp);
+    }
+    else if (PyDict_GetItem(info->renamed_fields, name) != NULL) {
+        out = PyDict_DelItem(info->renamed_fields, name);
     }
     Py_DECREF(temp);
     return out;
@@ -8248,16 +8262,14 @@ structmeta_collect_fields(StructMetaInfo *info, StructspecState *mod, bool kwonl
             Py_DECREF(annotate);
             return 0;
         }
-        PyObject *format = PyLong_FromLong(1);  /* annotationlib.Format.VALUE */
-        if (format == NULL) {
-            Py_DECREF(annotate);
-            return -1;
-        }
-        annotations = PyObject_CallOneArg(
-            annotate, format
-        );
+        /* `call_annotate_forwardref` evaluates eagerly, falling back to
+         * FORWARDREF only for unresolved names, so unquoted forward references
+         * don't raise NameError while the class body is still executing (PEP
+         * 649). See structtype._utils and
+         * https://docs.python.org/3/library/annotationlib.html#using-annotations-in-a-metaclass
+         */
+        annotations = PyObject_CallOneArg(mod->call_annotate_forwardref, annotate);
         Py_DECREF(annotate);
-        Py_DECREF(format);
         if (annotations == NULL) {
             return -1;
         }
@@ -19163,7 +19175,14 @@ validate_int(
         return ms_decode_int_enum_or_literal_pyint(obj, type, path);
     }
     else if (type->types & MS_TYPE_FLOAT) {
-        return ms_decode_float(PyLong_AsDouble(obj), type, path);
+        double val = PyLong_AsDouble(obj);
+        if (val == -1.0 && PyErr_Occurred()) {
+            /* `obj` is out of range for a C double (PyLong_AsDouble sets
+             * OverflowError but still returns -1.0); without this check
+             * that error leaks past this function as a SystemError. */
+            return ms_error_with_path("Number out of range%U", path);
+        }
+        return ms_decode_float(val, type, path);
     }
     else if (
         type->types & MS_TYPE_DECIMAL
@@ -21512,6 +21531,7 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->concrete_types);
     Py_CLEAR(st->get_type_hints);
     Py_CLEAR(st->get_class_annotations);
+    Py_CLEAR(st->call_annotate_forwardref);
     Py_CLEAR(st->resolve_annotations_dict);
     Py_CLEAR(st->get_typeddict_info);
     Py_CLEAR(st->get_dataclass_info);
@@ -21557,6 +21577,7 @@ structtype_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->concrete_types);
     Py_VISIT(st->get_type_hints);
     Py_VISIT(st->get_class_annotations);
+    Py_VISIT(st->call_annotate_forwardref);
     Py_VISIT(st->resolve_annotations_dict);
     Py_VISIT(st->get_typeddict_info);
     Py_VISIT(st->get_dataclass_info);
@@ -21750,6 +21771,7 @@ PyInit__core(void)
     SET_REF(concrete_types, "_CONCRETE_TYPES");
     SET_REF(get_type_hints, "get_type_hints");
     SET_REF(get_class_annotations, "get_class_annotations");
+    SET_REF(call_annotate_forwardref, "call_annotate_forwardref");
     SET_REF(resolve_annotations_dict, "resolve_annotations_dict");
     SET_REF(get_typeddict_info, "get_typeddict_info");
     SET_REF(get_dataclass_info, "get_dataclass_info");

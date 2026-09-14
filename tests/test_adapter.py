@@ -131,6 +131,20 @@ def test_validate_python_constrained():
     assert ta.struct_validate(5) == 5
 
 
+@pytest.mark.parametrize("strict", [True, False])
+def test_float_from_int_out_of_range(strict):
+    ta = StructAdapter(float)
+    big = 10**400
+    with pytest.raises(ValidationError, match="Number out of range"):
+        ta.struct_validate(big, strict=strict)
+    with pytest.raises(ValidationError, match="Number out of range"):
+        ta.struct_validate(-big, strict=strict)
+
+    ta_map = StructAdapter(dict[str, float])
+    with pytest.raises(ValidationError, match=r"Number out of range.*\['x'\]"):
+        ta_map.struct_validate({"x": big}, strict=strict)
+
+
 def test_dump_python_struct():
     class Point(Struct):
         x: int

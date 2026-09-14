@@ -13,6 +13,13 @@
   `CollectionConstraint`, and `BytesConstraint` as an "out of range"
   `ValueError` instead of a misleading "must be >= 0" message. Matches msgspec
   PR #1172.
+- Fix a `SystemError` when coercing an `int` too large for a C double into a
+  `float` field; `struct_validate` / `StructAdapter` now raise
+  `ValidationError: Number out of range`. Matches msgspec PR #1162.
+- Fix inherited field `alias` / `rename` not being reset when a subclass
+  re-declares the field back to its own name. Matches msgspec PR #1133.
+- Fix `NameError` when defining a `Struct` with an unquoted forward reference on
+  Python 3.14+ (PEP 649 deferred annotations). Matches msgspec PR #1168.
 - Add `Struct.struct_validate_csv()` and `Struct.struct_dump_csv()` for
   CSV encoding/decoding. These operate on the standard library's `csv` module:
   `struct_validate_csv(row)` decodes one row (a sequence of cell strings) into

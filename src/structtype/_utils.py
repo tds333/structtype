@@ -53,12 +53,34 @@ else:  # pragma: no cover
 
 
 if sys.version_info >= (3, 14):
-    from annotationlib import get_annotations as _get_class_annotations
+    from annotationlib import (
+        Format as _AnnotationFormat,
+        call_annotate_function as _call_annotate_function,
+        get_annotations as _get_class_annotations,
+    )
+
+    def call_annotate_forwardref(annotate):
+        """Evaluate a class annotate function, tolerating unresolved names.
+
+        Evaluate eagerly first so real errors in an annotation expression (for
+        example an invalid ``Field`` kwarg) still surface at class creation.
+        Only when a name isn't defined yet -- an unquoted forward reference
+        under PEP 649 -- fall back to ``Format.FORWARDREF`` so the class body
+        can finish; the reference is resolved later at decode time.
+        """
+        try:
+            return annotate(1)  # annotationlib.Format.VALUE
+        except NameError:
+            return _call_annotate_function(annotate, _AnnotationFormat.FORWARDREF)
+
 else:  # pragma: no cover
 
     def _get_class_annotations(cls):
         # RUF063 targets 3.14+ behavior; this is the <3.14 raw-annotations fallback.
         return cls.__dict__.get("__annotations__", {})  # noqa: RUF063
+
+    def call_annotate_forwardref(annotate):
+        return annotate(1)  # annotationlib.Format.VALUE
 
 
 def _apply_params(obj, mapping):

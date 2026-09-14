@@ -1705,6 +1705,17 @@ class TestSetAttr:
         assert obj3.y == 8
 
 
+def test_float_field_from_out_of_range_int():
+    class Ex(Struct):
+        x: float
+
+    with pytest.raises(structtype.ValidationError, match=r"Number out of range.*\$\.x"):
+        Ex.struct_validate({"x": 10**400})
+
+    # A large but representable int still coerces fine.
+    assert Ex.struct_validate({"x": 2**53}) == Ex(2.0**53)
+
+
 class TestOrderAndEq:
     @staticmethod
     def assert_eq(a, b):
@@ -2231,6 +2242,37 @@ class TestRename:
 
         assert Test4.__struct_alias_fields__ == ("my_field",)
 
+    def test_field_alias_override_inherited(self):
+        class Base(Struct):
+            x: Annotated[int, Field(alias="_x")]
+
+        class Test1(Base):
+            x: Annotated[int, Field(alias="x")]
+
+        assert Test1.__struct_alias_fields__ == ("x",)
+        assert Test1(1).struct_dump() == {"x": 1}
+        assert Test1.struct_validate({"x": 1}) == Test1(1)
+
+        # Re-declaring without an alias keeps the inherited alias.
+        class Test2(Base):
+            x: int = 1
+
+        assert Test2.__struct_alias_fields__ == ("_x",)
+        assert Test2(2).struct_dump() == {"_x": 2}
+
+    def test_rename_override_inherited(self):
+        class Base(Struct):
+            struct_config = StructConfig(rename="upper")
+            x: int
+
+        class Test(Base):
+            struct_config = StructConfig(rename="lower")
+            x: int
+
+        assert Test.__struct_alias_fields__ == ("x",)
+        assert Test(1).struct_dump() == {"x": 1}
+        assert Test.struct_validate({"x": 1}) == Test(1)
+
     def test_rename_fields_only_used_for_encode_and_decode(self):
         """Check that the renamed fields don't show up elsewhere"""
 
@@ -2564,6 +2606,108 @@ class TestClassVar:
             match="'typing' has no attribute 'ClassVar'",
         ):
             temp_module(source).__enter__()  # It used to crash, but must not!
+
+
+class TestForwardReferences:
+    """Quoted forward refs work on all supported Pythons. Unquoted forward
+    refs are only valid under PEP 649 deferred annotations (3.14+).
+    """
+
+    def test_quoted_forward_reference(self):
+        source = """
+        import structtype
+
+        class Outer(structtype.Struct):
+            inner: "Inner"
+
+        class Inner(structtype.Struct):
+            value: int
+        """
+        with temp_module(source) as mod:
+            assert mod.Outer.__struct_fields__ == ("inner",)
+            msg = mod.Outer(mod.Inner(1))
+            assert (
+                mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
+            )
+
+    def test_future_annotations_forward_reference(self):
+        source = """
+        from __future__ import annotations
+        import structtype
+
+        class Outer(structtype.Struct):
+            inner: Inner
+
+        class Inner(structtype.Struct):
+            value: int
+        """
+        with temp_module(source) as mod:
+            assert mod.Outer.__struct_fields__ == ("inner",)
+            msg = mod.Outer(mod.Inner(1))
+            assert (
+                mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
+            )
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 14),
+        reason="unquoted forward references require PEP 649 (Python 3.14+)",
+    )
+    def test_unquoted_forward_reference(self):
+        source = """
+        import structtype
+
+        class Outer(structtype.Struct):
+            inner: Inner
+
+        class Inner(structtype.Struct):
+            value: int
+        """
+        with temp_module(source) as mod:
+            assert mod.Outer.__struct_fields__ == ("inner",)
+            msg = mod.Outer(mod.Inner(1))
+            assert (
+                mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
+            )
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 14),
+        reason="unquoted forward references require PEP 649 (Python 3.14+)",
+    )
+    def test_unquoted_forward_reference_generic_container(self):
+        source = """
+        import structtype
+
+        class Outer(structtype.Struct):
+            items: list[Inner]
+
+        class Inner(structtype.Struct):
+            value: int
+        """
+        with temp_module(source) as mod:
+            assert mod.Outer.__struct_fields__ == ("items",)
+            msg = mod.Outer([mod.Inner(1), mod.Inner(2)])
+            assert (
+                mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
+            )
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 14),
+        reason="unquoted forward references require PEP 649 (Python 3.14+)",
+    )
+    def test_unquoted_mutual_forward_reference(self):
+        source = """
+        import structtype
+
+        class Node(structtype.Struct):
+            value: int
+            child: Node | None = None
+        """
+        with temp_module(source) as mod:
+            assert mod.Node.__struct_fields__ == ("value", "child")
+            msg = mod.Node(1, mod.Node(2))
+            assert (
+                mod.Node.struct_validate_json(msg.struct_dump_json()) == msg
+            )
 
 
 class TestPostInit:
