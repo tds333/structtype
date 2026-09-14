@@ -446,6 +446,22 @@ def test_struct_array_like(forbid_unknown_fields):
     assert make_schema(Example) == sol
 
 
+@pytest.mark.parametrize(
+    "tag, min_items, payload",
+    [(False, 0, b"[]"), (True, 1, b'["Example"]')],
+)
+def test_struct_array_like_all_fields_optional(tag, min_items, payload):
+    class Example(structtype.Struct):
+        struct_config = StructConfig(array_like=True, tag=tag)
+
+        a: int = 1
+        b: list[int] = Factory(list)
+
+    schema = make_schema(Example)["$defs"]["Example"]
+    assert Example.struct_validate_json(payload) == Example()
+    assert schema["minItems"] == min_items
+
+
 def test_struct_no_fields():
     class Example(structtype.Struct):
         pass

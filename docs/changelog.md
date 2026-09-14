@@ -2,6 +2,10 @@
 
 ## 0.13.0 (unreleased)
 
+- Fix `minItems` in generated JSON schemas for `array_like=True` Structs whose
+  fields are all optional: it was one too high (an untagged Struct reported
+  `minItems: 1` for an empty-array payload that decoding accepts; a tagged one
+  reported `2` for a tag-only payload). Matches the fix in msgspec PR #1124.
 - Add `Struct.struct_validate_csv()` and `Struct.struct_dump_csv()` for
   CSV encoding/decoding. These operate on the standard library's `csv` module:
   `struct_validate_csv(row)` decodes one row (a sequence of cell strings) into
