@@ -370,15 +370,14 @@ class _SchemaGenerator:
                 schema["items"] = False
         elif isinstance(t, (DictType, FrozenDictType)):
             schema["type"] = "object"
-            # If there are restrictions on the keys, specify them as propertyNames
-            if isinstance(key_type := t.key_type, StrType):
-                property_names: dict[str, Any] = {}
-                if key_type.min_length is not None:
-                    property_names["minLength"] = key_type.min_length
-                if key_type.max_length is not None:
-                    property_names["maxLength"] = key_type.max_length
-                if key_type.pattern is not None:
-                    property_names["pattern"] = key_type.pattern
+            # Keys with schema metadata or constraints become propertyNames
+            key_type = t.key_type
+            while isinstance(key_type, Metadata):
+                key_type = key_type.type
+            if isinstance(key_type, StrType):
+                property_names = self.to_schema(t.key_type)
+                # Object property names are always strings; omit the redundant type
+                property_names.pop("type", None)
                 if property_names:
                     schema["propertyNames"] = property_names
             if not isinstance(t.value_type, AnyType):

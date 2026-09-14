@@ -1,6 +1,7 @@
 import datetime
 import math
 import re
+import sys
 from typing import Annotated
 
 import pytest
@@ -237,10 +238,20 @@ class TestStrConstraintMetaObject:
     def test_nonnegative_integer_fields(self, field):
         StrConstraint(**{field: 0})
         StrConstraint(**{field: 10})
+        StrConstraint(**{field: sys.maxsize})
         with pytest.raises(TypeError, match=f"`{field}` must be an int, got float"):
             StrConstraint(**{field: 1.5})
         with pytest.raises(ValueError, match=f"{field}` must be >= 0, got -10"):
             StrConstraint(**{field: -10})
+
+    @pytest.mark.parametrize("field", ["min_length", "max_length"])
+    @pytest.mark.parametrize(
+        "val", [sys.maxsize + 1, -sys.maxsize - 2, 10**400, -(10**400)]
+    )
+    def test_nonnegative_integer_fields_out_of_range(self, field, val):
+        # Values outside Py_ssize_t need a range error in either direction.
+        with pytest.raises(ValueError, match=f"`{field}` is out of range"):
+            StrConstraint(**{field: val})
 
     def test_invalid_pattern_errors(self):
         with pytest.raises(re.error):
@@ -274,6 +285,24 @@ class TestBytesConstraintMetaObject:
         assert_ne(BytesConstraint(max_length=5), BytesConstraint(max_length=6))
         assert_ne(BytesConstraint(), None)
 
+    @pytest.mark.parametrize("field", ["min_length", "max_length"])
+    def test_nonnegative_integer_fields(self, field):
+        BytesConstraint(**{field: 0})
+        BytesConstraint(**{field: 10})
+        BytesConstraint(**{field: sys.maxsize})
+        with pytest.raises(TypeError, match=f"`{field}` must be an int, got float"):
+            BytesConstraint(**{field: 1.5})
+        with pytest.raises(ValueError, match=f"{field}` must be >= 0, got -10"):
+            BytesConstraint(**{field: -10})
+
+    @pytest.mark.parametrize("field", ["min_length", "max_length"])
+    @pytest.mark.parametrize(
+        "val", [sys.maxsize + 1, -sys.maxsize - 2, 10**400, -(10**400)]
+    )
+    def test_nonnegative_integer_fields_out_of_range(self, field, val):
+        with pytest.raises(ValueError, match=f"`{field}` is out of range"):
+            BytesConstraint(**{field: val})
+
 
 class TestCollectionConstraintMetaObject:
     def test_repr_empty(self):
@@ -297,6 +326,24 @@ class TestCollectionConstraintMetaObject:
             CollectionConstraint(min_length=1), CollectionConstraint(min_length=1)
         )
         assert_ne(CollectionConstraint(min_length=1), "not a constraint")
+
+    @pytest.mark.parametrize("field", ["min_length", "max_length"])
+    def test_nonnegative_integer_fields(self, field):
+        CollectionConstraint(**{field: 0})
+        CollectionConstraint(**{field: 10})
+        CollectionConstraint(**{field: sys.maxsize})
+        with pytest.raises(TypeError, match=f"`{field}` must be an int, got float"):
+            CollectionConstraint(**{field: 1.5})
+        with pytest.raises(ValueError, match=f"{field}` must be >= 0, got -10"):
+            CollectionConstraint(**{field: -10})
+
+    @pytest.mark.parametrize("field", ["min_length", "max_length"])
+    @pytest.mark.parametrize(
+        "val", [sys.maxsize + 1, -sys.maxsize - 2, 10**400, -(10**400)]
+    )
+    def test_nonnegative_integer_fields_out_of_range(self, field, val):
+        with pytest.raises(ValueError, match=f"`{field}` is out of range"):
+            CollectionConstraint(**{field: val})
 
 
 class TestTimezoneConstraintMetaObject:

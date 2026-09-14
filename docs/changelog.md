@@ -6,6 +6,13 @@
   fields are all optional: it was one too high (an untagged Struct reported
   `minItems: 1` for an empty-array payload that decoding accepts; a tagged one
   reported `2` for a tag-only payload). Matches the fix in msgspec PR #1124.
+- Preserve `Field` metadata and `StrConstraint` on annotated dictionary **keys**
+  in generated JSON schemas: they now appear under `propertyNames` instead of
+  being dropped. Matches msgspec PR #1159.
+- Report out-of-range `min_length` / `max_length` on `StrConstraint`,
+  `CollectionConstraint`, and `BytesConstraint` as an "out of range"
+  `ValueError` instead of a misleading "must be >= 0" message. Matches msgspec
+  PR #1172.
 - Add `Struct.struct_validate_csv()` and `Struct.struct_dump_csv()` for
   CSV encoding/decoding. These operate on the standard library's `csv` module:
   `struct_validate_csv(row)` decodes one row (a sequence of cell strings) into

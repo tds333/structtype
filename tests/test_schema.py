@@ -1267,6 +1267,24 @@ def test_dict_key_metadata(field, val, constraint):
     }
 
 
+@pytest.mark.parametrize(
+    "key_type, property_names",
+    [
+        (Annotated[str, Field(title="key")], {"title": "key"}),
+        (
+            Annotated[str, Field(title="key"), StrConstraint(pattern="^A$")],
+            {"title": "key", "pattern": "^A$"},
+        ),
+    ],
+)
+def test_dict_key_metadata_with_schema_metadata(key_type, property_names):
+    assert make_schema(dict[key_type, int]) == {
+        "type": "object",
+        "additionalProperties": {"type": "integer"},
+        "propertyNames": property_names,
+    }
+
+
 @pytest.mark.parametrize("typ", [bytes, bytearray, memoryview])
 @pytest.mark.parametrize(
     "field, n, constraint",
