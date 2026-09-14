@@ -143,6 +143,10 @@ bench-validators: ## run Serializer/Validator benchmarks
 bench-codecs: ## run Constraint + Serializer heavy benchmarks
 	uv run -p 3.15 benchmarks/bench_codecs.py
 
+.PHONY: bench-csv-1m
+bench-csv-1m: ## run 1M-row on-disk CSV benchmark
+	uv run -p 3.15 benchmarks/bench_csv_1m.py
+
 ##@ Utility
 .PHONY: clean
 clean: ## Delete all temporary files
