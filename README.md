@@ -51,6 +51,8 @@ User.struct_validate_json(
 
 Full documentation is available at **https://tds333.github.io/structtype/**.
 
+The library is in beta phase, interface and features may have breaking changes.
+
 ## Benchmarks
 
 structtype is as fast as msgspec and about 3-5x faster than pydantic. See the
@@ -67,4 +69,4 @@ structtype is as fast as msgspec and about 3-5x faster than pydantic. See the
 ## License
 
 New BSD. See the [License File](LICENSE).
-The core is based on the work of Jim Crist-Harif from msgspec.
+Parts of the core are based on the work of Jim Crist-Harif from msgspec.
