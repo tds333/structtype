@@ -137,5 +137,21 @@ You can enrich the generated JSON Schema using several ``Field`` parameters
 and validation via ``NumericConstraint``.
 These are covered on the :doc:`Field Annotations <annotation>` page.
 
+Dictionary Keys
+---------------
+
+``Field`` metadata and ``StrConstraint`` attached to the annotation of a dict
+**key** type are not dropped. They are emitted under ``propertyNames`` in the
+generated schema. For example,
+``dict[Annotated[str, Field(title="key")], int]`` produces:
+
+.. code-block:: json
+
+    {
+      "type": "object",
+      "additionalProperties": {"type": "integer"},
+      "propertyNames": {"title": "key"}
+    }
+
 .. _JSON Schema: https://json-schema.org/
 .. _OpenAPI: https://www.openapis.org/

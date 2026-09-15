@@ -93,7 +93,7 @@ complete example enforcing the following constraints on a ``User`` struct:
     ...     cpu_limit: Annotated[float, NumericConstraint(ge=0.1, le=8)] = 1
     ...     mem_limit: Annotated[int, NumericConstraint(ge=256, le=8192)] = 1024
 
-As shown above, ``Annotated`` types can applied inline, or used to create type
+As shown above, ``Annotated`` types can be applied inline, or used to create type
 aliases and then reused elsewhere (as done with ``UnixName``).
 
 ``Annotated`` metadata can also be layered. A type alias may carry one kind of
@@ -126,11 +126,15 @@ At most one ``Field``, one ``Serializer``, and one ``Constraint`` may apply to a
 single field, across all nesting levels. Using two of the same kind (e.g. two
 ``Field`` wrappers) raises a ``TypeError``.
 
-A ``Serializer`` or ``Constraint`` must be attached to a concrete type —
-attaching one directly to a union or optional type (e.g.
+.. _annotated-placement-rule:
+
+A ``Serializer`` or ``Constraint`` must be attached to a concrete type inside
+``Annotated``. Attaching one directly to a union or optional type (e.g.
 ``Annotated[int | None, Constraint(...)]``) raises a ``TypeError`` at class
-creation. To make such a field optional, union the *annotated* member with
-``None``: ``Annotated[T, Constraint(...)] | None``.
+creation for `structtype.Struct`, or at construction for
+`structtype.StructAdapter`. To make such a field optional, union the
+*annotated* member with ``None``: ``Annotated[T, Constraint(...)] | None``. A
+``None`` value bypasses the Serializer (``load`` is not called).
 
 The following constraints are supported:
 

@@ -233,8 +233,8 @@ will result in an inconsistent hash.
 ``weakref``
 -----------
 
-By default, struct instances do not support :mod:`weakref`\ erences. To enable
-weak reference support, set ``weakref=True``:
+By default, struct instances do not support weak references (:mod:`weakref`).
+To enable weak reference support, set ``weakref=True``:
 
 .. code-block:: python
 

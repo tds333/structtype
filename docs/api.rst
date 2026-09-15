@@ -174,7 +174,7 @@ Structs
         :type: bool
 
         Generate ``__lt__``, ``__le__``, ``__gt__``, ``__ge__``.
-        Requires ``eq=True``. See :doc:`usage` (Field Ordering).
+        Requires ``eq=True``. See :ref:`struct-equality-and-order`.
 
     .. attribute:: kw_only
 
@@ -314,11 +314,8 @@ Serializer
         at class creation time for ``Struct``, at construction for
         ``StructAdapter``. All other types (``bytes``, ``datetime``, ``UUID``,
         ``Decimal``, ``Enum``, ``Struct`` subclasses, etc.) are accepted. The
-        Serializer must be attached to a concrete type; attaching it to a union
-        or optional type (e.g. ``Annotated[int | None, Serializer(dump=...)]``)
-        raises a ``TypeError``. To make a field optional, union the annotated
-        member with ``None``: ``Annotated[T, Serializer(...)] | None``. See
-        :doc:`extending`.
+        Serializer must be attached to a concrete type; see
+        :ref:`the placement rule <annotated-placement-rule>`.
 
     .. attribute:: load
         :no-index:
@@ -337,12 +334,8 @@ Serializer
         valid on blocked
         types (``Any``, ``bool``, ``int``, ``float``, ``str``, ``list``,
         ``dict``, ``tuple``, ``TypedDict``, ``NamedTuple``, ``frozendict``,
-        ``Literal``). The Serializer must be attached
-        to a concrete type; attaching it to a union or optional type (e.g.
-        ``Annotated[int | None, Serializer(load=...)]``) raises a ``TypeError``.
-        To make the field optional, union the annotated member with ``None``:
-        ``Annotated[T, Serializer(load=...)] | None``; ``None`` bypasses
-        ``load``. See :doc:`extending`.
+        ``Literal``). The Serializer must be attached to a concrete type; see
+        :ref:`the placement rule <annotated-placement-rule>`.
 
 
 Constraint
@@ -352,12 +345,7 @@ Constraint
     :members:
 
     Like :class:`Serializer`, a `Constraint` must be attached to a concrete
-    type inside `Annotated`. Attaching one to a union or optional type (e.g.
-    ``Annotated[int | None, NumericConstraint(ge=0)]``) raises a ``TypeError``
-    at class creation for :class:`Struct`, and at construction for
-    :class:`StructAdapter`. To make a constrained field optional, union the
-    annotated member with ``None``:
-    ``Annotated[T, Constraint(...)] | None``.
+    type inside `Annotated`; see :ref:`the placement rule <annotated-placement-rule>`.
 
 
 NumericConstraint
@@ -427,3 +415,12 @@ Exceptions
 
 .. autoexception:: ValidationError
     :show-inheritance:
+
+
+Version
+-------
+
+.. autodata:: __version__
+   :no-value:
+
+   The current ``structtype`` version string.

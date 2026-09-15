@@ -57,10 +57,10 @@ with no required dependencies.
       File "<stdin>", line 1, in <module>
     structtype.ValidationError: Expected `str`, got `int` - at `$.groups[0]`
 
-``structtype`` is designed to be as performant as possible, while retaining some
-of the nicities of validation libraries like pydantic_. For supported types,
-encoding/decoding a message with ``structtype`` can be :doc:`~10-80x faster than
-alternative libraries <benchmarks>`.
+``structtype`` is designed to be as performant as possible, while keeping the
+conveniences of validation libraries like pydantic_. For supported types,
+encoding/decoding a message with ``structtype`` is faster than alternative
+libraries; see :doc:`the benchmarks <benchmarks>` for the full numbers.
 
 Highlights
 ----------

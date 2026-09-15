@@ -138,13 +138,12 @@ Default values may be one of 3 kinds:
 
 - Builtin *empty* mutable collections (``[]``, ``{}``, ``set()``, and
   ``bytearray()``) may be used as default values (as in ``c`` above). Since
-  defaults of these types are so common, these are "syntactic sugar" for
-  ``Factory(list)`` and friends (to avoid accidental sharing of mutable
-  values). A default of ``[]`` is identical to a default of
-  ``Factory(list)``, with a new list instance used each time.
-  Specifying a non-empty mutable collection (e.g. ``[1, 2, 3]``) as a default
-  value will cause the struct definition to error (you should wrap a callable
-  in ``Factory`` in this case).
+  defaults of these types are so common, they are "syntactic sugar" for
+  ``Factory(list)`` and friends, avoiding accidental sharing of mutable values.
+  A default of ``[]`` is identical to a default of ``Factory(list)``, with a
+  new list instance used each time. Specifying a non-empty mutable collection
+  (e.g. ``[1, 2, 3]``) as a default value will cause the struct definition to
+  error; wrap a callable in ``Factory`` in this case.
 
 .. _struct-post-init:
 
@@ -242,7 +241,7 @@ Field Ordering
 --------------
 
 When defining a new struct type, fields are stored in the order they're defined
-(keyword-only fields excluded, more on this later). This is nice for
+(keyword-only fields are reordered later; see below). This is nice for
 readability since the generated ``__init__`` matches the field order.
 
 .. code-block:: python
@@ -251,7 +250,7 @@ readability since the generated ``__init__`` matches the field order.
         a: str
         b: int = 0
 
-The generated ``__init__()`` for ``User`` looks like:
+The generated ``__init__()`` for ``Example`` looks like:
 
 .. code-block:: python
 
@@ -294,11 +293,11 @@ parameters can be mixed in any order.
    >>> Example(a="example", b=123)
    Example(a='example', b=123)
 
-Note that the ``kw_only`` setting only affects fields defined on that class,
-*not* those defined on base or subclasses. This means you can define
-keyword-only parameters on a base class then add positional parameters in a
-subclass. All keyword-only parameters are reordered to go after all positional
-fields.
+Note that the ``kw_only`` setting only affects fields declared in that class
+body, not fields inherited from a base or declared in a subclass. This means
+you can define keyword-only parameters on a base class then add positional
+parameters in a subclass. All keyword-only parameters are reordered to go after
+all positional fields.
 
 .. code-block:: python
 
@@ -447,6 +446,8 @@ blocks. Replicating an example from `PEP 636`_:
     >>> where_is(Point(0, 6))
     "Y=6"
 
+
+.. _struct-equality-and-order:
 
 Equality and Order
 ------------------
@@ -959,11 +960,12 @@ precedence.
     b'{"fieldX":1,"y":2}'
 
 
+.. _struct-array-like:
+
 Encoding/Decoding as Arrays
 ---------------------------
 
-By default Struct objects encode the same dicts, with both the keys and values
-present in the message.
+By default, Structs encode as JSON objects, with both keys and values present.
 
 .. code-block:: python
 
@@ -1029,6 +1031,9 @@ array, and is used to determine which type in the union to use when decoding.
 
 
 
+Serialization Protocols
+-----------------------
+
 ``structtype`` provides JSON as its primary serialization protocol. All JSON
 operations are available as methods on ``Struct`` instances, or via
 ``StructAdapter`` for encoding non-struct objects. A row-iterating CSV codec is
@@ -1051,6 +1056,10 @@ Struct instances are encoded to JSON using ``struct_dump_json()``:
     >>> alice = User("alice")
     >>> alice.struct_dump_json()
     b'{"name":"alice","groups":[],"email":null}'
+
+Both ``struct_dump_json`` and ``struct_dump`` accept a ``sort_keys`` parameter
+(default ``False``). When True, object keys are sorted alphabetically in the
+output.
 
 For encoding non-struct objects, ``StructAdapter`` can be used:
 
@@ -1315,15 +1324,14 @@ The :ref:`Converters <structs-converters>` section below covers how to combine
 ``struct_dump`` / ``struct_validate`` with other serialization libraries, and
 the :class:`StructAdapter` helper.
 
-Note that ``dict(struct_instance)`` is *not* equivalent to
-``struct_dump``. It performs a one-to-one conversion of a single struct
-instance to a `dict` using the raw attribute names.
+Note that ``dict(struct_instance)`` is *not* equivalent to ``struct_dump``. It
+performs a one-to-one conversion of a single struct instance to a `dict` using
+the raw attribute names.
 
 None of the semantics listed above apply. Every field is included regardless
 of ``omit_defaults`` or `structtype.UNSET`, ``rename`` and ``tag`` are ignored,
 nested `structtype.Struct` / `dataclasses.dataclass` / attrs_ values are left
-as-is, and value-level types (`bytes`, `datetime.datetime`, `uuid.UUID`,
-`decimal.Decimal`, `enum.Enum`, ...) are not converted.
+as-is, and the value-level type conversions listed above are not applied.
 
 Prefer ``struct_dump`` when the output is intended for serialization.
 
@@ -1417,7 +1425,11 @@ several configuration options:
   to ``Struct`` / ``dataclass`` / ``attrs`` types by extracting attributes from the
   input matching fields in the output type. One use case is converting database
   query results (ORM or otherwise) to structtype structured types. The default is
-  False.
+  False. When the input is a non-dict object, matching accepts both the Python
+  field name and the alias; dict/JSON input matches by alias only.
+
+- ``sort_keys``: `struct_dump` and `struct_dump_json`. If True, object keys are
+  sorted alphabetically in the output. The default is False.
 
 Custom types — types other than those :doc:`natively supported
 <supported-types>` — are handled by implementing the ``struct_dump`` /
@@ -1451,11 +1463,8 @@ yield ``(name, value)`` pairs in declaration order:
     >>> [name for name, _ in alice]
     ['name', 'groups']
 
-Note that ``dict(p)`` is *not* equivalent to ``struct_dump``. It is a
-one-to-one mapping using the raw Python field names — none of the
-:ref:`struct_dump semantics <to-builtins-vs-asdict>` apply (no ``rename`` /
-``tag`` / ``omit_defaults`` / ``UNSET`` handling, and no recursive expansion of
-nested values).
+Note that ``dict(p)`` is *not* equivalent to ``struct_dump``; see
+:ref:`to-builtins-vs-asdict` for the differences.
 
 StructAdapter
 ~~~~~~~~~~~~~

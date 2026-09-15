@@ -76,8 +76,8 @@ For a summary of which types support lax-mode string-to-type conversion, see
 
 Additional types may be supported through :doc:`extensions <extending>`.
 
-Note that except where explicitly stated, subclasses of these types are not
-supported by default (see :doc:`extending` for how to add support yourself).
+Unless stated otherwise, subclasses of these types are not supported out of the
+box. See :doc:`extending` for how to add support yourself.
 
 Here we document how structtype maps Python objects to/from JSON.
 
@@ -454,7 +454,7 @@ The implementation in ``structtype`` is compatible with the ones in:
 - Python libraries like pendulum_ or pydantic_.
 
 Duration strings produced by structtype should be interchangeable with these
-libraries, as well as similar ones in other language ecosystems.
+libraries and equivalent libraries in other languages.
 
 .. code-block:: python
 
@@ -933,7 +933,7 @@ match or if any required fields are missing.
     ... """
 
     >>> StructAdapter(User).struct_validate_json(msg)
-    User(name='bob', groups=[], email="bob@company.com")
+    User(name='bob', groups=set(), email='bob@company.com')
 
     >>> wrong_type = b"""
     ... {
@@ -970,10 +970,10 @@ Type checking also still applies.
     b'["alice",["admin","engineering"],null]'
 
     >>> StructAdapter(User).struct_validate_json(b'["bob"]')
-    User(name="bob", groups=[], email=None)
+    User(name='bob', groups=set(), email=None)
 
     >>> StructAdapter(User).struct_validate_json(b'["carol", ["admin"], null, ["extra", "field"]]')
-    User(name="carol", groups=["admin"], email=None)
+    User(name='carol', groups={'admin'}, email=None)
 
     >>> StructAdapter(Any).struct_validate_json(b'["david", ["finance", 123]]')
     Traceback (most recent call last):
@@ -1031,8 +1031,8 @@ types. It is an error to use `structtype.UNSET` or `structtype.UnsetType` anywhe
 other than a field for one of these types.
 
 Omission of ``UNSET`` fields applies to `struct_dump_json` and
-`struct_dump`. `dict()` always include every field, so ``UNSET`` values appear
-in their output unchanged.
+`struct_dump`. ``dict()`` always includes every field, so ``UNSET`` values
+appear unchanged.
 
 ``Enum`` / ``IntEnum`` / ``StrEnum``
 ------------------------------------
@@ -1364,7 +1364,7 @@ instances of their most common concrete type.
     >>> from typing import MutableMapping
 
     >>> StructAdapter(MutableMapping[str, int]).struct_validate_json(b'{"x": 1}')
-    {"x": 1}
+    {'x': 1}
 
     >>> StructAdapter(MutableMapping[str, int]).struct_validate_json(b'{"x": "oops"}')
     Traceback (most recent call last):

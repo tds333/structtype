@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.13.0 (unreleased)
+## 0.13.0 (2026-09-15)
 
 - Fix `minItems` in generated JSON schemas for `array_like=True` Structs whose
   fields are all optional: it was one too high (an untagged Struct reported

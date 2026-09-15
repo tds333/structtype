@@ -21,15 +21,14 @@ following:
 
 - **Optimized**
 
-  It consumes less memory than othere libraries or dataclasses.
-  Validation and serialization is very fast. (in C)
-  It is easy to learn without to much features.
+  It uses less memory than dataclasses or other libraries, and
+  validation/serialization is very fast (implemented in C). The API is small and
+  easy to learn.
 
 - **Clean and minimal interface**
 
-  It has a simple interface. If a method is named validate it validates and decodes data.
-  If it is named dump it encodes the data and dumps out.
-  No feature overbloat.
+  Methods named ``validate`` validate and decode; methods named ``dump`` encode
+  and serialize. Nothing more.
 
 
 
@@ -52,9 +51,9 @@ fork are:
 Relationship to pydantic
 ------------------------
 
-It does similar things but faster using less memory and with strict simple
-validation. Some ideas are the same but parameters and usage differs.
-It has less features by intend.
+It solves a similar problem faster and with less memory, using strict, simple
+validation. Some ideas overlap, but parameters and usage differ. It has fewer
+features by design.
 
 
 .. _msgspec: https://github.com/jcrist/msgspec
@@ -68,8 +67,7 @@ It has less features by intend.
 Relationship to std lib and std json
 ------------------------------------
 
-If it makes sense parameters are the same.
-It does not provide extra methods for copy, replace, ... it implements
-std protocol to support it (like __copy__, __replace__). So builtin functions
-can be used. 
+Where it makes sense, parameters match the standard library. Instead of extra
+copy/replace methods, it implements the standard protocols (``__copy__``,
+``__replace__``) so builtins work.
 

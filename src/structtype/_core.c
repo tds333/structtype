@@ -1772,6 +1772,23 @@ typedef struct {
     PyObject *factory;
 } Factory;
 
+PyDoc_STRVAR(Factory__doc__,
+"A wrapper around a zero-argument callable used as a dynamic default value.\n"
+"\n"
+"A default value may be a plain value, which is shared by every instance, or\n"
+"a ``Factory``, whose wrapped callable is invoked with no arguments to create\n"
+"a fresh default for each instance. Wrapping the callable makes it explicit\n"
+"that it produces the default value rather than being the default value\n"
+"itself, which is otherwise ambiguous.\n"
+"\n"
+"This is useful for mutable defaults that should not be shared between\n"
+"instances, and for defaults that depend on runtime state (e.g.\n"
+"``Factory(uuid.uuid4)``). Builtin empty mutable collections (``[]``, ``{}``,\n"
+"``set()``, and ``bytearray()``) used as defaults are shorthand for\n"
+"``Factory(list)``, ``Factory(dict)``, and friends. The wrapped callable is\n"
+"exposed as the read-only ``factory`` attribute.\n"
+);
+
 static PyObject *
 Factory_New(PyObject *factory) {
     if (!PyCallable_Check(factory)) {
@@ -1857,6 +1874,7 @@ static PyMemberDef Factory_members[] = {
 static PyTypeObject Factory_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "structtype.Factory",
+    .tp_doc = Factory__doc__,
     .tp_basicsize = sizeof(Factory),
     .tp_itemsize = 0,
     .tp_new = Factory_new,

@@ -9,15 +9,9 @@ Here we present a few tips and tricks for squeezing maximum performance out of
 Avoid Encoding Default Values
 -----------------------------
 
-By default, ``structtype`` encodes all fields in a ``Struct`` type, including optional
-fields (those configured with a default value). If the default values are known
-on the decoding end (making serializing them redundant), it may be beneficial
-to omit default values from the encoded message. This can be done by
-configuring ``omit_defaults=True`` as part of the ``Struct`` definition.
-Omitting defaults reduces the size of the encoded message, and often also improves
-encoding and decoding performance (since there's less work to do).
-
-For more information, see :ref:`omit_defaults`.
+Configuring ``omit_defaults=True`` omits fields equal to their default value
+from the encoded message, reducing its size and often improving encoding and
+decoding performance. See :ref:`omit_defaults` for details.
 
 
 .. _avoid-decoding-unused-fields:
@@ -70,14 +64,15 @@ technique.
 Use ``array_like=True``
 -----------------------
 
-One touted benefit of JSON_ is that it's "self-describing"
-protocols. JSON objects serialize their field names along with their values. If
-both ends of a connection already know the field names though, serializing them
-may be an unnecessary cost. If you need higher performance (at the cost of more
+One touted benefit of JSON_ is that it is a self-describing protocol: JSON
+objects serialize their field names along with their values. If both ends of a
+connection already know the field names though, serializing them may be an
+unnecessary cost. If you need higher performance (at the cost of more
 inscrutable message encoding), you can set ``array_like=True`` on a struct
 definition. Structs with this option enabled are encoded/decoded like array
-types, removing the field names from the encoded message. This can provide on
-average another ~2x speedup for decoding (and ~1.5x speedup for encoding).
+types, removing the field names from the encoded message. See
+:ref:`struct-array-like` for a discussion of the tradeoffs and the performance
+gains.
 
 .. code-block:: python
 
