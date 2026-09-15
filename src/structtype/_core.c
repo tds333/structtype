@@ -15924,7 +15924,7 @@ json_read_codepoint(JSONDecoderState *self, unsigned int *out) {
 }
 
 static MS_NOINLINE int
-json_handle_unicode_escape(JSONDecoderState *self) {
+json_parse_unicode_escape(JSONDecoderState *self, Py_UCS4 *out) {
     unsigned int cp;
     if (json_read_codepoint(self, &cp) < 0) return -1;
 
@@ -15949,7 +15949,12 @@ json_handle_unicode_escape(JSONDecoderState *self) {
         cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
     }
 
-    /* Encode the codepoint as utf-8 */
+    *out = (Py_UCS4)cp;
+    return 0;
+}
+
+static MS_INLINE void
+json_scratch_write_codepoint(JSONDecoderState *self, Py_UCS4 cp) {
     unsigned char *p = self->scratch + self->scratch_len;
     if (cp < 0x80) {
         *p++ = cp;
@@ -15970,7 +15975,6 @@ json_handle_unicode_escape(JSONDecoderState *self) {
         *p++ = 0x80 | (cp & 0x3F);
         self->scratch_len += 4;
     }
-    return 0;
 }
 
 static MS_NOINLINE Py_ssize_t
@@ -15998,56 +16002,25 @@ top:
         self->input_pos++;
         if (!json_read1(self, &c)) return -1;
 
+        Py_UCS4 ch;
         switch (c) {
-            case 'n': {
-                *(self->scratch + self->scratch_len) = '\n';
-                self->scratch_len++;
-                break;
-            }
-            case '"': {
-                *(self->scratch + self->scratch_len) = '"';
-                self->scratch_len++;
-                break;
-            }
-            case 't': {
-                *(self->scratch + self->scratch_len) = '\t';
-                self->scratch_len++;
-                break;
-            }
-            case 'r': {
-                *(self->scratch + self->scratch_len) = '\r';
-                self->scratch_len++;
-                break;
-            }
-            case '\\': {
-                *(self->scratch + self->scratch_len) = '\\';
-                self->scratch_len++;
-                break;
-            }
-            case '/': {
-                *(self->scratch + self->scratch_len) = '/';
-                self->scratch_len++;
-                break;
-            }
-            case 'b': {
-                *(self->scratch + self->scratch_len) = '\b';
-                self->scratch_len++;
-                break;
-            }
-            case 'f': {
-                *(self->scratch + self->scratch_len) = '\f';
-                self->scratch_len++;
-                break;
-            }
-            case 'u': {
+            case 'n': ch = '\n'; break;
+            case '"': ch = '"'; break;
+            case 't': ch = '\t'; break;
+            case 'r': ch = '\r'; break;
+            case '\\': ch = '\\'; break;
+            case '/': ch = '/'; break;
+            case 'b': ch = '\b'; break;
+            case 'f': ch = '\f'; break;
+            case 'u':
                 *is_ascii = false;
-                if (json_handle_unicode_escape(self) < 0) return -1;
+                if (json_parse_unicode_escape(self, &ch) < 0) return -1;
                 break;
-            }
             default:
                 json_err_invalid(self, "invalid escape character in string");
                 return -1;
         }
+        json_scratch_write_codepoint(self, ch);
 
         start = self->input_pos;
     }
