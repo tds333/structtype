@@ -474,6 +474,93 @@ class TestStrings:
         buf3 = _json_encode({"y": sol, "x": 1})
         _json_decode(buf3, type=Test)
 
+    @pytest.mark.parametrize("length", [7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65])
+    @pytest.mark.parametrize("special", ['"', "\\", "\x01", "é", "𝄞"])
+    def test_encode_str_scan_boundaries(self, length, special):
+        """Place a special byte at every offset across wide-scan boundaries."""
+        base = ["a"] * length
+        for i in range(length):
+            s = base.copy()
+            s[i] = special
+            s = "".join(s)
+            assert _json_encode(s) == json.dumps(s, ensure_ascii=False).encode("utf-8")
+
+    @pytest.mark.parametrize("length", [7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65])
+    def test_decode_str_scan_boundaries(self, length):
+        base = "a" * length
+        for i in range(length):
+            for special in ("é", "𝄞", "/", "z"):
+                s = base[:i] + special + base[i + 1 :]
+                buf = json.dumps(s, ensure_ascii=False).encode("utf-8")
+                assert _json_decode(buf) == s
+            for control in (b"\x01", b"\x1f", b"\x00"):
+                raw = base.encode()[:i] + control + base.encode()[i + 1 :]
+                with pytest.raises(structtype.DecodeError, match="invalid character"):
+                    _json_decode(b'"' + raw + b'"')
+
+    @pytest.mark.parametrize("length", [7, 8, 9, 15, 16, 17, 31, 32, 33])
+    def test_decode_str_escape_every_offset(self, length):
+        base = "a" * length
+        for i in range(length):
+            for esc in ('\\"', "\\\\", "\\n", "\\u0041", "\\uD834\\uDD1E"):
+                raw = (base[:i] + base[i + 1 :]).encode()
+                buf = b'"' + raw[:i] + esc.encode() + raw[i:] + b'"'
+                out = _json_decode(buf)
+                expected = base[:i] + json.loads(b'"' + esc.encode() + b'"') + base[i + 1 :]
+                assert out == expected
+
+
+class TestWideStructAliasLookup:
+    @staticmethod
+    def _make(nfields, **namespace):
+        annotations = {f"f{i}": int for i in range(nfields)}
+        namespace.setdefault("__annotations__", annotations)
+        return structtype.StructMeta("Wide", (structtype.Struct,), namespace)
+
+    @pytest.mark.parametrize("nfields", [12, 13, 20, 64])
+    def test_reverse_order_and_dict(self, nfields):
+        cls = self._make(nfields)
+        keys = [f"f{i}" for i in range(nfields)]
+        data = {key: i for i, key in enumerate(reversed(keys))}
+        buf = json.dumps(data).encode("utf-8")
+
+        obj = cls.struct_validate_json(buf)
+        assert [getattr(obj, key) for key in keys] == [data[key] for key in keys]
+
+        obj2 = cls.struct_validate(data)
+        assert obj2 == obj
+
+    @pytest.mark.parametrize("nfields", [13, 20])
+    def test_unknown_field_ignored(self, nfields):
+        cls = self._make(nfields)
+        data = {f"f{i}": i for i in range(nfields)}
+        data["unknown"] = 1
+        obj = cls.struct_validate_json(json.dumps(data).encode("utf-8"))
+        assert obj.f0 == 0
+
+    def test_non_ascii_alias(self):
+        annotations = {f"f{i}": int for i in range(12)}
+        annotations["é"] = int
+        cls = self._make(12, __annotations__=annotations)
+        data = {f"f{i}": i for i in range(12)}
+        data["é"] = 99
+        obj = cls.struct_validate_json(json.dumps(data).encode("utf-8"))
+        assert obj.é == 99
+
+    def test_tag_and_unknown_forbidden(self):
+        nfields = 16
+        cls = self._make(
+            nfields,
+            struct_config=StructConfig(tag=True, forbid_unknown_fields=True),
+        )
+        data = {"type": "Wide", **{f"f{i}": i for i in range(nfields)}}
+        obj = cls.struct_validate_json(json.dumps(data).encode("utf-8"))
+        assert obj.f15 == 15
+
+        data["nope"] = 1
+        with pytest.raises(structtype.ValidationError):
+            cls.struct_validate_json(json.dumps(data).encode("utf-8"))
+
 
 class TestBinary:
     @pytest.mark.parametrize(
