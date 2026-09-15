@@ -2,6 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "msgspec",
+#     "pydantic",
 #     "structtype",
 # ]
 #
@@ -9,114 +10,146 @@
 # structtype = { path = "..", editable = true }
 # ///
 
-"""Micro-benchmarks for byte-level string handling.
-
-Covers JSON dump/validate for ASCII, non-ASCII and escape-heavy strings of
-various lengths, plus the alias-field lookup for wide structs (declaration
-order vs. reverse order). Reports ns/op and ns/UTF-8-byte.
+"""Benchmark JSON round-trip for a struct with a long ``str`` field, compared
+against msgspec and pydantic. Strings are 100000 characters (ASCII, non-ASCII
+and escape-heavy). Reports ns/UTF-8-byte and the structtype speedup vs
+pydantic.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 import timeit
 
 import structtype
-from structtype import Struct, StructAdapter, StructMeta
+from structtype import Struct
 
 try:
     import msgspec
 except ImportError:
     msgspec = None
 
+try:
+    import pydantic
+except ImportError:
+    pydantic = None
+
+SIZE = 100000
+
+
+def _text_with_escapes(size=SIZE):
+    chars = ["x"] * size
+    for i in range(79, size, 80):
+        chars[i] = "\n"
+    for i in range(199, size, 200):
+        chars[i] = '"'
+    return "".join(chars)
+
+
+CASES = [
+    ("ascii", "x" * SIZE),
+    ("nonascii", "é" * SIZE),
+    ("escape", _text_with_escapes()),
+]
+
 
 def measure(fn, number, repeat=5):
     return min(timeit.repeat(fn, number=number, repeat=repeat)) / number
 
 
-def report(label, ns, nbytes=None):
-    if nbytes:
-        print(f"{label:44s} {ns * 1e9:10.1f} ns/op {ns / nbytes * 1e9:8.3f} ns/byte")
-    else:
-        print(f"{label:44s} {ns * 1e9:10.1f} ns/op")
+def table(title, columns, rows, decimals=3):
+    width = max(len(r[0]) for r in rows)
+    print(f"\n{title}")
+    print(f"  {'case':<{width}}" + "".join(f"{c:>13}" for c in columns))
+    for row in rows:
+        line = f"  {row[0]:<{width}}"
+        for value in row[1:]:
+            if value is None:
+                line += f"{'n/a':>13}"
+            elif isinstance(value, str):
+                line += f"{value:>13}"
+            else:
+                line += f"{value:>13.{decimals}f}"
+        print(line)
 
 
-def scaled_number(nbytes):
-    return max(2000, 200_000 // max(1, nbytes))
-
-
-def bench_str(adapter, msgspec_codec):
-    print("\n== dump_json str ==")
-    cases = [
-        ("ascii 10", "x" * 10),
-        ("ascii 100", "x" * 100),
-        ("ascii 1000", "x" * 1000),
-        ("ascii 10000", "x" * 10000),
-        ("escape 100", ('a"b\\c\td\x01' * 20)),
-        ("nonascii 100", "é" * 100),
-        ("nonascii 1000", "é" * 1000),
-        ("emoji 100", "𝄞" * 100),
-    ]
-    for name, s in cases:
-        nbytes = len(s.encode("utf-8"))
-        n = scaled_number(nbytes)
-        ns = measure(lambda s=s: adapter.struct_dump_json(s), n)
-        report(f"dump {name}", ns, nbytes)
-        if msgspec is not None:
-            ns = measure(lambda s=s: msgspec.json.encode(s), n)
-            report(f"  msgspec {name}", ns, nbytes)
-
-    print("\n== validate_json str ==")
-    for name, s in cases:
-        raw = s.encode("utf-8")
-        j = json.dumps(s, ensure_ascii=False).encode("utf-8")
-        n = scaled_number(len(raw))
-        ns = measure(lambda j=j: adapter.struct_validate_json(j), n)
-        report(f"validate {name}", ns, len(raw))
-        if msgspec is not None:
-            ns = measure(lambda j=j: msgspec.json.decode(j, type=str), n)
-            report(f"  msgspec {name}", ns, len(raw))
-
-
-def make_struct(nfields):
-    annotations = {f"f{i}": int for i in range(nfields)}
-    return StructMeta("S", (Struct,), {"__annotations__": annotations})
-
-
-def bench_wide_struct():
-    print("\n== wide struct validate_json ==")
-    for nfields in (5, 20, 50, 100):
-        cls = make_struct(nfields)
-        adapter = StructAdapter(cls)
-        keys = [f"f{i}" for i in range(nfields)]
-        inorder = ("{" + ",".join(f'"{k}":1' for k in keys) + "}").encode()
-        reverse = ("{" + ",".join(f'"{k}":1' for k in reversed(keys)) + "}").encode()
-        n = max(2000, 200_000 // nfields)
-        report(
-            f"{nfields} fields inorder",
-            measure(
-                lambda adapter=adapter, inorder=inorder: adapter.struct_validate_json(
-                    inorder
-                ),
-                n,
-            ),
-        )
-        report(
-            f"{nfields} fields reverse",
-            measure(
-                lambda adapter=adapter, reverse=reverse: adapter.struct_validate_json(
-                    reverse
-                ),
-                n,
-            ),
-        )
+def speedup(base, other):
+    return None if other is None else f"{other / base:.2f}x"
 
 
 def main():
-    print(f"Python {sys.version.split()[0]}, structtype {structtype.__version__}")
-    bench_str(StructAdapter(str), msgspec)
-    bench_wide_struct()
+    class Msg(Struct):
+        text: str
+
+    codecs = {}
+    if msgspec is not None:
+
+        class MsgMS(msgspec.Struct):
+            text: str
+
+        codecs["msgspec"] = MsgMS
+    if pydantic is not None:
+
+        class MsgPD(pydantic.BaseModel):
+            text: str
+
+        codecs["pydantic"] = MsgPD
+
+    parts = [f"Python {sys.version.split()[0]}", f"structtype {structtype.__version__}"]
+    if msgspec is not None:
+        parts.append(f"msgspec {msgspec.__version__}")
+    if pydantic is not None:
+        parts.append(f"pydantic {pydantic.__version__}")
+    print(", ".join(parts))
+
+    dump_rows, validate_rows = [], []
+    for name, s in CASES:
+        nbytes = len(s.encode("utf-8"))
+        obj = Msg(s)
+        buf = obj.struct_dump_json()
+
+        st_dump = measure(lambda o=obj: o.struct_dump_json(), 200) / nbytes * 1e9
+        st_validate = (
+            measure(lambda b=buf: Msg.struct_validate_json(b), 200) / nbytes * 1e9
+        )
+        ms_dump = ms_validate = pd_dump = pd_validate = None
+        if msgspec is not None:
+            cls = codecs["msgspec"]
+            mobj = cls(s)
+            ms_dump = measure(lambda o=mobj: msgspec.json.encode(o), 200) / nbytes * 1e9
+            ms_validate = (
+                measure(lambda b=buf, c=cls: msgspec.json.decode(b, type=c), 200)
+                / nbytes
+                * 1e9
+            )
+        if pydantic is not None:
+            pobj = codecs["pydantic"](text=s)
+            pd_dump = (
+                measure(lambda o=pobj: o.model_dump_json().encode(), 200) / nbytes * 1e9
+            )
+            pd_validate = (
+                measure(
+                    lambda b=buf, c=codecs["pydantic"]: c.model_validate_json(b), 200
+                )
+                / nbytes
+                * 1e9
+            )
+
+        dump_rows.append((name, st_dump, ms_dump, pd_dump, speedup(st_dump, pd_dump)))
+        validate_rows.append(
+            (
+                name,
+                st_validate,
+                ms_validate,
+                pd_validate,
+                speedup(st_validate, pd_validate),
+            )
+        )
+
+    columns = ["structtype", "msgspec", "pydantic", "vs pydantic"]
+    unit = f"{SIZE} chars"
+    table(f"long str struct dump_json ({unit}, ns/byte)", columns, dump_rows)
+    table(f"long str struct validate_json ({unit}, ns/byte)", columns, validate_rows)
 
 
 if __name__ == "__main__":
