@@ -230,6 +230,20 @@ ascii_get_buffer(PyObject *str) {
     return (char *)(((PyASCIIObject *)str) + 1);
 }
 
+/* Build a `str` from a UTF-8 view.  `is_ascii` asserts every byte is < 0x80
+ * so the compact ASCII representation can be filled directly, bypassing the
+ * UTF-8 decoder.  Returns NULL with the CPython exception set on failure. */
+static MS_INLINE PyObject *
+ms_unicode_from_view(const char *view, Py_ssize_t size, bool is_ascii) {
+    if (MS_LIKELY(is_ascii)) {
+        PyObject *out = PyUnicode_New(size, 127);
+        if (MS_UNLIKELY(out == NULL)) return NULL;
+        memcpy(ascii_get_buffer(out), view, size);
+        return out;
+    }
+    return PyUnicode_DecodeUTF8(view, size, NULL);
+}
+
 /* Fill in view.buf & view.len from either a Unicode or buffer-compatible
  * object. */
 static int
@@ -1554,6 +1568,44 @@ _meta_richcompare_part(PyObject *left, PyObject *right) {
     }
 }
 
+/*************************************************************************
+ * Shared metadata-type helpers                                          *
+ *************************************************************************/
+
+/* Metadata types (Field, Serializer, and the Constraint subclasses) all
+ * store their fields as PyObject pointers and share identical repr,
+ * richcompare, and hash logic. These helpers are defined once and applied
+ * to each type's own fields. Never #undef these. */
+
+#define MS_META_NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
+
+#define MS_META_SET_FIELD(self, x) do { Py_XINCREF(x); self->x = x; } while(0)
+
+#define MS_META_DO_REPR(builder, self, field, first) do { \
+    if (self->field != NULL) { \
+        if (!_meta_repr_part(builder, #field "=", sizeof(#field), self->field, first)) { \
+            goto error; \
+        } \
+    } \
+} while(0)
+
+#define MS_META_DO_COMPARE(self, other, field, equal) do { \
+    equal = _meta_richcompare_part(self->field, other->field); \
+    if (equal < 0) return NULL; \
+    if (!equal) goto done; \
+} while (0)
+
+#define MS_META_DO_HASH(self, field) do { \
+    if (self->field != NULL) { \
+        Py_uhash_t lane = PyObject_Hash(self->field); \
+        if (lane == (Py_uhash_t)-1) return -1; \
+        acc += lane * MS_HASH_XXPRIME_2; \
+        acc = MS_HASH_XXROTATE(acc); \
+        acc *= MS_HASH_XXPRIME_1; \
+        nfields += 1; \
+    } \
+} while (0)
+
 
 
 /*************************************************************************
@@ -1886,13 +1938,11 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     )
         return NULL;
 
-#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
-    NONE_TO_NULL(title);
-    NONE_TO_NULL(description);
-    NONE_TO_NULL(examples);
-    NONE_TO_NULL(deprecated);
-    NONE_TO_NULL(json_schema_extra);
-#undef NONE_TO_NULL
+    MS_META_NONE_TO_NULL(title);
+    MS_META_NONE_TO_NULL(description);
+    MS_META_NONE_TO_NULL(examples);
+    MS_META_NONE_TO_NULL(deprecated);
+    MS_META_NONE_TO_NULL(json_schema_extra);
 
     if (deprecated != NULL && !ensure_is_bool(deprecated, "deprecated")) return NULL;
 
@@ -1930,15 +1980,13 @@ Field_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
         return NULL;
     }
 
-#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
     Py_XINCREF(alias);
     self->alias = alias;
-    SET_FIELD(title);
-    SET_FIELD(description);
-    SET_FIELD(examples);
-    SET_FIELD(deprecated);
-    SET_FIELD(json_schema_extra);
-#undef SET_FIELD
+    MS_META_SET_FIELD(self, title);
+    MS_META_SET_FIELD(self, description);
+    MS_META_SET_FIELD(self, examples);
+    MS_META_SET_FIELD(self, deprecated);
+    MS_META_SET_FIELD(self, json_schema_extra);
 
     return (PyObject *)self;
 }
@@ -1948,20 +1996,12 @@ Field_repr(Field *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.Field(")) return NULL;
-#define DO_REPR(field) do { \
-    if (self->field != NULL) { \
-        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
-            goto error; \
-        } \
-    } \
-} while(0)
-    DO_REPR(alias);
-    DO_REPR(title);
-    DO_REPR(description);
-    DO_REPR(examples);
-    DO_REPR(deprecated);
-    DO_REPR(json_schema_extra);
-#undef DO_REPR
+    MS_META_DO_REPR(&builder, self, alias, &first);
+    MS_META_DO_REPR(&builder, self, title, &first);
+    MS_META_DO_REPR(&builder, self, description, &first);
+    MS_META_DO_REPR(&builder, self, examples, &first);
+    MS_META_DO_REPR(&builder, self, deprecated, &first);
+    MS_META_DO_REPR(&builder, self, json_schema_extra, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -2012,19 +2052,13 @@ Field_richcompare(Field *self, PyObject *py_other, int op) {
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-#define DO_COMPARE(field) do { \
-        equal = _meta_richcompare_part(self->field, other->field); \
-        if (equal < 0) return NULL; \
-        if (!equal) goto done; \
-    } while (0)
-        DO_COMPARE(alias);
-        DO_COMPARE(title);
-        DO_COMPARE(description);
-        DO_COMPARE(examples);
-        DO_COMPARE(deprecated);
-        DO_COMPARE(json_schema_extra);
+        MS_META_DO_COMPARE(self, other, alias, equal);
+        MS_META_DO_COMPARE(self, other, title, equal);
+        MS_META_DO_COMPARE(self, other, description, equal);
+        MS_META_DO_COMPARE(self, other, examples, equal);
+        MS_META_DO_COMPARE(self, other, deprecated, equal);
+        MS_META_DO_COMPARE(self, other, json_schema_extra, equal);
     }
-#undef DO_COMPARE
 done:
     if (op == Py_EQ) {
         out = equal ? Py_True : Py_False;
@@ -2047,21 +2081,11 @@ Field_hash(Field *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-#define DO_HASH(field) \
-    if (self->field != NULL) { \
-        Py_uhash_t lane = PyObject_Hash(self->field); \
-        if (lane == (Py_uhash_t)-1) return -1; \
-        acc += lane * MS_HASH_XXPRIME_2; \
-        acc = MS_HASH_XXROTATE(acc); \
-        acc *= MS_HASH_XXPRIME_1; \
-        nfields += 1; \
-    }
-    DO_HASH(alias);
-    DO_HASH(title);
-    DO_HASH(description);
-    DO_HASH(deprecated);
+    MS_META_DO_HASH(self, alias);
+    MS_META_DO_HASH(self, title);
+    MS_META_DO_HASH(self, description);
+    MS_META_DO_HASH(self, deprecated);
     /* Leave out examples & json_schema_extra, since they could be unhashable */
-#undef DO_HASH
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -2176,10 +2200,8 @@ Serializer_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     )
         return NULL;
 
-#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
-    NONE_TO_NULL(load);
-    NONE_TO_NULL(dump);
-#undef NONE_TO_NULL
+    MS_META_NONE_TO_NULL(load);
+    MS_META_NONE_TO_NULL(dump);
 
     if (load != NULL && !PyCallable_Check(load)) {
         PyErr_SetString(PyExc_TypeError, "load must be callable");
@@ -2193,10 +2215,8 @@ Serializer_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     Serializer *self = (Serializer *)Serializer_Type.tp_alloc(&Serializer_Type, 0);
     if (self == NULL) return NULL;
 
-#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
-    SET_FIELD(load);
-    SET_FIELD(dump);
-#undef SET_FIELD
+    MS_META_SET_FIELD(self, load);
+    MS_META_SET_FIELD(self, dump);
 
     return (PyObject *)self;
 }
@@ -2206,16 +2226,8 @@ Serializer_repr(Serializer *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.Serializer(")) return NULL;
-#define DO_REPR(field) do { \
-    if (self->field != NULL) { \
-        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
-            goto error; \
-        } \
-    } \
-} while(0)
-    DO_REPR(load);
-    DO_REPR(dump);
-#undef DO_REPR
+    MS_META_DO_REPR(&builder, self, load, &first);
+    MS_META_DO_REPR(&builder, self, dump, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -2262,15 +2274,9 @@ Serializer_richcompare(Serializer *self, PyObject *py_other, int op) {
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-#define DO_COMPARE(field) do { \
-        equal = _meta_richcompare_part(self->field, other->field); \
-        if (equal < 0) return NULL; \
-        if (!equal) goto done; \
-    } while (0)
-        DO_COMPARE(load);
-        DO_COMPARE(dump);
+        MS_META_DO_COMPARE(self, other, load, equal);
+        MS_META_DO_COMPARE(self, other, dump, equal);
     }
-#undef DO_COMPARE
 done:
     if (op == Py_EQ) {
         out = equal ? Py_True : Py_False;
@@ -2293,18 +2299,8 @@ Serializer_hash(Serializer *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-#define DO_HASH(field) \
-    if (self->field != NULL) { \
-        Py_uhash_t lane = PyObject_Hash(self->field); \
-        if (lane == (Py_uhash_t)-1) return -1; \
-        acc += lane * MS_HASH_XXPRIME_2; \
-        acc = MS_HASH_XXROTATE(acc); \
-        acc *= MS_HASH_XXPRIME_1; \
-        nfields += 1; \
-    }
-    DO_HASH(load);
-    DO_HASH(dump);
-#undef DO_HASH
+    MS_META_DO_HASH(self, load);
+    MS_META_DO_HASH(self, dump);
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -2399,9 +2395,7 @@ Constraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     )
         return NULL;
 
-#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
-    NONE_TO_NULL(fn);
-#undef NONE_TO_NULL
+    MS_META_NONE_TO_NULL(fn);
 
     if (fn != NULL && !PyCallable_Check(fn)) {
         PyErr_SetString(PyExc_TypeError, "fn must be callable");
@@ -2443,15 +2437,7 @@ Constraint_repr(Constraint *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.Constraint(")) return NULL;
-#define DO_REPR(field) do { \
-    if (self->field != NULL) { \
-        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
-            goto error; \
-        } \
-    } \
-} while(0)
-    DO_REPR(fn);
-#undef DO_REPR
+    MS_META_DO_REPR(&builder, self, fn, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -2497,14 +2483,8 @@ Constraint_richcompare(Constraint *self, PyObject *py_other, int op) {
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-#define DO_COMPARE(field) do { \
-        equal = _meta_richcompare_part(self->field, other->field); \
-        if (equal < 0) return NULL; \
-        if (!equal) goto done; \
-    } while (0)
-        DO_COMPARE(fn);
+        MS_META_DO_COMPARE(self, other, fn, equal);
     }
-#undef DO_COMPARE
 done:
     if (op == Py_EQ) {
         out = equal ? Py_True : Py_False;
@@ -2529,17 +2509,7 @@ Constraint_hash(Constraint *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-#define DO_HASH(field) \
-    if (self->field != NULL) { \
-        Py_uhash_t lane = PyObject_Hash(self->field); \
-        if (lane == (Py_uhash_t)-1) return -1; \
-        acc += lane * MS_HASH_XXPRIME_2; \
-        acc = MS_HASH_XXROTATE(acc); \
-        acc *= MS_HASH_XXPRIME_1; \
-        nfields += 1; \
-    }
-    DO_HASH(fn);
-#undef DO_HASH
+    MS_META_DO_HASH(self, fn);
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -2636,13 +2606,11 @@ NumericConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     )
         return NULL;
 
-#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
-    NONE_TO_NULL(gt);
-    NONE_TO_NULL(ge);
-    NONE_TO_NULL(lt);
-    NONE_TO_NULL(le);
-    NONE_TO_NULL(multiple_of);
-#undef NONE_TO_NULL
+    MS_META_NONE_TO_NULL(gt);
+    MS_META_NONE_TO_NULL(ge);
+    MS_META_NONE_TO_NULL(lt);
+    MS_META_NONE_TO_NULL(le);
+    MS_META_NONE_TO_NULL(multiple_of);
 
     /* Check constraint parameter types/values */
     if (gt != NULL && !ensure_is_finite_numeric(gt, "gt", false)) return NULL;
@@ -2664,13 +2632,11 @@ NumericConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     NumericConstraint *self = (NumericConstraint *)NumericConstraint_Type.tp_alloc(&NumericConstraint_Type, 0);
     if (self == NULL) return NULL;
 
-#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
-    SET_FIELD(gt);
-    SET_FIELD(ge);
-    SET_FIELD(lt);
-    SET_FIELD(le);
-    SET_FIELD(multiple_of);
-#undef SET_FIELD
+    MS_META_SET_FIELD(self, gt);
+    MS_META_SET_FIELD(self, ge);
+    MS_META_SET_FIELD(self, lt);
+    MS_META_SET_FIELD(self, le);
+    MS_META_SET_FIELD(self, multiple_of);
 
     return (PyObject *)self;
 }
@@ -2893,19 +2859,11 @@ NumericConstraint_repr(NumericConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.NumericConstraint(")) return NULL;
-#define DO_REPR(field) do { \
-    if (self->field != NULL) { \
-        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
-            goto error; \
-        } \
-    } \
-} while(0)
-    DO_REPR(gt);
-    DO_REPR(ge);
-    DO_REPR(lt);
-    DO_REPR(le);
-    DO_REPR(multiple_of);
-#undef DO_REPR
+    MS_META_DO_REPR(&builder, self, gt, &first);
+    MS_META_DO_REPR(&builder, self, ge, &first);
+    MS_META_DO_REPR(&builder, self, lt, &first);
+    MS_META_DO_REPR(&builder, self, le, &first);
+    MS_META_DO_REPR(&builder, self, multiple_of, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -2955,18 +2913,12 @@ NumericConstraint_richcompare(NumericConstraint *self, PyObject *py_other, int o
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-#define DO_COMPARE(field) do { \
-        equal = _meta_richcompare_part(self->field, other->field); \
-        if (equal < 0) return NULL; \
-        if (!equal) goto done; \
-    } while (0)
-        DO_COMPARE(gt);
-        DO_COMPARE(ge);
-        DO_COMPARE(lt);
-        DO_COMPARE(le);
-        DO_COMPARE(multiple_of);
+        MS_META_DO_COMPARE(self, other, gt, equal);
+        MS_META_DO_COMPARE(self, other, ge, equal);
+        MS_META_DO_COMPARE(self, other, lt, equal);
+        MS_META_DO_COMPARE(self, other, le, equal);
+        MS_META_DO_COMPARE(self, other, multiple_of, equal);
     }
-#undef DO_COMPARE
 done:
     if (op == Py_EQ) {
         out = equal ? Py_True : Py_False;
@@ -2989,21 +2941,11 @@ NumericConstraint_hash(NumericConstraint *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-#define DO_HASH(field) \
-    if (self->field != NULL) { \
-        Py_uhash_t lane = PyObject_Hash(self->field); \
-        if (lane == (Py_uhash_t)-1) return -1; \
-        acc += lane * MS_HASH_XXPRIME_2; \
-        acc = MS_HASH_XXROTATE(acc); \
-        acc *= MS_HASH_XXPRIME_1; \
-        nfields += 1; \
-    }
-    DO_HASH(gt);
-    DO_HASH(ge);
-    DO_HASH(lt);
-    DO_HASH(le);
-    DO_HASH(multiple_of);
-#undef DO_HASH
+    MS_META_DO_HASH(self, gt);
+    MS_META_DO_HASH(self, ge);
+    MS_META_DO_HASH(self, lt);
+    MS_META_DO_HASH(self, le);
+    MS_META_DO_HASH(self, multiple_of);
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -3114,11 +3056,9 @@ StrConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     )
         return NULL;
 
-#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
-    NONE_TO_NULL(pattern);
-    NONE_TO_NULL(min_length);
-    NONE_TO_NULL(max_length);
-#undef NONE_TO_NULL
+    MS_META_NONE_TO_NULL(pattern);
+    MS_META_NONE_TO_NULL(min_length);
+    MS_META_NONE_TO_NULL(max_length);
 
     /* Check constraint parameter types/values */
     if (pattern != NULL && !ensure_is_string(pattern, "pattern")) return NULL;
@@ -3138,14 +3078,12 @@ StrConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
         return NULL;
     }
 
-#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
 #define SET_FIELD_OWNED(x) do { self->x = x; } while(0)
-    SET_FIELD(pattern);
+    MS_META_SET_FIELD(self, pattern);
     SET_FIELD_OWNED(regex);
-    SET_FIELD(min_length);
-    SET_FIELD(max_length);
+    MS_META_SET_FIELD(self, min_length);
+    MS_META_SET_FIELD(self, max_length);
 #undef SET_FIELD_OWNED
-#undef SET_FIELD
 
     return (PyObject *)self;
 }
@@ -3212,17 +3150,9 @@ StrConstraint_repr(StrConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.StrConstraint(")) return NULL;
-#define DO_REPR(field) do { \
-    if (self->field != NULL) { \
-        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
-            goto error; \
-        } \
-    } \
-} while(0)
-    DO_REPR(pattern);
-    DO_REPR(min_length);
-    DO_REPR(max_length);
-#undef DO_REPR
+    MS_META_DO_REPR(&builder, self, pattern, &first);
+    MS_META_DO_REPR(&builder, self, min_length, &first);
+    MS_META_DO_REPR(&builder, self, max_length, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -3270,16 +3200,10 @@ StrConstraint_richcompare(StrConstraint *self, PyObject *py_other, int op) {
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-#define DO_COMPARE(field) do { \
-        equal = _meta_richcompare_part(self->field, other->field); \
-        if (equal < 0) return NULL; \
-        if (!equal) goto done; \
-    } while (0)
-        DO_COMPARE(pattern);
-        DO_COMPARE(min_length);
-        DO_COMPARE(max_length);
+        MS_META_DO_COMPARE(self, other, pattern, equal);
+        MS_META_DO_COMPARE(self, other, min_length, equal);
+        MS_META_DO_COMPARE(self, other, max_length, equal);
     }
-#undef DO_COMPARE
 done:
     if (op == Py_EQ) {
         out = equal ? Py_True : Py_False;
@@ -3302,19 +3226,9 @@ StrConstraint_hash(StrConstraint *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-#define DO_HASH(field) \
-    if (self->field != NULL) { \
-        Py_uhash_t lane = PyObject_Hash(self->field); \
-        if (lane == (Py_uhash_t)-1) return -1; \
-        acc += lane * MS_HASH_XXPRIME_2; \
-        acc = MS_HASH_XXROTATE(acc); \
-        acc *= MS_HASH_XXPRIME_1; \
-        nfields += 1; \
-    }
-    DO_HASH(pattern);
-    DO_HASH(min_length);
-    DO_HASH(max_length);
-#undef DO_HASH
+    MS_META_DO_HASH(self, pattern);
+    MS_META_DO_HASH(self, min_length);
+    MS_META_DO_HASH(self, max_length);
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -3416,10 +3330,8 @@ BytesConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     )
         return NULL;
 
-#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
-    NONE_TO_NULL(min_length);
-    NONE_TO_NULL(max_length);
-#undef NONE_TO_NULL
+    MS_META_NONE_TO_NULL(min_length);
+    MS_META_NONE_TO_NULL(max_length);
 
     /* Check constraint parameter types/values */
     if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
@@ -3428,10 +3340,8 @@ BytesConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     BytesConstraint *self = (BytesConstraint *)BytesConstraint_Type.tp_alloc(&BytesConstraint_Type, 0);
     if (self == NULL) return NULL;
 
-#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
-    SET_FIELD(min_length);
-    SET_FIELD(max_length);
-#undef SET_FIELD
+    MS_META_SET_FIELD(self, min_length);
+    MS_META_SET_FIELD(self, max_length);
 
     return (PyObject *)self;
 }
@@ -3504,16 +3414,8 @@ BytesConstraint_repr(BytesConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.BytesConstraint(")) return NULL;
-#define DO_REPR(field) do { \
-    if (self->field != NULL) { \
-        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
-            goto error; \
-        } \
-    } \
-} while(0)
-    DO_REPR(min_length);
-    DO_REPR(max_length);
-#undef DO_REPR
+    MS_META_DO_REPR(&builder, self, min_length, &first);
+    MS_META_DO_REPR(&builder, self, max_length, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -3560,15 +3462,9 @@ BytesConstraint_richcompare(BytesConstraint *self, PyObject *py_other, int op) {
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-#define DO_COMPARE(field) do { \
-        equal = _meta_richcompare_part(self->field, other->field); \
-        if (equal < 0) return NULL; \
-        if (!equal) goto done; \
-    } while (0)
-        DO_COMPARE(min_length);
-        DO_COMPARE(max_length);
+        MS_META_DO_COMPARE(self, other, min_length, equal);
+        MS_META_DO_COMPARE(self, other, max_length, equal);
     }
-#undef DO_COMPARE
 done:
     if (op == Py_EQ) {
         out = equal ? Py_True : Py_False;
@@ -3591,18 +3487,8 @@ BytesConstraint_hash(BytesConstraint *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-#define DO_HASH(field) \
-    if (self->field != NULL) { \
-        Py_uhash_t lane = PyObject_Hash(self->field); \
-        if (lane == (Py_uhash_t)-1) return -1; \
-        acc += lane * MS_HASH_XXPRIME_2; \
-        acc = MS_HASH_XXROTATE(acc); \
-        acc *= MS_HASH_XXPRIME_1; \
-        nfields += 1; \
-    }
-    DO_HASH(min_length);
-    DO_HASH(max_length);
-#undef DO_HASH
+    MS_META_DO_HASH(self, min_length);
+    MS_META_DO_HASH(self, max_length);
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -3699,10 +3585,8 @@ CollectionConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     )
         return NULL;
 
-#define NONE_TO_NULL(x) do { if (x == Py_None) {x = NULL;} } while(0)
-    NONE_TO_NULL(min_length);
-    NONE_TO_NULL(max_length);
-#undef NONE_TO_NULL
+    MS_META_NONE_TO_NULL(min_length);
+    MS_META_NONE_TO_NULL(max_length);
 
     /* Check constraint parameter types/values */
     if (min_length != NULL && !ensure_is_nonnegative_integer(min_length, "min_length")) return NULL;
@@ -3711,10 +3595,8 @@ CollectionConstraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     CollectionConstraint *self = (CollectionConstraint *)CollectionConstraint_Type.tp_alloc(&CollectionConstraint_Type, 0);
     if (self == NULL) return NULL;
 
-#define SET_FIELD(x) do { Py_XINCREF(x); self->x = x; } while(0)
-    SET_FIELD(min_length);
-    SET_FIELD(max_length);
-#undef SET_FIELD
+    MS_META_SET_FIELD(self, min_length);
+    MS_META_SET_FIELD(self, max_length);
 
     return (PyObject *)self;
 }
@@ -3760,16 +3642,8 @@ CollectionConstraint_repr(CollectionConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.CollectionConstraint(")) return NULL;
-#define DO_REPR(field) do { \
-    if (self->field != NULL) { \
-        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
-            goto error; \
-        } \
-    } \
-} while(0)
-    DO_REPR(min_length);
-    DO_REPR(max_length);
-#undef DO_REPR
+    MS_META_DO_REPR(&builder, self, min_length, &first);
+    MS_META_DO_REPR(&builder, self, max_length, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -3816,15 +3690,9 @@ CollectionConstraint_richcompare(CollectionConstraint *self, PyObject *py_other,
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-#define DO_COMPARE(field) do { \
-        equal = _meta_richcompare_part(self->field, other->field); \
-        if (equal < 0) return NULL; \
-        if (!equal) goto done; \
-    } while (0)
-        DO_COMPARE(min_length);
-        DO_COMPARE(max_length);
+        MS_META_DO_COMPARE(self, other, min_length, equal);
+        MS_META_DO_COMPARE(self, other, max_length, equal);
     }
-#undef DO_COMPARE
 done:
     if (op == Py_EQ) {
         out = equal ? Py_True : Py_False;
@@ -3847,18 +3715,8 @@ CollectionConstraint_hash(CollectionConstraint *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-#define DO_HASH(field) \
-    if (self->field != NULL) { \
-        Py_uhash_t lane = PyObject_Hash(self->field); \
-        if (lane == (Py_uhash_t)-1) return -1; \
-        acc += lane * MS_HASH_XXPRIME_2; \
-        acc = MS_HASH_XXROTATE(acc); \
-        acc *= MS_HASH_XXPRIME_1; \
-        nfields += 1; \
-    }
-    DO_HASH(min_length);
-    DO_HASH(max_length);
-#undef DO_HASH
+    MS_META_DO_HASH(self, min_length);
+    MS_META_DO_HASH(self, max_length);
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -4014,15 +3872,7 @@ TimezoneConstraint_repr(TimezoneConstraint *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.TimezoneConstraint(")) return NULL;
-#define DO_REPR(field) do { \
-    if (self->field != NULL) { \
-        if (!_meta_repr_part(&builder, #field "=", sizeof(#field), self->field, &first)) { \
-            goto error; \
-        } \
-    } \
-} while(0)
-    DO_REPR(tz);
-#undef DO_REPR
+    MS_META_DO_REPR(&builder, self, tz, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -4068,14 +3918,8 @@ TimezoneConstraint_richcompare(TimezoneConstraint *self, PyObject *py_other, int
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-#define DO_COMPARE(field) do { \
-        equal = _meta_richcompare_part(self->field, other->field); \
-        if (equal < 0) return NULL; \
-        if (!equal) goto done; \
-    } while (0)
-        DO_COMPARE(tz);
+        MS_META_DO_COMPARE(self, other, tz, equal);
     }
-#undef DO_COMPARE
 done:
     if (op == Py_EQ) {
         out = equal ? Py_True : Py_False;
@@ -4098,17 +3942,7 @@ TimezoneConstraint_hash(TimezoneConstraint *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-#define DO_HASH(field) \
-    if (self->field != NULL) { \
-        Py_uhash_t lane = PyObject_Hash(self->field); \
-        if (lane == (Py_uhash_t)-1) return -1; \
-        acc += lane * MS_HASH_XXPRIME_2; \
-        acc = MS_HASH_XXROTATE(acc); \
-        acc *= MS_HASH_XXPRIME_1; \
-        nfields += 1; \
-    }
-    DO_HASH(tz);
-#undef DO_HASH
+    MS_META_DO_HASH(self, tz);
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -7000,6 +6834,20 @@ ms_validation_error(const char *got, TypeNode *type, PathNode *path) {
     return NULL;
 }
 
+/* Delete `name` from `obj` while preserving any ambient exception.
+ *
+ * PyObject_DelAttr may itself set an exception (e.g. when the attribute is
+ * absent), which would mask the error that triggered cleanup. Fetch and
+ * restore the ambient exception around the delete so the original error
+ * survives. */
+static MS_NOINLINE void
+ms_delattr_preserving_error(PyObject *obj, PyObject *name) {
+    PyObject *err_type, *err_value, *err_tb;
+    PyErr_Fetch(&err_type, &err_value, &err_tb);
+    PyObject_DelAttr(obj, name);
+    PyErr_Restore(err_type, err_value, err_tb);
+}
+
 static void
 ms_missing_required_field(PyObject *field, PathNode *path) {
     ms_raise_validation_error(
@@ -7394,6 +7242,52 @@ typedef struct {
     PyObject *codec_maps;  /* tuple of per-field Serializer dicts, or NULL */
 } StructMetaInfo;
 
+/* Config keys accepted in a class-body `struct_config` dict.
+ *
+ * `offset` is the offset of the option in the temporary StructMetaInfo used
+ * while a class is being built; `kind` selects how the value is applied. This
+ * table is the single source of truth for the set of known config keys (used
+ * to reject unknown keys). */
+typedef enum { CFG_BOOL, CFG_TAG, CFG_TAG_FIELD, CFG_RENAME } CfgKind;
+
+typedef struct {
+    const char *name;
+    size_t offset;  /* offsetof(StructMetaInfo, field) */
+    CfgKind kind;
+} CfgSpec;
+
+/* Boolean config options, shared by the config table, base-class inheritance,
+ * and __struct_config__ construction. Arguments to X:
+ *   field   - member name, present on both StructMetaInfo/StructMetaObject
+ *   inherit - 1 if the option is inherited from base classes, else 0
+ *   value   - expression reading the resolved value from a `st_type`
+ *             (StructMetaObject *) local; only used when building the dict
+ * The order here fixes both apply order and __struct_config__ key order. */
+#define ST_CFG_BOOLS(X) \
+    X(frozen,                1, st_type->frozen == OPT_TRUE) \
+    X(eq,                    1, st_type->eq != OPT_FALSE) \
+    X(order,                 1, st_type->order == OPT_TRUE) \
+    X(kw_only,               1, st_type->kw_only == OPT_TRUE) \
+    X(repr_omit_defaults,    1, st_type->repr_omit_defaults == OPT_TRUE) \
+    X(array_like,            1, st_type->array_like == OPT_TRUE) \
+    X(omit_defaults,         1, st_type->omit_defaults == OPT_TRUE) \
+    X(forbid_unknown_fields, 1, st_type->forbid_unknown_fields == OPT_TRUE) \
+    X(check_types_on_init,   0, st_type->check_types_on_init == OPT_TRUE) \
+    X(weakref,               0, ((PyTypeObject *)st_type)->tp_weaklistoffset != 0) \
+    X(dict,                  0, ((PyTypeObject *)st_type)->tp_dictoffset != 0) \
+    X(cache_hash,            0, st_type->hash_offset != 0)
+
+static const CfgSpec config_specs[] = {
+#define ST_CFG_SPEC(field, inherit, value) \
+    {#field, offsetof(StructMetaInfo, field), CFG_BOOL},
+    ST_CFG_BOOLS(ST_CFG_SPEC)
+#undef ST_CFG_SPEC
+    {"tag",       offsetof(StructMetaInfo, temp_tag),       CFG_TAG},
+    {"tag_field", offsetof(StructMetaInfo, temp_tag_field), CFG_TAG_FIELD},
+    {"rename",    offsetof(StructMetaInfo, rename),         CFG_RENAME},
+    {NULL, 0, CFG_BOOL},
+};
+
 static int
 structmeta_check_namespace(PyObject *namespace) {
     static const char *attrs[] = {"__init__", "__new__", "__slots__"};
@@ -7473,18 +7367,14 @@ structmeta_collect_base(StructMetaInfo *info, StructspecState *mod, PyObject *ba
     if (st_type->rename != NULL) {
         info->rename = st_type->rename;
     }
-    info->frozen = STRUCT_MERGE_OPTIONS(info->frozen, st_type->frozen);
-    info->eq = STRUCT_MERGE_OPTIONS(info->eq, st_type->eq);
-    info->order = STRUCT_MERGE_OPTIONS(info->order, st_type->order);
-    info->array_like = STRUCT_MERGE_OPTIONS(info->array_like, st_type->array_like);
-    info->omit_defaults = STRUCT_MERGE_OPTIONS(info->omit_defaults, st_type->omit_defaults);
-    info->repr_omit_defaults = STRUCT_MERGE_OPTIONS(
-        info->repr_omit_defaults, st_type->repr_omit_defaults
-    );
-    info->forbid_unknown_fields = STRUCT_MERGE_OPTIONS(
-        info->forbid_unknown_fields, st_type->forbid_unknown_fields
-    );
-    info->kw_only = STRUCT_MERGE_OPTIONS(info->kw_only, st_type->kw_only);
+#define ST_CFG_MERGE_BOOL_1(field) \
+    info->field = STRUCT_MERGE_OPTIONS(info->field, st_type->field);
+#define ST_CFG_MERGE_BOOL_0(field)
+#define ST_CFG_MERGE(field, inherit, value) ST_CFG_MERGE_BOOL_##inherit(field)
+    ST_CFG_BOOLS(ST_CFG_MERGE)
+#undef ST_CFG_MERGE
+#undef ST_CFG_MERGE_BOOL_1
+#undef ST_CFG_MERGE_BOOL_0
 
     PyObject *fields = st_type->struct_fields;
     PyObject *alias_fields = st_type->struct_alias_fields;
@@ -7539,43 +7429,34 @@ extract_field_from_annotated(PyObject *annotation, StructspecState *mod) {
     }
     /* Check for __metadata__ without disturbing existing errors */
     int has_error = PyErr_Occurred() != NULL;
-    if (!has_error) {
-        PyObject *metadata = PyObject_GetAttr(annotation, mod->str___metadata__);
-        if (metadata == NULL) {
-            PyErr_Clear();
-            return NULL;
-        }
-        if (!PyTuple_Check(metadata)) { Py_DECREF(metadata); return NULL; }
-        Field *result = NULL;
-        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(metadata); i++) {
-            PyObject *item = PyTuple_GET_ITEM(metadata, i);
-            if (Py_TYPE(item) == &Field_Type) { result = (Field *)item; break; }
-        }
-        Py_DECREF(metadata);
-        return result;
-    } else {
-        /* Save existing error, try to get metadata */
-        PyObject *exc_type, *exc_value, *exc_tb;
+    PyObject *exc_type = NULL, *exc_value = NULL, *exc_tb = NULL;
+    if (has_error) {
+        /* Save the existing error while we attempt to read metadata. */
         PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
-        PyObject *metadata = PyObject_GetAttr(annotation, mod->str___metadata__);
-        if (metadata == NULL) {
+    }
+    PyObject *metadata = PyObject_GetAttr(annotation, mod->str___metadata__);
+    if (metadata == NULL) {
+        if (has_error) {
             /* Restore original error */
             PyErr_Restore(exc_type, exc_value, exc_tb);
-            return NULL;
         }
-        /* Found metadata - discard saved error */
-        Py_XDECREF(exc_type);
-        Py_XDECREF(exc_value);
-        Py_XDECREF(exc_tb);
-        if (!PyTuple_Check(metadata)) { Py_DECREF(metadata); return NULL; }
-        Field *result = NULL;
-        for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(metadata); i++) {
-            PyObject *item = PyTuple_GET_ITEM(metadata, i);
-            if (Py_TYPE(item) == &Field_Type) { result = (Field *)item; break; }
+        else {
+            PyErr_Clear();
         }
-        Py_DECREF(metadata);
-        return result;
+        return NULL;
     }
+    /* Found metadata - discard any saved error */
+    Py_XDECREF(exc_type);
+    Py_XDECREF(exc_value);
+    Py_XDECREF(exc_tb);
+    if (!PyTuple_Check(metadata)) { Py_DECREF(metadata); return NULL; }
+    Field *result = NULL;
+    for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(metadata); i++) {
+        PyObject *item = PyTuple_GET_ITEM(metadata, i);
+        if (Py_TYPE(item) == &Field_Type) { result = (Field *)item; break; }
+    }
+    Py_DECREF(metadata);
+    return result;
 }
 
 static int
@@ -8719,106 +8600,48 @@ structmeta_construct_offsets(
     return 0;
 }
 
-/* The 15 known config keys for validation */
-static const char *known_config_keys[] = {
-    "frozen", "eq", "order", "kw_only", "repr_omit_defaults", "array_like",
-    "omit_defaults", "forbid_unknown_fields", "check_types_on_init",
-    "weakref", "dict", "cache_hash", "tag", "tag_field", "rename",
-    NULL
-};
+/* Look up a config key by name, or NULL if unknown. */
+static const CfgSpec *
+structmeta_find_spec(PyObject *key) {
+    if (!PyUnicode_Check(key)) return NULL;
+    for (const CfgSpec *s = config_specs; s->name != NULL; s++) {
+        if (PyUnicode_CompareWithASCIIString(key, s->name) == 0) return s;
+    }
+    return NULL;
+}
 
 /* Apply spec-mode fields from a dict over the StructMetaInfo.
  * Only keys present in the dict override the info. */
 static int
 structmeta_apply_spec(StructMetaInfo *info, PyObject *spec) {
-    PyObject *v;
-
-    /* Bool options — strict PyBool_Check */
-    v = PyDict_GetItemString(spec, "frozen");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`frozen` must be a bool"); return -1; }
-        info->frozen = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+    for (const CfgSpec *s = config_specs; s->name != NULL; s++) {
+        PyObject *v = PyDict_GetItemString(spec, s->name);
+        if (v == NULL) continue;
+        if (s->kind == CFG_BOOL) {
+            /* Bool options — strict PyBool_Check */
+            if (!PyBool_Check(v)) {
+                PyErr_Format(PyExc_TypeError, "`%s` must be a bool", s->name);
+                return -1;
+            }
+            *(int *)((char *)info + s->offset) = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
+        }
+        else {
+            PyObject **slot = (PyObject **)((char *)info + s->offset);
+            /* tag: None or False => explicitly no tag */
+            if (s->kind == CFG_TAG) {
+                *slot = (v == Py_None) ? Py_False : v;
+            }
+            else {
+                *slot = (v == Py_None) ? NULL : v;
+            }
+        }
     }
-    v = PyDict_GetItemString(spec, "eq");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`eq` must be a bool"); return -1; }
-        info->eq = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "order");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`order` must be a bool"); return -1; }
-        info->order = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "kw_only");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`kw_only` must be a bool"); return -1; }
-        info->kw_only = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "repr_omit_defaults");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`repr_omit_defaults` must be a bool"); return -1; }
-        info->repr_omit_defaults = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "array_like");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`array_like` must be a bool"); return -1; }
-        info->array_like = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "omit_defaults");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`omit_defaults` must be a bool"); return -1; }
-        info->omit_defaults = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "forbid_unknown_fields");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`forbid_unknown_fields` must be a bool"); return -1; }
-        info->forbid_unknown_fields = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "check_types_on_init");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`check_types_on_init` must be a bool"); return -1; }
-        info->check_types_on_init = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "weakref");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`weakref` must be a bool"); return -1; }
-        info->weakref = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "dict");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`dict` must be a bool"); return -1; }
-        info->dict = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-    v = PyDict_GetItemString(spec, "cache_hash");
-    if (v != NULL) {
-        if (!PyBool_Check(v)) { PyErr_SetString(PyExc_TypeError, "`cache_hash` must be a bool"); return -1; }
-        info->cache_hash = (v == Py_True) ? OPT_TRUE : OPT_FALSE;
-    }
-
-    /* tag: None or False => explicitly no tag */
-    v = PyDict_GetItemString(spec, "tag");
-    if (v != NULL) info->temp_tag = (v == Py_None) ? Py_False : v;
-
-    v = PyDict_GetItemString(spec, "tag_field");
-    if (v != NULL) info->temp_tag_field = (v == Py_None) ? NULL : v;
-
-    v = PyDict_GetItemString(spec, "rename");
-    if (v != NULL) info->rename = (v == Py_None) ? NULL : v;
 
     /* Validate unknown keys */
     PyObject *key, *iter = PyObject_GetIter(spec);
     if (iter == NULL) return -1;
     while ((key = PyIter_Next(iter)) != NULL) {
-        int found = 0;
-        if (PyUnicode_Check(key)) {
-            for (const char **k = known_config_keys; *k != NULL; k++) {
-                if (PyUnicode_CompareWithASCIIString(key, *k) == 0) {
-                    found = 1;
-                    break;
-                }
-            }
-        }
-        if (!found) {
+        if (structmeta_find_spec(key) == NULL) {
             PyErr_Format(PyExc_TypeError, "Unknown struct_config key: %R", key);
             Py_DECREF(key);
             Py_DECREF(iter);
@@ -9275,10 +9098,7 @@ error:
         else {
             /* Fetch and restore the original exception to avoid DelAttr
              * silently clearing it on rare occasions. */
-            PyObject *err_type, *err_value, *err_tb;
-            PyErr_Fetch(&err_type, &err_value, &err_tb);
-            PyObject_DelAttr(obj, mod->str___structtype_cache__);
-            PyErr_Restore(err_type, err_value, err_tb);
+            ms_delattr_preserving_error(obj, mod->str___structtype_cache__);
         }
     }
     Py_DECREF(class);
@@ -9460,27 +9280,18 @@ structmeta_build_config_dict(StructMetaObject *st_type) {
     PyObject *d = PyDict_New();
     if (d == NULL) return NULL;
 
-    #define SET_BOOL(name, val) do { \
-        PyObject *b = (val) ? Py_True : Py_False; \
-        Py_INCREF(b); \
-        if (PyDict_SetItemString(d, name, b) < 0) { Py_DECREF(b); Py_DECREF(d); return NULL; } \
-    } while(0)
-
-    SET_BOOL("frozen", st_type->frozen == OPT_TRUE);
     /* eq defaults to True; OPT_UNSET (unresolved base) means the default */
-    SET_BOOL("eq", st_type->eq != OPT_FALSE);
-    SET_BOOL("order", st_type->order == OPT_TRUE);
-    SET_BOOL("kw_only", st_type->kw_only == OPT_TRUE);
-    SET_BOOL("repr_omit_defaults", st_type->repr_omit_defaults == OPT_TRUE);
-    SET_BOOL("array_like", st_type->array_like == OPT_TRUE);
-    SET_BOOL("omit_defaults", st_type->omit_defaults == OPT_TRUE);
-    SET_BOOL("forbid_unknown_fields", st_type->forbid_unknown_fields == OPT_TRUE);
-    SET_BOOL("check_types_on_init", st_type->check_types_on_init == OPT_TRUE);
-    SET_BOOL("weakref", ((PyTypeObject *)st_type)->tp_weaklistoffset != 0);
-    SET_BOOL("dict", ((PyTypeObject *)st_type)->tp_dictoffset != 0);
-    SET_BOOL("cache_hash", st_type->hash_offset != 0);
-
-    #undef SET_BOOL
+#define ST_CFG_SET_BOOL(field, inherit, value) do { \
+    PyObject *b = (value) ? Py_True : Py_False; \
+    Py_INCREF(b); \
+    if (PyDict_SetItemString(d, #field, b) < 0) { \
+        Py_DECREF(b); \
+        Py_DECREF(d); \
+        return NULL; \
+    } \
+} while(0);
+    ST_CFG_BOOLS(ST_CFG_SET_BOOL)
+#undef ST_CFG_SET_BOOL
 
     PyObject *tag_val = st_type->struct_tag_value;
     if (tag_val == NULL) tag_val = Py_None;
@@ -10194,7 +10005,9 @@ Struct_replace(
 error:
     Py_DECREF(out);
     return NULL;
-}static PyObject *
+}
+
+static PyObject *
 Struct_reduce(PyObject *self, PyObject *args)
 {
     PyObject *values = NULL, *out = NULL;
@@ -10749,10 +10562,7 @@ cleanup:
             * TypedDict. We need to delete the attribute. Fetch and restore the
             * original exception to avoid DelAttr silently clearing it on rare
             * occasions. */
-            PyObject *err_type, *err_value, *err_tb;
-            PyErr_Fetch(&err_type, &err_value, &err_tb);
-            PyObject_DelAttr(obj, mod->str___structtype_cache__);
-            PyErr_Restore(err_type, err_value, err_tb);
+            ms_delattr_preserving_error(obj, mod->str___structtype_cache__);
         }
     }
     Py_XDECREF(annotations);
@@ -10952,10 +10762,7 @@ cleanup:
             * Dataclass. We need to delete the attribute. Fetch and restore the
             * original exception to avoid DelAttr silently clearing it on rare
             * occasions. */
-            PyObject *err_type, *err_value, *err_tb;
-            PyErr_Fetch(&err_type, &err_value, &err_tb);
-            PyObject_DelAttr(obj, mod->str___structtype_cache__);
-            PyErr_Restore(err_type, err_value, err_tb);
+            ms_delattr_preserving_error(obj, mod->str___structtype_cache__);
         }
     }
     Py_XDECREF(cls);
@@ -11185,10 +10992,7 @@ cleanup:
             * NamedTuple. We need to delete the attribute. Fetch and restore
             * the original exception to avoid DelAttr silently clearing it
             * on rare occasions. */
-            PyObject *err_type, *err_value, *err_tb;
-            PyErr_Fetch(&err_type, &err_value, &err_tb);
-            PyObject_DelAttr(obj, mod->str___structtype_cache__);
-            PyErr_Restore(err_type, err_value, err_tb);
+            ms_delattr_preserving_error(obj, mod->str___structtype_cache__);
         }
     }
     Py_XDECREF(cls);
@@ -11372,9 +11176,13 @@ found_val:
     *field_name = name;
     *field_val = val;
     return true;
-}/*************************************************************************
+}
+
+/*************************************************************************
  * Object Utilities                                                      *
- *************************************************************************//*************************************************************************
+ *************************************************************************/
+
+/*************************************************************************
  * Shared Encoder structs/methods                                        *
  *************************************************************************/
 
@@ -11414,7 +11222,7 @@ ms_resize_bytes(PyObject** output_buffer, Py_ssize_t size)
 static MS_NOINLINE int
 ms_resize(EncoderState *self, Py_ssize_t size)
 {
-    /* Calculate growth: 2x (was size + size/2), with overflow check */
+    /* Calculate growth: 2x (size + size), with overflow check */
     Py_ssize_t growth = size;
     if (size > PY_SSIZE_T_MAX - growth) {
         PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
@@ -11445,14 +11253,7 @@ ms_ensure_space(EncoderState *self, Py_ssize_t size) {
 static MS_INLINE int
 ms_write(EncoderState *self, const char *s, Py_ssize_t n)
 {
-    if (n < 0 || self->output_len > PY_SSIZE_T_MAX - n) {
-        PyErr_SetString(PyExc_OverflowError, "encoded output is too large");
-        return -1;
-    }
-    Py_ssize_t required = self->output_len + n;
-    if (MS_UNLIKELY(required > self->max_output_len)) {
-        if (ms_resize(self, required) < 0) return -1;
-    }
+    if (ms_ensure_space(self, n) < 0) return -1;
     memcpy(self->output_buffer_raw + self->output_len, s, n);
     self->output_len += n;
     return 0;
@@ -12374,8 +12175,8 @@ ms_check_str_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
     return _ms_check_str_constraints(obj, type, path);
 }
 
-static bool
-ms_passes_bytes_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
+static MS_NOINLINE bool
+_ms_passes_bytes_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
     if (MS_UNLIKELY(type->types & MS_CONSTR_BYTES_MIN_LENGTH)) {
         Py_ssize_t c = TypeNode_get_constr_bytes_min_length(type);
         if (size < c) {
@@ -12391,6 +12192,14 @@ ms_passes_bytes_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
                 "Expected `bytes` of length <= %zd%U", c, path
             );
         }
+    }
+    return true;
+}
+
+static MS_INLINE bool
+ms_passes_bytes_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
+    if (MS_UNLIKELY(type->types & MS_BYTES_CONSTRS)) {
+        return _ms_passes_bytes_constraints(size, type, path);
     }
     return true;
 }
@@ -12453,8 +12262,8 @@ ms_passes_map_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
     return true;
 }
 
-static bool
-ms_passes_tz_constraint(
+static MS_NOINLINE bool
+_ms_passes_tz_constraint(
     PyObject *tz, TypeNode *type, PathNode *path
 ) {
     char *err, *type_str;
@@ -12480,6 +12289,16 @@ error:
 
     ms_raise_validation_error(path, err, type_str);
     return false;
+}
+
+static MS_INLINE bool
+ms_passes_tz_constraint(
+    PyObject *tz, TypeNode *type, PathNode *path
+) {
+    if (MS_UNLIKELY(type->types & MS_TIME_CONSTRS)) {
+        return _ms_passes_tz_constraint(tz, type, path);
+    }
+    return true;
 }
 
 static int
@@ -13655,17 +13474,8 @@ static PyObject *
 ms_decode_decimal(
     const char *view, Py_ssize_t size, bool is_ascii, PathNode *path, StructspecState *mod
 ) {
-    PyObject *str;
-
-    if (MS_LIKELY(is_ascii)) {
-        str = PyUnicode_New(size, 127);
-        if (str == NULL) return NULL;
-        memcpy(ascii_get_buffer(str), view, size);
-    }
-    else {
-        str = PyUnicode_DecodeUTF8(view, size, NULL);
-        if (str == NULL) return NULL;
-    }
+    PyObject *str = ms_unicode_from_view(view, size, is_ascii);
+    if (str == NULL) return NULL;
     PyObject *out = ms_decode_decimal_from_pystr(str, path, mod);
     Py_DECREF(str);
     return out;
@@ -14504,6 +14314,9 @@ escape:
         goto noescape;
     }
 }
+
+#undef write_ascii_pre
+#undef write_ascii_post
 
 static int
 json_encode_cstr(EncoderState *self, const char *src, Py_ssize_t len) {
@@ -16334,15 +16147,7 @@ json_decode_dict_key_fallback(
     {
         Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
         if (serializer->load != NULL) {
-            PyObject *out;
-            if (is_ascii) {
-                out = PyUnicode_New(size, 127);
-                if (MS_UNLIKELY(out == NULL)) return NULL;
-                memcpy(ascii_get_buffer(out), view, size);
-            }
-            else {
-                out = PyUnicode_DecodeUTF8(view, size, NULL);
-            }
+            PyObject *out = ms_unicode_from_view(view, size, is_ascii);
             if (out == NULL) return NULL;
             PyObject *key = PyObject_CallOneArg(serializer->load, out);
             Py_DECREF(out);
@@ -16354,15 +16159,8 @@ json_decode_dict_key_fallback(
         }
     }
     if (type->types & (MS_TYPE_STR | MS_TYPE_ANY)) {
-        PyObject *out;
-        if (is_ascii) {
-            out = PyUnicode_New(size, 127);
-            if (MS_UNLIKELY(out == NULL)) return NULL;
-            memcpy(ascii_get_buffer(out), view, size);
-        }
-        else {
-            out = PyUnicode_DecodeUTF8(view, size, NULL);
-        }
+        PyObject *out = ms_unicode_from_view(view, size, is_ascii);
+        if (out == NULL) return NULL;
         if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
             return ms_decode_custom(out, type, path);
         }
@@ -17191,15 +16989,8 @@ json_decode_dict(
                 char *view = NULL;
                 Py_ssize_t size = json_decode_string_view(self, &view, &is_ascii);
                 if (size < 0) goto error;
-                if (MS_LIKELY(is_ascii)) {
-                    key = PyUnicode_New(size, 127);
-                    if (MS_UNLIKELY(key == NULL)) goto error;
-                    memcpy(ascii_get_buffer(key), view, size);
-                }
-                else {
-                    key = PyUnicode_DecodeUTF8(view, size, NULL);
-                    if (MS_UNLIKELY(key == NULL)) goto error;
-                }
+                key = ms_unicode_from_view(view, size, is_ascii);
+                if (MS_UNLIKELY(key == NULL)) goto error;
             }
             else {
                 key = json_decode_dict_key(self, key_type, &key_path);
@@ -17712,15 +17503,8 @@ json_decode_str_fast(JSONDecoderState *self, TypeNode *type, PathNode *path)
     bool is_ascii = true;
     Py_ssize_t size = json_decode_string_view(self, &view, &is_ascii);
     if (size < 0) return NULL;
-    PyObject *out;
-    if (MS_LIKELY(is_ascii)) {
-        out = PyUnicode_New(size, 127);
-        if (MS_UNLIKELY(out == NULL)) return NULL;
-        memcpy(ascii_get_buffer(out), view, size);
-    }
-    else {
-        out = PyUnicode_DecodeUTF8(view, size, NULL);
-    }
+    PyObject *out = ms_unicode_from_view(view, size, is_ascii);
+    if (MS_UNLIKELY(out == NULL)) return NULL;
     return ms_check_str_constraints(out, type, path);
 }
 
@@ -20456,7 +20240,7 @@ error:
     return NULL;
 }
 
-static bool
+static MS_INLINE bool
 Lookup_union_contains_type(Lookup *lookup, PyTypeObject *cls) {
     if (Lookup_IsStrLookup(lookup)) {
         StrLookup *lk = (StrLookup *)lookup;
@@ -20490,6 +20274,66 @@ Lookup_union_contains_type(Lookup *lookup, PyTypeObject *cls) {
     return false;
 }
 
+/* Whether `obj` is already an acceptable instance for `type`.  Used to skip a
+ * `Serializer.load` callback on the codec fast path, and to short-circuit
+ * `validate_other`.  Both sites must agree on what counts as an instance. */
+static MS_INLINE bool
+ms_typenode_accepts_instance(TypeNode *type, PyObject *obj, StructspecState *mod) {
+    PyTypeObject *pytype = Py_TYPE(obj);
+    uint64_t bits = type->types;
+
+    if ((bits & MS_TYPE_DATETIME) && pytype == PyDateTimeAPI->DateTimeType)
+        return true;
+    else if ((bits & MS_TYPE_DATE) && pytype == PyDateTimeAPI->DateType)
+        return true;
+    else if ((bits & MS_TYPE_TIME) && pytype == PyDateTimeAPI->TimeType)
+        return true;
+    else if ((bits & MS_TYPE_TIMEDELTA) && pytype == PyDateTimeAPI->DeltaType)
+        return true;
+    else if ((bits & MS_TYPE_DECIMAL) && pytype == (PyTypeObject *)(mod->DecimalType))
+        return true;
+    else if ((bits & MS_TYPE_BYTES) && PyBytes_Check(obj))
+        return true;
+    else if ((bits & MS_TYPE_BYTEARRAY) && pytype == &PyByteArray_Type)
+        return true;
+    else if ((bits & MS_TYPE_MEMORYVIEW) && pytype == &PyMemoryView_Type)
+        return true;
+    else if (
+        (bits & MS_TYPE_UUID) &&
+        PyType_IsSubtype(pytype, (PyTypeObject *)(mod->UUIDType))
+    )
+        return true;
+    else if ((bits & MS_TYPE_SET) && PySet_Check(obj))
+        return true;
+    else if ((bits & MS_TYPE_FROZENSET) && PyFrozenSet_Check(obj))
+        return true;
+    else if (bits & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
+        StructInfo *info = TypeNode_get_struct_info(type);
+        if (info != NULL && pytype == (PyTypeObject *)(info->class)) return true;
+    }
+    else if (bits & (MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION)) {
+        Lookup *lookup = TypeNode_get_struct_union(type);
+        if (lookup != NULL && Lookup_union_contains_type(lookup, pytype)) return true;
+    }
+    else if (bits & MS_TYPE_DATACLASS) {
+        DataclassInfo *info = TypeNode_get_dataclass_info(type);
+        if (info != NULL && pytype == (PyTypeObject *)(info->class)) return true;
+    }
+    else if (bits & MS_TYPE_NAMEDTUPLE) {
+        NamedTupleInfo *info = TypeNode_get_namedtuple_info(type);
+        if (info != NULL && pytype == (PyTypeObject *)(info->class)) return true;
+    }
+    else if (bits & (MS_TYPE_INTENUM | MS_TYPE_ENUM)) {
+        Lookup *lookup = (bits & MS_TYPE_INTENUM)
+            ? (Lookup *)TypeNode_get_int_enum_or_literal(type)
+            : (Lookup *)TypeNode_get_str_enum_or_literal(type);
+        if (lookup != NULL && lookup->cls != NULL &&
+            pytype == (PyTypeObject *)(lookup->cls))
+            return true;
+    }
+    return false;
+}
+
 static PyObject *
 getattr_then_getitem(PyObject *obj, PyObject *key) {
     PyObject *out = PyObject_GetAttr(obj, key);
@@ -20504,41 +20348,14 @@ static PyObject *
 validate_other(
     ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
-    PyTypeObject *pytype = Py_TYPE(obj);
-
-    /* First check if instance matches requested type for builtin user-defined
-     * collection types. */
-    if (type->types & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
-        StructInfo *info = TypeNode_get_struct_info(type);
-        if (MS_UNLIKELY(info == NULL)) return NULL;
-        if (pytype == (PyTypeObject *)(info->class)) {
-            Py_INCREF(obj);
-            return obj;
-        }
+    /* First check if the value is already an acceptable instance for the
+     * requested type (struct, struct union, dataclass, namedtuple, ...). */
+    if (ms_typenode_accepts_instance(type, obj, self->mod)) {
+        Py_INCREF(obj);
+        return obj;
     }
-    else if (type->types & (MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION)) {
-        Lookup *lookup = TypeNode_get_struct_union(type);
-        if (Lookup_union_contains_type(lookup, pytype)) {
-            Py_INCREF(obj);
-            return obj;
-        }
-    }
-    else if (type->types & MS_TYPE_DATACLASS) {
-        DataclassInfo *info = TypeNode_get_dataclass_info(type);
-        if (MS_UNLIKELY(info == NULL)) return NULL;
-        if (pytype == (PyTypeObject *)(info->class)) {
-            Py_INCREF(obj);
-            return obj;
-        }
-    }
-    else if (type->types & MS_TYPE_NAMEDTUPLE) {
-        NamedTupleInfo *info = TypeNode_get_namedtuple_info(type);
-        if (MS_UNLIKELY(info == NULL)) return NULL;
-        if (pytype == (PyTypeObject *)(info->class)) {
-            Py_INCREF(obj);
-            return obj;
-        }
-    }
+    /* An info-build failure reports a pending error there; propagate it. */
+    if (MS_UNLIKELY(PyErr_Occurred())) return NULL;
 
     /* No luck. Next check if it's a tuple subclass (standard tuples are
      * handled earlier), and if so try converting it as a sequence */
@@ -20692,58 +20509,12 @@ validate_obj(
         /* `None` bypasses the codec for Optional types. */
         if (!(obj == Py_None && (type->types & MS_TYPE_NONE))) {
             /* Skip `load` when the value already matches the target type. */
-            bool already_matches = false;
-            PyTypeObject *pytype = Py_TYPE(obj);
-            uint64_t bits = type->types;
-            if (bits & MS_TYPE_DATETIME && pytype == PyDateTimeAPI->DateTimeType)
-                already_matches = true;
-            else if (bits & MS_TYPE_DATE && pytype == PyDateTimeAPI->DateType)
-                already_matches = true;
-            else if (bits & MS_TYPE_TIME && pytype == PyDateTimeAPI->TimeType)
-                already_matches = true;
-            else if (bits & MS_TYPE_TIMEDELTA && pytype == PyDateTimeAPI->DeltaType)
-                already_matches = true;
-            else if (bits & MS_TYPE_DECIMAL && pytype == (PyTypeObject *)(self->mod->DecimalType))
-                already_matches = true;
-            else if (bits & MS_TYPE_BYTES && PyBytes_Check(obj))
-                already_matches = true;
-            else if (bits & MS_TYPE_BYTEARRAY && pytype == &PyByteArray_Type)
-                already_matches = true;
-            else if (bits & MS_TYPE_MEMORYVIEW && pytype == &PyMemoryView_Type)
-                already_matches = true;
-            else if (bits & MS_TYPE_UUID && PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->UUIDType)))
-                already_matches = true;
-            else if (bits & MS_TYPE_SET && PySet_Check(obj))
-                already_matches = true;
-            else if (bits & MS_TYPE_FROZENSET && PyFrozenSet_Check(obj))
-                already_matches = true;
-            else if (bits & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY)) {
-                StructInfo *info = TypeNode_get_struct_info(type);
-                if (info == NULL) { ms_maybe_wrap_validation_error(path); return NULL; }
-                if (pytype == (PyTypeObject *)info->class) already_matches = true;
-            }
-            else if (bits & MS_TYPE_DATACLASS) {
-                DataclassInfo *info = TypeNode_get_dataclass_info(type);
-                if (info == NULL) { ms_maybe_wrap_validation_error(path); return NULL; }
-                if (pytype == (PyTypeObject *)info->class) already_matches = true;
-            }
-            else if (bits & (MS_TYPE_INTENUM | MS_TYPE_ENUM)) {
-                Lookup *lookup = NULL;
-                if (bits & MS_TYPE_INTENUM) {
-                    lookup = (Lookup *)TypeNode_get_int_enum_or_literal(type);
+            if (!ms_typenode_accepts_instance(type, obj, self->mod)) {
+                /* An info-build failure reports a pending error there. */
+                if (MS_UNLIKELY(PyErr_Occurred())) {
+                    ms_maybe_wrap_validation_error(path);
+                    return NULL;
                 }
-                else if (bits & MS_TYPE_ENUM) {
-                    lookup = (Lookup *)TypeNode_get_str_enum_or_literal(type);
-                }
-                PyObject *cls = lookup == NULL ? NULL : lookup->cls;
-                if (cls != NULL) {
-                    int is_inst = PyObject_IsInstance(obj, cls);
-                    if (is_inst < 0) { ms_maybe_wrap_validation_error(path); return NULL; }
-                    already_matches = (is_inst == 1);
-                }
-            }
-
-            if (!already_matches) {
                 Serializer *serializer = (Serializer *)TypeNode_get_codec(type);
                 if (serializer->load != NULL) {
                     PyObject *temp = PyObject_CallOneArg(serializer->load, obj);
@@ -21441,6 +21212,54 @@ static struct PyMethodDef structtype_methods[] = {
     {NULL, NULL} /* sentinel */
 };
 
+/* Cached interned strings. Each X receives the StructspecState member name;
+ * the literal is that name with the leading "str_" removed (e.g.
+ * str___origin__ -> "__origin__"). */
+#if PY312_PLUS
+#define ST_STR_ATTRS_PY312(X) X(str___value__)
+#else
+#define ST_STR_ATTRS_PY312(X)
+#endif
+
+#define ST_STR_ATTRS(X) \
+    X(str___weakref__) \
+    X(str___dict__) \
+    X(str___structtype_cached_hash__) \
+    X(str__value2member_map_) \
+    X(str___structtype_cache__) \
+    X(str__value_) \
+    X(str__missing_) \
+    X(str_type) \
+    X(str_strict) \
+    X(str_sort_keys) \
+    X(str_decimal_as_number) \
+    X(str_uuid_as_hex) \
+    X(str_utcoffset) \
+    X(str___origin__) \
+    X(str___args__) \
+    X(str___metadata__) \
+    X(str___total__) \
+    X(str___required_keys__) \
+    X(str__fields) \
+    X(str__field_defaults) \
+    X(str___post_init__) \
+    X(str___dataclass_fields__) \
+    X(str___attrs_attrs__) \
+    X(str___supertype__) \
+    ST_STR_ATTRS_PY312(X) \
+    X(str___bound__) \
+    X(str___constraints__) \
+    X(str_int) \
+    X(str_is_safe) \
+    X(str_struct_dump) \
+    X(str_model_dump) \
+    X(str___struct_fields__) \
+    X(str___struct_defaults__) \
+    X(str_struct_validate) \
+    X(str_model_validate) \
+    X(str_search) \
+    X(str_pattern)
+
 static int
 structtype_clear(PyObject *m)
 {
@@ -21453,45 +21272,9 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->ABCMetaType);
     Py_CLEAR(st->_abc_init);
     Py_CLEAR(st->struct_lookup_cache);
-    Py_CLEAR(st->str___weakref__);
-    Py_CLEAR(st->str___dict__);
-    Py_CLEAR(st->str___structtype_cached_hash__);
-    Py_CLEAR(st->str__value2member_map_);
-    Py_CLEAR(st->str___structtype_cache__);
-    Py_CLEAR(st->str__value_);
-    Py_CLEAR(st->str__missing_);
-    Py_CLEAR(st->str_type);
-    Py_CLEAR(st->str_strict);
-    Py_CLEAR(st->str_sort_keys);
-    Py_CLEAR(st->str_decimal_as_number);
-    Py_CLEAR(st->str_uuid_as_hex);
-    Py_CLEAR(st->str_utcoffset);
-    Py_CLEAR(st->str___origin__);
-    Py_CLEAR(st->str___args__);
-    Py_CLEAR(st->str___metadata__);
-    Py_CLEAR(st->str___total__);
-    Py_CLEAR(st->str___required_keys__);
-    Py_CLEAR(st->str__fields);
-    Py_CLEAR(st->str__field_defaults);
-    Py_CLEAR(st->str___post_init__);
-    Py_CLEAR(st->str___dataclass_fields__);
-    Py_CLEAR(st->str___attrs_attrs__);
-    Py_CLEAR(st->str___supertype__);
-#if PY312_PLUS
-    Py_CLEAR(st->str___value__);
-#endif
-    Py_CLEAR(st->str___bound__);
-    Py_CLEAR(st->str___constraints__);
-    Py_CLEAR(st->str_int);
-    Py_CLEAR(st->str_is_safe);
-    Py_CLEAR(st->str_struct_dump);
-    Py_CLEAR(st->str_model_dump);
-    Py_CLEAR(st->str___struct_fields__);
-    Py_CLEAR(st->str___struct_defaults__);
-    Py_CLEAR(st->str_struct_validate);
-    Py_CLEAR(st->str_model_validate);
-    Py_CLEAR(st->str_search);
-    Py_CLEAR(st->str_pattern);
+#define ST_STR_CLEAR(attr) Py_CLEAR(st->attr);
+    ST_STR_ATTRS(ST_STR_CLEAR)
+#undef ST_STR_CLEAR
     Py_CLEAR(st->UUIDType);
     Py_CLEAR(st->uuid_safeuuid_unknown);
     Py_CLEAR(st->DecimalType);
@@ -21570,6 +21353,9 @@ structtype_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->EnumType);
     Py_VISIT(st->astimezone);
     Py_VISIT(st->re_compile);
+#define ST_STR_VISIT(attr) Py_VISIT(st->attr);
+    ST_STR_ATTRS(ST_STR_VISIT)
+#undef ST_STR_VISIT
     return 0;
 }
 
@@ -21881,47 +21667,10 @@ PyInit__core(void)
     if (st->re_compile == NULL) return NULL;
 
     /* Initialize cached constant strings */
-#define CACHED_STRING(attr, str) \
-    if ((st->attr = PyUnicode_InternFromString(str)) == NULL) return NULL
-    CACHED_STRING(str___weakref__, "__weakref__");
-    CACHED_STRING(str___dict__, "__dict__");
-    CACHED_STRING(str___structtype_cached_hash__, "__structtype_cached_hash__");
-    CACHED_STRING(str__value2member_map_, "_value2member_map_");
-    CACHED_STRING(str___structtype_cache__, "__structtype_cache__");
-    CACHED_STRING(str__value_, "_value_");
-    CACHED_STRING(str__missing_, "_missing_");
-    CACHED_STRING(str_type, "type");
-    CACHED_STRING(str_strict, "strict");
-    CACHED_STRING(str_sort_keys, "sort_keys");
-    CACHED_STRING(str_decimal_as_number, "decimal_as_number");
-    CACHED_STRING(str_uuid_as_hex, "uuid_as_hex");
-    CACHED_STRING(str_utcoffset, "utcoffset");
-    CACHED_STRING(str___origin__, "__origin__");
-    CACHED_STRING(str___args__, "__args__");
-    CACHED_STRING(str___metadata__, "__metadata__");
-    CACHED_STRING(str___total__, "__total__");
-    CACHED_STRING(str___required_keys__, "__required_keys__");
-    CACHED_STRING(str__fields, "_fields");
-    CACHED_STRING(str__field_defaults, "_field_defaults");
-    CACHED_STRING(str___post_init__, "__post_init__");
-    CACHED_STRING(str___dataclass_fields__, "__dataclass_fields__");
-    CACHED_STRING(str___attrs_attrs__, "__attrs_attrs__");
-    CACHED_STRING(str___supertype__, "__supertype__");
-#if PY312_PLUS
-    CACHED_STRING(str___value__, "__value__");
-#endif
-    CACHED_STRING(str___bound__, "__bound__");
-    CACHED_STRING(str___constraints__, "__constraints__");
-    CACHED_STRING(str_int, "int");
-    CACHED_STRING(str_is_safe, "is_safe");
-    CACHED_STRING(str_struct_dump, "struct_dump");
-    CACHED_STRING(str_model_dump, "model_dump");
-    CACHED_STRING(str___struct_fields__, "__struct_fields__");
-    CACHED_STRING(str___struct_defaults__, "__struct_defaults__");
-    CACHED_STRING(str_struct_validate, "struct_validate");
-    CACHED_STRING(str_model_validate, "model_validate");
-    CACHED_STRING(str_search, "search");
-    CACHED_STRING(str_pattern, "pattern");
+#define CACHED_STRING(attr) \
+    if ((st->attr = PyUnicode_InternFromString(#attr + 4)) == NULL) return NULL;
+    ST_STR_ATTRS(CACHED_STRING)
+#undef CACHED_STRING
 
     /* Initialize the Struct Type */
     PyState_AddModule(m, &structtypemodule);

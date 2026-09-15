@@ -698,6 +698,50 @@ class TestSerializerCodecWiring:
         assert out.color is value
         assert calls == []
 
+    def test_accepts_instance_struct_union_via_codec_fast_path(self):
+        calls = []
+
+        def load(value):
+            calls.append(value)
+            return value
+
+        class A(Struct):
+            struct_config = StructConfig(tag=True)
+            x: int
+
+        class B(Struct):
+            struct_config = StructConfig(tag=True)
+            y: str
+
+        class Msg(Struct):
+            value: Union[Annotated[A, Serializer(load=load)], B]
+
+        a = A(1)
+        out = Msg.struct_validate({"value": a})
+        assert out.value is a
+        assert calls == []
+
+    def test_accepts_instance_enum_uses_exact_type(self):
+        calls = []
+
+        class Meta(enum.EnumMeta):
+            def __instancecheck__(cls, instance):
+                return True
+
+        class Color(enum.Enum, metaclass=Meta):
+            RED = "red"
+
+        def load(value):
+            calls.append(value)
+            return Color(value)
+
+        class Msg(Struct):
+            color: Annotated[Color, Serializer(load=load)]
+
+        out = Msg.struct_validate({"color": "red"})
+        assert out.color is Color.RED
+        assert calls == ["red"]
+
     @pytest.mark.parametrize("enum_type", [enum.Enum, enum.IntEnum])
     @pytest.mark.parametrize("from_json", [False, True])
     def test_load_called_for_raw_enum_value(self, enum_type, from_json):
