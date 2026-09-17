@@ -161,6 +161,7 @@ clean: ## Delete all temporary files
 	rm -rf htmlcov-c
 	rm -f .coverage
 	rm -f coverage-c.info coverage-c.info.*
+	rm -rf .venv*
 
 .PHONY: install
 install: install-uv ## Install virtual environment
