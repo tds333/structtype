@@ -7248,7 +7248,7 @@ StructMeta_get_field_index(
     StructMetaObject *self, const char * key, Py_ssize_t key_size, Py_ssize_t *pos
 ) {
     Py_ssize_t nfields = PyTuple_GET_SIZE(self->struct_alias_fields);
-    if (MS_UNLIKELY(self->struct_alias_hash != NULL)) {
+    if (MS_LIKELY(nfields != 0)) {
         /* Fast path for keys arriving in declaration order. */
         Py_ssize_t i = *pos;
         if (
@@ -7275,28 +7275,6 @@ StructMeta_get_field_index(
                 return i;
             }
             slot = (slot + 1) & mask;
-        }
-    }
-    else {
-        const char *field;
-        Py_ssize_t field_size, i, offset = *pos;
-        for (i = offset; i < nfields; i++) {
-            field = unicode_str_and_size_nocheck(
-                PyTuple_GET_ITEM(self->struct_alias_fields, i), &field_size
-            );
-            if (key_size == field_size && memcmp(key, field, key_size) == 0) {
-                *pos = i < (nfields - 1) ? (i + 1) : 0;
-                return i;
-            }
-        }
-        for (i = 0; i < offset; i++) {
-            field = unicode_str_and_size_nocheck(
-                PyTuple_GET_ITEM(self->struct_alias_fields, i), &field_size
-            );
-            if (key_size == field_size && memcmp(key, field, key_size) == 0) {
-                *pos = i + 1;
-                return i;
-            }
         }
     }
     /* Not a field, check if it matches the tag field (if present) */
@@ -8689,10 +8667,6 @@ structmeta_construct_alias_fields(StructMetaInfo *info)
     return 0;
 }
 
-/* Structs with at least this many fields get an alias hash table, making
- * out-of-order key lookup O(1) instead of a linear scan. */
-#define MS_ALIAS_HASH_MIN 13
-
 /* Precompute raw UTF-8 views of the struct's encode field names and tag field
  * so the JSON encoder can write keys without touching Python str objects at
  * encode time. Field names are guaranteed to be escape-free (identifiers, or
@@ -8734,8 +8708,9 @@ structmeta_construct_alias_key_views(StructMetaObject *cls)
         if (cls->struct_alias_keys[i].buf == NULL) return -1;
     }
 
-    if (nfields < MS_ALIAS_HASH_MIN) return 0;
-
+    /* Open-addressed index (entry = field index + 1, 0 = empty) used for
+     * out-of-order or unknown keys; in-order keys hit the raw-view fast path
+     * in StructMeta_get_field_index without consulting it. */
     Py_ssize_t size = 16;
     while (size < 2 * nfields) size <<= 1;
     cls->struct_alias_hash = PyMem_Calloc(size, sizeof(int32_t));
