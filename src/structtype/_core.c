@@ -407,12 +407,14 @@ unaligned_load(const unsigned char *p) {
 
 /* Byte scanners for the JSON codec.
  *
- * Each `ms_scan_clean_*` returns true when the next MS_SCAN_W bytes contain no
- * byte of the relevant class. `ms_scan_escape_index` returns the offset of the
- * first byte needing an escape (or MS_SCAN_W when clean). Callers advance a
- * whole block when clean and otherwise fall back to the byte loop to locate
- * the byte. SSE2/NEON are used only on GCC/Clang (x86-64 / aarch64); MSVC,
- * WASM and 32-bit ARM take the portable, endian-neutral SWAR path. */
+ * Both return the offset of the first interesting byte within the next
+ * MS_SCAN_W bytes, or MS_SCAN_W when the block is clean.
+ * `ms_scan_escape_index` targets bytes needing an escape (control < 0x20, '"',
+ * '\\'); `ms_scan_special_or_nonascii_index` additionally targets non-ASCII
+ * bytes (>= 0x80). Callers advance a whole block when clean, otherwise advance
+ * exactly to the returned offset. SSE2/NEON are used only on GCC/Clang (x86-64
+ * / aarch64); MSVC, WASM and 32-bit ARM take the portable, endian-neutral SWAR
+ * path. */
 #if !MS_HAVE_SCAN_SIMD
 #define MS_SWAR_ONES  ((uint64_t)0x0101010101010101ULL)
 #define MS_SWAR_HIGHS ((uint64_t)0x8080808080808080ULL)
@@ -465,31 +467,6 @@ ms_scan_escape_index(const char *p) {
     return mask == 0 ? MS_SCAN_W : (Py_ssize_t)ms_ctz32(mask);
 }
 
-static MS_INLINE bool
-ms_scan_clean_special(const char *p) {
-    __m128i v = _mm_loadu_si128((const __m128i *)p);
-    __m128i ctrl = _mm_cmpeq_epi8(_mm_min_epu8(v, _mm_set1_epi8(0x1f)), v);
-    __m128i special = _mm_or_si128(
-        _mm_cmpeq_epi8(v, _mm_set1_epi8('"')),
-        _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'))
-    );
-    return _mm_movemask_epi8(_mm_or_si128(ctrl, special)) == 0;
-}
-
-static MS_INLINE bool
-ms_scan_clean_special_or_nonascii(const char *p) {
-    __m128i v = _mm_loadu_si128((const __m128i *)p);
-    __m128i ctrl = _mm_cmpeq_epi8(_mm_min_epu8(v, _mm_set1_epi8(0x1f)), v);
-    __m128i special = _mm_or_si128(
-        _mm_cmpeq_epi8(v, _mm_set1_epi8('"')),
-        _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'))
-    );
-    __m128i nonascii = _mm_cmplt_epi8(v, _mm_setzero_si128());
-    return _mm_movemask_epi8(
-        _mm_or_si128(_mm_or_si128(ctrl, special), nonascii)
-    ) == 0;
-}
-
 static MS_INLINE Py_ssize_t
 ms_scan_special_or_nonascii_index(const char *p) {
     __m128i v = _mm_loadu_si128((const __m128i *)p);
@@ -520,27 +497,6 @@ ms_scan_escape_index(const char *p) {
     if (lo != 0) return (Py_ssize_t)(ms_ctz64(lo) >> 3);
     uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(any), 1);
     return (Py_ssize_t)(8 + (ms_ctz64(hi) >> 3));
-}
-
-static MS_INLINE bool
-ms_scan_clean_special(const char *p) {
-    uint8x16_t v = vld1q_u8((const uint8_t *)p);
-    uint8x16_t ctrl = vceqq_u8(v, vminq_u8(v, vdupq_n_u8(0x1f)));
-    uint8x16_t special = vorrq_u8(
-        vceqq_u8(v, vdupq_n_u8('"')), vceqq_u8(v, vdupq_n_u8('\\'))
-    );
-    return vmaxvq_u8(vorrq_u8(ctrl, special)) == 0;
-}
-
-static MS_INLINE bool
-ms_scan_clean_special_or_nonascii(const char *p) {
-    uint8x16_t v = vld1q_u8((const uint8_t *)p);
-    uint8x16_t ctrl = vceqq_u8(v, vminq_u8(v, vdupq_n_u8(0x1f)));
-    uint8x16_t special = vorrq_u8(
-        vceqq_u8(v, vdupq_n_u8('"')), vceqq_u8(v, vdupq_n_u8('\\'))
-    );
-    uint8x16_t nonascii = vcgeq_u8(v, vdupq_n_u8(0x80));
-    return vmaxvq_u8(vorrq_u8(vorrq_u8(ctrl, special), nonascii)) == 0;
 }
 
 static MS_INLINE Py_ssize_t
@@ -574,23 +530,6 @@ ms_scan_escape_index(const char *p) {
         if (c == '"' || c == '\\' || c < 0x20) return i;
     }
     return MS_SCAN_W;
-}
-
-static MS_INLINE bool
-ms_scan_clean_special(const char *p) {
-    uint64_t v = ms_load64(p);
-    return !(ms_swar_hasvalue(v, '"') ||
-             ms_swar_hasvalue(v, '\\') ||
-             ms_swar_hasless(v, 0x20));
-}
-
-static MS_INLINE bool
-ms_scan_clean_special_or_nonascii(const char *p) {
-    uint64_t v = ms_load64(p);
-    return !(ms_swar_hasvalue(v, '"') ||
-             ms_swar_hasvalue(v, '\\') ||
-             ms_swar_hasless(v, 0x20) ||
-             (v & MS_SWAR_HIGHS));
 }
 
 static MS_INLINE Py_ssize_t
