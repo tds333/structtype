@@ -490,6 +490,21 @@ ms_scan_clean_special_or_nonascii(const char *p) {
     ) == 0;
 }
 
+static MS_INLINE Py_ssize_t
+ms_scan_special_or_nonascii_index(const char *p) {
+    __m128i v = _mm_loadu_si128((const __m128i *)p);
+    __m128i ctrl = _mm_cmpeq_epi8(_mm_min_epu8(v, _mm_set1_epi8(0x1f)), v);
+    __m128i special = _mm_or_si128(
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('"')),
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'))
+    );
+    __m128i nonascii = _mm_cmplt_epi8(v, _mm_setzero_si128());
+    uint32_t mask = (uint32_t)_mm_movemask_epi8(
+        _mm_or_si128(_mm_or_si128(ctrl, special), nonascii)
+    );
+    return mask == 0 ? MS_SCAN_W : (Py_ssize_t)ms_ctz32(mask);
+}
+
 #elif MS_HAVE_SCAN_SIMD && defined(__aarch64__)
 
 static MS_INLINE Py_ssize_t
@@ -528,6 +543,22 @@ ms_scan_clean_special_or_nonascii(const char *p) {
     return vmaxvq_u8(vorrq_u8(vorrq_u8(ctrl, special), nonascii)) == 0;
 }
 
+static MS_INLINE Py_ssize_t
+ms_scan_special_or_nonascii_index(const char *p) {
+    uint8x16_t v = vld1q_u8((const uint8_t *)p);
+    uint8x16_t ctrl = vceqq_u8(v, vminq_u8(v, vdupq_n_u8(0x1f)));
+    uint8x16_t special = vorrq_u8(
+        vceqq_u8(v, vdupq_n_u8('"')), vceqq_u8(v, vdupq_n_u8('\\'))
+    );
+    uint8x16_t nonascii = vcgeq_u8(v, vdupq_n_u8(0x80));
+    uint8x16_t any = vorrq_u8(vorrq_u8(ctrl, special), nonascii);
+    if (vmaxvq_u8(any) == 0) return MS_SCAN_W;
+    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(any), 0);
+    if (lo != 0) return (Py_ssize_t)(ms_ctz64(lo) >> 3);
+    uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(any), 1);
+    return (Py_ssize_t)(8 + (ms_ctz64(hi) >> 3));
+}
+
 #else
 
 static MS_INLINE Py_ssize_t
@@ -560,6 +591,22 @@ ms_scan_clean_special_or_nonascii(const char *p) {
              ms_swar_hasvalue(v, '\\') ||
              ms_swar_hasless(v, 0x20) ||
              (v & MS_SWAR_HIGHS));
+}
+
+static MS_INLINE Py_ssize_t
+ms_scan_special_or_nonascii_index(const char *p) {
+    uint64_t v = ms_load64(p);
+    if (!(ms_swar_hasvalue(v, '"') ||
+          ms_swar_hasvalue(v, '\\') ||
+          ms_swar_hasless(v, 0x20) ||
+          (v & MS_SWAR_HIGHS))) {
+        return MS_SCAN_W;
+    }
+    for (Py_ssize_t i = 0; i < MS_SCAN_W; i++) {
+        uint8_t c = (uint8_t)p[i];
+        if (c == '"' || c == '\\' || c < 0x20 || c >= 0x80) return i;
+    }
+    return MS_SCAN_W;
 }
 
 #endif
@@ -15977,6 +16024,72 @@ json_scratch_write_codepoint(JSONDecoderState *self, Py_UCS4 cp) {
     }
 }
 
+/* Advance `input_pos` to the next byte needing attention inside a JSON string.
+ *
+ * A short scalar prefix handles tiny strings (typically short keys) without
+ * paying for a vector op. The wide scanners return the exact offset of the
+ * first interesting byte, so a dirty block is never re-scanned byte-by-byte,
+ * while long clean runs still advance MS_SCAN_W bytes at a time. */
+#if MS_HAVE_SCAN_SIMD
+#define MS_SCAN_PREFIX 8
+#else
+#define MS_SCAN_PREFIX MS_SCAN_W
+#endif
+
+static MS_INLINE void
+json_scan_string_nonascii(JSONDecoderState *self) {
+    unsigned char *p = self->input_pos;
+    unsigned char *end = self->input_end;
+    if (end - p >= MS_SCAN_PREFIX) {
+        Py_ssize_t j = 0;
+        while (j < MS_SCAN_PREFIX && !char_is_special_or_nonascii(p[j])) j++;
+        p += j;
+        if (j == MS_SCAN_PREFIX) {
+            while (end - p >= MS_SCAN_W) {
+                Py_ssize_t n = ms_scan_special_or_nonascii_index((const char *)p);
+                p += n;
+                if (n != MS_SCAN_W) {
+                    self->input_pos = p;
+                    return;
+                }
+            }
+        }
+        else {
+            self->input_pos = p;
+            return;
+        }
+    }
+    while (p < end && !char_is_special_or_nonascii(*p)) p++;
+    self->input_pos = p;
+}
+
+static MS_INLINE void
+json_scan_string_special(JSONDecoderState *self) {
+    unsigned char *p = self->input_pos;
+    unsigned char *end = self->input_end;
+    if (end - p >= MS_SCAN_PREFIX) {
+        Py_ssize_t j = 0;
+        while (j < MS_SCAN_PREFIX && !char_is_special(p[j])) j++;
+        p += j;
+        if (j == MS_SCAN_PREFIX) {
+            while (end - p >= MS_SCAN_W) {
+                Py_ssize_t n = ms_scan_escape_index((const char *)p);
+                p += n;
+                if (n != MS_SCAN_W) {
+                    self->input_pos = p;
+                    return;
+                }
+            }
+        }
+        else {
+            self->input_pos = p;
+            return;
+        }
+    }
+    while (p < end && !char_is_special(*p)) p++;
+    self->input_pos = p;
+}
+
 static MS_NOINLINE Py_ssize_t
 json_decode_string_view_copy(
     JSONDecoderState *self, char **out, bool *is_ascii, unsigned char *start
@@ -16036,14 +16149,7 @@ top:
     }
 
     /* Loop until `"`, `\`, or a non-ascii character */
-    while (self->input_end - self->input_pos >= MS_SCAN_W) {
-        if (MS_UNLIKELY(!ms_scan_clean_special_or_nonascii((const char *)self->input_pos))) break;
-        self->input_pos += MS_SCAN_W;
-    }
-    while (self->input_pos < self->input_end) {
-        if (MS_UNLIKELY(char_is_special_or_nonascii(*self->input_pos))) break;
-        self->input_pos++;
-    }
+    json_scan_string_nonascii(self);
     if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
 
     OPT_FORCE_RELOAD(*self->input_pos);
@@ -16051,14 +16157,7 @@ top:
     if (MS_UNLIKELY(*self->input_pos & 0x80)) {
         *is_ascii = false;
         /* Loop until `"` or `\` */
-        while (self->input_end - self->input_pos >= MS_SCAN_W) {
-            if (MS_UNLIKELY(!ms_scan_clean_special((const char *)self->input_pos))) break;
-            self->input_pos += MS_SCAN_W;
-        }
-        while (self->input_pos < self->input_end) {
-            if (MS_UNLIKELY(char_is_special(*self->input_pos))) break;
-            self->input_pos++;
-        }
+        json_scan_string_special(self);
         if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
     }
     goto top;
@@ -16070,14 +16169,7 @@ json_decode_string_view(JSONDecoderState *self, char **out, bool *is_ascii) {
     unsigned char *start = self->input_pos;
 
     /* Loop until `"`, `\`, or a non-ascii character */
-    while (self->input_end - self->input_pos >= MS_SCAN_W) {
-        if (MS_UNLIKELY(!ms_scan_clean_special_or_nonascii((const char *)self->input_pos))) break;
-        self->input_pos += MS_SCAN_W;
-    }
-    while (self->input_pos < self->input_end) {
-        if (MS_UNLIKELY(char_is_special_or_nonascii(*self->input_pos))) break;
-        self->input_pos++;
-    }
+    json_scan_string_nonascii(self);
     if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
 
     OPT_FORCE_RELOAD(*self->input_pos);
@@ -16092,14 +16184,7 @@ json_decode_string_view(JSONDecoderState *self, char **out, bool *is_ascii) {
     if (MS_UNLIKELY(*self->input_pos & 0x80)) {
         *is_ascii = false;
         /* Loop until `"` or `\` */
-        while (self->input_end - self->input_pos >= MS_SCAN_W) {
-            if (MS_UNLIKELY(!ms_scan_clean_special((const char *)self->input_pos))) break;
-            self->input_pos += MS_SCAN_W;
-        }
-        while (self->input_pos < self->input_end) {
-            if (MS_UNLIKELY(char_is_special(*self->input_pos))) break;
-            self->input_pos++;
-        }
+        json_scan_string_special(self);
         if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
     }
 
@@ -16121,14 +16206,7 @@ json_skip_string(JSONDecoderState *self) {
 
 parse_unicode:
     /* Loop until `"` or `\` */
-    while (self->input_end - self->input_pos >= MS_SCAN_W) {
-        if (MS_UNLIKELY(!ms_scan_clean_special((const char *)self->input_pos))) break;
-        self->input_pos += MS_SCAN_W;
-    }
-    while (self->input_pos < self->input_end) {
-        if (MS_UNLIKELY(char_is_special(*self->input_pos))) break;
-        self->input_pos++;
-    }
+    json_scan_string_special(self);
     if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
 
     OPT_FORCE_RELOAD(*self->input_pos);
