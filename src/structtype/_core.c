@@ -16,6 +16,22 @@
 #include "ryu.h"
 #include "atof.h"
 
+/* Byte-scan acceleration for the JSON codec. The portable SWAR (SIMD within a
+ * register) path is always available; SSE2/NEON are used only on GCC/Clang
+ * (x86-64 / aarch64) and fall back to SWAR everywhere else (MSVC, WASM, 32-bit
+ * ARM). Defining MS_STRING_SCAN_SWAR forces the portable path for testing. */
+#if !defined(MS_STRING_SCAN_SWAR) && (defined(__SSE2__) || defined(__aarch64__))
+#  if defined(__SSE2__)
+#    include <emmintrin.h>
+#  endif
+#  ifdef __aarch64__
+#    include <arm_neon.h>
+#  endif
+#  define MS_HAVE_SCAN_SIMD 1
+#else
+#  define MS_HAVE_SCAN_SIMD 0
+#endif
+
 /* Python version checks */
 #define PY311_PLUS (PY_VERSION_HEX >= 0x030b0000)
 #define PY312_PLUS (PY_VERSION_HEX >= 0x030c0000)
@@ -388,6 +404,212 @@ unaligned_load(const unsigned char *p) {
     memcpy(&out, p, sizeof(out));
     return out;
 }
+
+/* Byte scanners for the JSON codec.
+ *
+ * Each `ms_scan_clean_*` returns true when the next MS_SCAN_W bytes contain no
+ * byte of the relevant class. `ms_scan_escape_index` returns the offset of the
+ * first byte needing an escape (or MS_SCAN_W when clean). Callers advance a
+ * whole block when clean and otherwise fall back to the byte loop to locate
+ * the byte. SSE2/NEON are used only on GCC/Clang (x86-64 / aarch64); MSVC,
+ * WASM and 32-bit ARM take the portable, endian-neutral SWAR path. */
+#if !MS_HAVE_SCAN_SIMD
+#define MS_SWAR_ONES  ((uint64_t)0x0101010101010101ULL)
+#define MS_SWAR_HIGHS ((uint64_t)0x8080808080808080ULL)
+
+static MS_INLINE uint64_t
+ms_load64(const char *p) {
+    uint64_t out;
+    memcpy(&out, p, sizeof(out));
+    return out;
+}
+
+static MS_INLINE bool
+ms_swar_haszero(uint64_t v) {
+    return ((v - MS_SWAR_ONES) & ~v & MS_SWAR_HIGHS) != 0;
+}
+
+static MS_INLINE bool
+ms_swar_hasvalue(uint64_t v, uint8_t b) {
+    return ms_swar_haszero(v ^ (MS_SWAR_ONES * b));
+}
+
+static MS_INLINE bool
+ms_swar_hasless(uint64_t v, uint8_t n) {
+    return ((v - MS_SWAR_ONES * n) & ~v & MS_SWAR_HIGHS) != 0;
+}
+#endif
+
+#if MS_HAVE_SCAN_SIMD
+#define MS_SCAN_W 16
+#else
+#define MS_SCAN_W 8
+#endif
+
+#if MS_HAVE_SCAN_SIMD
+#define ms_ctz32(x) __builtin_ctz(x)
+#define ms_ctz64(x) __builtin_ctzll(x)
+#endif
+
+#if MS_HAVE_SCAN_SIMD && defined(__SSE2__)
+
+static MS_INLINE Py_ssize_t
+ms_scan_escape_index(const char *p) {
+    __m128i v = _mm_loadu_si128((const __m128i *)p);
+    __m128i ctrl = _mm_cmpeq_epi8(_mm_min_epu8(v, _mm_set1_epi8(0x1f)), v);
+    __m128i special = _mm_or_si128(
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('"')),
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'))
+    );
+    uint32_t mask = (uint32_t)_mm_movemask_epi8(_mm_or_si128(ctrl, special));
+    return mask == 0 ? MS_SCAN_W : (Py_ssize_t)ms_ctz32(mask);
+}
+
+static MS_INLINE bool
+ms_scan_clean_special(const char *p) {
+    __m128i v = _mm_loadu_si128((const __m128i *)p);
+    __m128i ctrl = _mm_cmpeq_epi8(_mm_min_epu8(v, _mm_set1_epi8(0x1f)), v);
+    __m128i special = _mm_or_si128(
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('"')),
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'))
+    );
+    return _mm_movemask_epi8(_mm_or_si128(ctrl, special)) == 0;
+}
+
+static MS_INLINE bool
+ms_scan_clean_special_or_nonascii(const char *p) {
+    __m128i v = _mm_loadu_si128((const __m128i *)p);
+    __m128i ctrl = _mm_cmpeq_epi8(_mm_min_epu8(v, _mm_set1_epi8(0x1f)), v);
+    __m128i special = _mm_or_si128(
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('"')),
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'))
+    );
+    __m128i nonascii = _mm_cmplt_epi8(v, _mm_setzero_si128());
+    return _mm_movemask_epi8(
+        _mm_or_si128(_mm_or_si128(ctrl, special), nonascii)
+    ) == 0;
+}
+
+static MS_INLINE Py_ssize_t
+ms_scan_special_or_nonascii_index(const char *p) {
+    __m128i v = _mm_loadu_si128((const __m128i *)p);
+    __m128i ctrl = _mm_cmpeq_epi8(_mm_min_epu8(v, _mm_set1_epi8(0x1f)), v);
+    __m128i special = _mm_or_si128(
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('"')),
+        _mm_cmpeq_epi8(v, _mm_set1_epi8('\\'))
+    );
+    __m128i nonascii = _mm_cmplt_epi8(v, _mm_setzero_si128());
+    uint32_t mask = (uint32_t)_mm_movemask_epi8(
+        _mm_or_si128(_mm_or_si128(ctrl, special), nonascii)
+    );
+    return mask == 0 ? MS_SCAN_W : (Py_ssize_t)ms_ctz32(mask);
+}
+
+#elif MS_HAVE_SCAN_SIMD && defined(__aarch64__)
+
+static MS_INLINE Py_ssize_t
+ms_scan_escape_index(const char *p) {
+    uint8x16_t v = vld1q_u8((const uint8_t *)p);
+    uint8x16_t ctrl = vceqq_u8(v, vminq_u8(v, vdupq_n_u8(0x1f)));
+    uint8x16_t special = vorrq_u8(
+        vceqq_u8(v, vdupq_n_u8('"')), vceqq_u8(v, vdupq_n_u8('\\'))
+    );
+    uint8x16_t any = vorrq_u8(ctrl, special);
+    if (vmaxvq_u8(any) == 0) return MS_SCAN_W;
+    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(any), 0);
+    if (lo != 0) return (Py_ssize_t)(ms_ctz64(lo) >> 3);
+    uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(any), 1);
+    return (Py_ssize_t)(8 + (ms_ctz64(hi) >> 3));
+}
+
+static MS_INLINE bool
+ms_scan_clean_special(const char *p) {
+    uint8x16_t v = vld1q_u8((const uint8_t *)p);
+    uint8x16_t ctrl = vceqq_u8(v, vminq_u8(v, vdupq_n_u8(0x1f)));
+    uint8x16_t special = vorrq_u8(
+        vceqq_u8(v, vdupq_n_u8('"')), vceqq_u8(v, vdupq_n_u8('\\'))
+    );
+    return vmaxvq_u8(vorrq_u8(ctrl, special)) == 0;
+}
+
+static MS_INLINE bool
+ms_scan_clean_special_or_nonascii(const char *p) {
+    uint8x16_t v = vld1q_u8((const uint8_t *)p);
+    uint8x16_t ctrl = vceqq_u8(v, vminq_u8(v, vdupq_n_u8(0x1f)));
+    uint8x16_t special = vorrq_u8(
+        vceqq_u8(v, vdupq_n_u8('"')), vceqq_u8(v, vdupq_n_u8('\\'))
+    );
+    uint8x16_t nonascii = vcgeq_u8(v, vdupq_n_u8(0x80));
+    return vmaxvq_u8(vorrq_u8(vorrq_u8(ctrl, special), nonascii)) == 0;
+}
+
+static MS_INLINE Py_ssize_t
+ms_scan_special_or_nonascii_index(const char *p) {
+    uint8x16_t v = vld1q_u8((const uint8_t *)p);
+    uint8x16_t ctrl = vceqq_u8(v, vminq_u8(v, vdupq_n_u8(0x1f)));
+    uint8x16_t special = vorrq_u8(
+        vceqq_u8(v, vdupq_n_u8('"')), vceqq_u8(v, vdupq_n_u8('\\'))
+    );
+    uint8x16_t nonascii = vcgeq_u8(v, vdupq_n_u8(0x80));
+    uint8x16_t any = vorrq_u8(vorrq_u8(ctrl, special), nonascii);
+    if (vmaxvq_u8(any) == 0) return MS_SCAN_W;
+    uint64_t lo = vgetq_lane_u64(vreinterpretq_u64_u8(any), 0);
+    if (lo != 0) return (Py_ssize_t)(ms_ctz64(lo) >> 3);
+    uint64_t hi = vgetq_lane_u64(vreinterpretq_u64_u8(any), 1);
+    return (Py_ssize_t)(8 + (ms_ctz64(hi) >> 3));
+}
+
+#else
+
+static MS_INLINE Py_ssize_t
+ms_scan_escape_index(const char *p) {
+    uint64_t v = ms_load64(p);
+    if (!(ms_swar_hasvalue(v, '"') ||
+          ms_swar_hasvalue(v, '\\') ||
+          ms_swar_hasless(v, 0x20))) {
+        return MS_SCAN_W;
+    }
+    for (Py_ssize_t i = 0; i < MS_SCAN_W; i++) {
+        uint8_t c = (uint8_t)p[i];
+        if (c == '"' || c == '\\' || c < 0x20) return i;
+    }
+    return MS_SCAN_W;
+}
+
+static MS_INLINE bool
+ms_scan_clean_special(const char *p) {
+    uint64_t v = ms_load64(p);
+    return !(ms_swar_hasvalue(v, '"') ||
+             ms_swar_hasvalue(v, '\\') ||
+             ms_swar_hasless(v, 0x20));
+}
+
+static MS_INLINE bool
+ms_scan_clean_special_or_nonascii(const char *p) {
+    uint64_t v = ms_load64(p);
+    return !(ms_swar_hasvalue(v, '"') ||
+             ms_swar_hasvalue(v, '\\') ||
+             ms_swar_hasless(v, 0x20) ||
+             (v & MS_SWAR_HIGHS));
+}
+
+static MS_INLINE Py_ssize_t
+ms_scan_special_or_nonascii_index(const char *p) {
+    uint64_t v = ms_load64(p);
+    if (!(ms_swar_hasvalue(v, '"') ||
+          ms_swar_hasvalue(v, '\\') ||
+          ms_swar_hasless(v, 0x20) ||
+          (v & MS_SWAR_HIGHS))) {
+        return MS_SCAN_W;
+    }
+    for (Py_ssize_t i = 0; i < MS_SCAN_W; i++) {
+        uint8_t c = (uint8_t)p[i];
+        if (c == '"' || c == '\\' || c < 0x20 || c >= 0x80) return i;
+    }
+    return MS_SCAN_W;
+}
+
+#endif
 
 static inline uint32_t
 murmur2(const char *p, Py_ssize_t len) {
@@ -4451,6 +4673,9 @@ typedef struct {
     Py_ssize_t *struct_offsets;
     PyObject *struct_alias_fields;
     MS_StrView *struct_alias_keys;   /* raw UTF-8 views of alias fields, NULL if none */
+    int32_t *struct_alias_hash;      /* open-addressed index+1 table, NULL if none */
+    uint32_t *struct_alias_hashes;   /* murmur2 hash per alias field, NULL if none */
+    Py_ssize_t struct_alias_hash_size; /* power-of-two table size, 0 if no hash */
     MS_StrView struct_tag_field_view; /* raw UTF-8 view of tag field, valid if tag_field set */
     PyObject *struct_module;          /* owning structtype module, or NULL */
     _Atomic(struct StructInfo *) struct_info;
@@ -7022,25 +7247,34 @@ static MS_INLINE Py_ssize_t
 StructMeta_get_field_index(
     StructMetaObject *self, const char * key, Py_ssize_t key_size, Py_ssize_t *pos
 ) {
-    const char *field;
-    Py_ssize_t nfields, field_size, i, offset = *pos;
-    nfields = PyTuple_GET_SIZE(self->struct_alias_fields);
-    for (i = offset; i < nfields; i++) {
-        field = unicode_str_and_size_nocheck(
-            PyTuple_GET_ITEM(self->struct_alias_fields, i), &field_size
-        );
-        if (key_size == field_size && memcmp(key, field, key_size) == 0) {
+    Py_ssize_t nfields = PyTuple_GET_SIZE(self->struct_alias_fields);
+    if (MS_LIKELY(nfields != 0)) {
+        /* Fast path for keys arriving in declaration order. */
+        Py_ssize_t i = *pos;
+        if (
+            i < nfields &&
+            key_size == self->struct_alias_keys[i].size &&
+            memcmp(self->struct_alias_keys[i].buf, key, key_size) == 0
+        ) {
             *pos = i < (nfields - 1) ? (i + 1) : 0;
             return i;
         }
-    }
-    for (i = 0; i < offset; i++) {
-        field = unicode_str_and_size_nocheck(
-            PyTuple_GET_ITEM(self->struct_alias_fields, i), &field_size
-        );
-        if (key_size == field_size && memcmp(key, field, key_size) == 0) {
-            *pos = i + 1;
-            return i;
+        Py_ssize_t mask = self->struct_alias_hash_size - 1;
+        uint32_t hash = murmur2(key, key_size);
+        Py_ssize_t slot = hash & mask;
+        while (true) {
+            int32_t entry = self->struct_alias_hash[slot];
+            if (entry == 0) break;
+            i = entry - 1;
+            if (
+                self->struct_alias_hashes[i] == hash &&
+                key_size == self->struct_alias_keys[i].size &&
+                memcmp(self->struct_alias_keys[i].buf, key, key_size) == 0
+            ) {
+                *pos = i < (nfields - 1) ? (i + 1) : 0;
+                return i;
+            }
+            slot = (slot + 1) & mask;
         }
     }
     /* Not a field, check if it matches the tag field (if present) */
@@ -8443,6 +8677,9 @@ static int
 structmeta_construct_alias_key_views(StructMetaObject *cls)
 {
     cls->struct_alias_keys = NULL;
+    cls->struct_alias_hash = NULL;
+    cls->struct_alias_hashes = NULL;
+    cls->struct_alias_hash_size = 0;
     cls->struct_tag_field_view.buf = NULL;
     cls->struct_tag_field_view.size = 0;
 
@@ -8470,7 +8707,43 @@ structmeta_construct_alias_key_views(StructMetaObject *cls)
         cls->struct_alias_keys[i].buf = unicode_str_and_size(field, &cls->struct_alias_keys[i].size);
         if (cls->struct_alias_keys[i].buf == NULL) return -1;
     }
+
+    /* Open-addressed index (entry = field index + 1, 0 = empty) used for
+     * out-of-order or unknown keys; in-order keys hit the raw-view fast path
+     * in StructMeta_get_field_index without consulting it. */
+    Py_ssize_t size = 16;
+    while (size < 2 * nfields) size <<= 1;
+    cls->struct_alias_hash = PyMem_Calloc(size, sizeof(int32_t));
+    cls->struct_alias_hashes = PyMem_Malloc(nfields * sizeof(uint32_t));
+    if (cls->struct_alias_hash == NULL || cls->struct_alias_hashes == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    cls->struct_alias_hash_size = size;
+
+    Py_ssize_t mask = size - 1;
+    for (Py_ssize_t i = 0; i < nfields; i++) {
+        uint32_t h = murmur2(
+            cls->struct_alias_keys[i].buf, cls->struct_alias_keys[i].size
+        );
+        cls->struct_alias_hashes[i] = h;
+        Py_ssize_t slot = h & mask;
+        while (cls->struct_alias_hash[slot] != 0) slot = (slot + 1) & mask;
+        cls->struct_alias_hash[slot] = (int32_t)(i + 1);
+    }
     return 0;
+}
+
+static void
+structmeta_free_alias_key_views(StructMetaObject *cls)
+{
+    PyMem_Free(cls->struct_alias_keys);
+    cls->struct_alias_keys = NULL;
+    PyMem_Free(cls->struct_alias_hash);
+    cls->struct_alias_hash = NULL;
+    PyMem_Free(cls->struct_alias_hashes);
+    cls->struct_alias_hashes = NULL;
+    cls->struct_alias_hash_size = 0;
 }
 
 /* Extracts the qualname for a class, and strips off any leading bits from a
@@ -8897,10 +9170,7 @@ cleanup:
              * doesn't double-free if the error happened after assignment. */
             if (cls != NULL) cls->struct_offsets = NULL;
         }
-        if (cls != NULL && cls->struct_alias_keys != NULL) {
-            PyMem_Free(cls->struct_alias_keys);
-            cls->struct_alias_keys = NULL;
-        }
+        if (cls != NULL) structmeta_free_alias_key_views(cls);
         Py_XDECREF(cls);
         return NULL;
     }
@@ -9184,9 +9454,8 @@ StructMeta_clear(StructMetaObject *self)
         PyMem_Free(self->struct_offsets);
         self->struct_offsets = NULL;
     }
-    if (self->struct_alias_keys != NULL) {
-        PyMem_Free(self->struct_alias_keys);
-        self->struct_alias_keys = NULL;
+    if (self->struct_alias_keys != NULL || self->struct_alias_hash != NULL) {
+        structmeta_free_alias_key_views(self);
     }
     return PyType_Type.tp_clear((PyObject *)self);
 }
@@ -14249,11 +14518,11 @@ json_str_requires_escaping(PyObject *obj) {
     Py_ssize_t i, len;
     const char* buf = unicode_str_and_size(obj, &len);
     if (buf == NULL) return -1;
-    for (i = 0; i < len; i++) {
-        char escape = escape_table[(uint8_t)buf[i]];
-        if (escape != 0) {
-            return 1;
-        }
+    for (i = 0; i + MS_SCAN_W <= len; i += MS_SCAN_W) {
+        if (ms_scan_escape_index(buf + i) != MS_SCAN_W) return 1;
+    }
+    for (; i < len; i++) {
+        if (escape_table[(uint8_t)buf[i]]) return 1;
     }
     return 0;
 }
@@ -14269,34 +14538,30 @@ json_encode_cstr_inline(EncoderState *self, const char *src, Py_ssize_t len) {
     *out++ = '"';
 
 noescape:
-
-#define write_ascii_pre(i) \
-    if (MS_UNLIKELY(escape_table[(uint8_t)src[i]])) goto write_ascii_##i;
-
-#define write_ascii_post(i) \
-    write_ascii_##i: \
-    memcpy(out, src, i); \
-    out += i; \
-    src += i; \
-    goto escape;
-
-    while (src_end - src >= 8) {
-        repeat8(write_ascii_pre);
-        memcpy(out, src, 8);
-        out += 8;
-        src += 8;
+    while (src_end - src >= MS_SCAN_W) {
+        Py_ssize_t n = ms_scan_escape_index(src);
+        if (MS_LIKELY(n == MS_SCAN_W)) {
+            memcpy(out, src, MS_SCAN_W);
+            out += MS_SCAN_W;
+            src += MS_SCAN_W;
+            continue;
+        }
+        if (n > 0) {
+            memcpy(out, src, n);
+            out += n;
+            src += n;
+        }
+        goto escape;
     }
 
     while (MS_LIKELY(src_end > src)) {
-        write_ascii_pre(0);
+        if (MS_UNLIKELY(escape_table[(uint8_t)*src])) goto escape;
         *out++ = *src++;
     }
 
     *out++ = '"';
     self->output_len = out - self->output_buffer_raw;
     return 0;
-
-repeat8(write_ascii_post);
 
 escape:
     {
@@ -14332,9 +14597,6 @@ escape:
         goto noescape;
     }
 }
-
-#undef write_ascii_pre
-#undef write_ascii_post
 
 static int
 json_encode_cstr(EncoderState *self, const char *src, Py_ssize_t len) {
@@ -15684,7 +15946,7 @@ json_read_codepoint(JSONDecoderState *self, unsigned int *out) {
 }
 
 static MS_NOINLINE int
-json_handle_unicode_escape(JSONDecoderState *self) {
+json_parse_unicode_escape(JSONDecoderState *self, Py_UCS4 *out) {
     unsigned int cp;
     if (json_read_codepoint(self, &cp) < 0) return -1;
 
@@ -15709,7 +15971,12 @@ json_handle_unicode_escape(JSONDecoderState *self) {
         cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
     }
 
-    /* Encode the codepoint as utf-8 */
+    *out = (Py_UCS4)cp;
+    return 0;
+}
+
+static MS_INLINE void
+json_scratch_write_codepoint(JSONDecoderState *self, Py_UCS4 cp) {
     unsigned char *p = self->scratch + self->scratch_len;
     if (cp < 0x80) {
         *p++ = cp;
@@ -15730,24 +15997,73 @@ json_handle_unicode_escape(JSONDecoderState *self) {
         *p++ = 0x80 | (cp & 0x3F);
         self->scratch_len += 4;
     }
-    return 0;
 }
 
-#define parse_ascii_pre(i) \
-    if (MS_UNLIKELY(char_is_special_or_nonascii(self->input_pos[i]))) goto parse_ascii_##i;
+/* Advance `input_pos` to the next byte needing attention inside a JSON string.
+ *
+ * A short scalar prefix handles tiny strings (typically short keys) without
+ * paying for a vector op. The wide scanners return the exact offset of the
+ * first interesting byte, so a dirty block is never re-scanned byte-by-byte,
+ * while long clean runs still advance MS_SCAN_W bytes at a time. */
+#if MS_HAVE_SCAN_SIMD
+#define MS_SCAN_PREFIX 8
+#else
+#define MS_SCAN_PREFIX MS_SCAN_W
+#endif
 
-#define parse_ascii_post(i) \
-    parse_ascii_##i: \
-    self->input_pos += i; \
-    goto parse_ascii_end;
+static MS_INLINE void
+json_scan_string_nonascii(JSONDecoderState *self) {
+    unsigned char *p = self->input_pos;
+    unsigned char *end = self->input_end;
+    if (end - p >= MS_SCAN_PREFIX) {
+        Py_ssize_t j = 0;
+        while (j < MS_SCAN_PREFIX && !char_is_special_or_nonascii(p[j])) j++;
+        p += j;
+        if (j == MS_SCAN_PREFIX) {
+            while (end - p >= MS_SCAN_W) {
+                Py_ssize_t n = ms_scan_special_or_nonascii_index((const char *)p);
+                p += n;
+                if (n != MS_SCAN_W) {
+                    self->input_pos = p;
+                    return;
+                }
+            }
+        }
+        else {
+            self->input_pos = p;
+            return;
+        }
+    }
+    while (p < end && !char_is_special_or_nonascii(*p)) p++;
+    self->input_pos = p;
+}
 
-#define parse_unicode_pre(i) \
-    if (MS_UNLIKELY(char_is_special(self->input_pos[i]))) goto parse_unicode_##i;
-
-#define parse_unicode_post(i) \
-    parse_unicode_##i: \
-    self->input_pos += i; \
-    goto parse_unicode_end;
+static MS_INLINE void
+json_scan_string_special(JSONDecoderState *self) {
+    unsigned char *p = self->input_pos;
+    unsigned char *end = self->input_end;
+    if (end - p >= MS_SCAN_PREFIX) {
+        Py_ssize_t j = 0;
+        while (j < MS_SCAN_PREFIX && !char_is_special(p[j])) j++;
+        p += j;
+        if (j == MS_SCAN_PREFIX) {
+            while (end - p >= MS_SCAN_W) {
+                Py_ssize_t n = ms_scan_escape_index((const char *)p);
+                p += n;
+                if (n != MS_SCAN_W) {
+                    self->input_pos = p;
+                    return;
+                }
+            }
+        }
+        else {
+            self->input_pos = p;
+            return;
+        }
+    }
+    while (p < end && !char_is_special(*p)) p++;
+    self->input_pos = p;
+}
 
 static MS_NOINLINE Py_ssize_t
 json_decode_string_view_copy(
@@ -15774,56 +16090,25 @@ top:
         self->input_pos++;
         if (!json_read1(self, &c)) return -1;
 
+        Py_UCS4 ch;
         switch (c) {
-            case 'n': {
-                *(self->scratch + self->scratch_len) = '\n';
-                self->scratch_len++;
-                break;
-            }
-            case '"': {
-                *(self->scratch + self->scratch_len) = '"';
-                self->scratch_len++;
-                break;
-            }
-            case 't': {
-                *(self->scratch + self->scratch_len) = '\t';
-                self->scratch_len++;
-                break;
-            }
-            case 'r': {
-                *(self->scratch + self->scratch_len) = '\r';
-                self->scratch_len++;
-                break;
-            }
-            case '\\': {
-                *(self->scratch + self->scratch_len) = '\\';
-                self->scratch_len++;
-                break;
-            }
-            case '/': {
-                *(self->scratch + self->scratch_len) = '/';
-                self->scratch_len++;
-                break;
-            }
-            case 'b': {
-                *(self->scratch + self->scratch_len) = '\b';
-                self->scratch_len++;
-                break;
-            }
-            case 'f': {
-                *(self->scratch + self->scratch_len) = '\f';
-                self->scratch_len++;
-                break;
-            }
-            case 'u': {
+            case 'n': ch = '\n'; break;
+            case '"': ch = '"'; break;
+            case 't': ch = '\t'; break;
+            case 'r': ch = '\r'; break;
+            case '\\': ch = '\\'; break;
+            case '/': ch = '/'; break;
+            case 'b': ch = '\b'; break;
+            case 'f': ch = '\f'; break;
+            case 'u':
                 *is_ascii = false;
-                if (json_handle_unicode_escape(self) < 0) return -1;
+                if (json_parse_unicode_escape(self, &ch) < 0) return -1;
                 break;
-            }
             default:
                 json_err_invalid(self, "invalid escape character in string");
                 return -1;
         }
+        json_scratch_write_codepoint(self, ch);
 
         start = self->input_pos;
     }
@@ -15839,37 +16124,17 @@ top:
     }
 
     /* Loop until `"`, `\`, or a non-ascii character */
-    while (self->input_end - self->input_pos >= 8) {
-        repeat8(parse_ascii_pre);
-        self->input_pos += 8;
-        continue;
-        repeat8(parse_ascii_post);
-    }
-    while (true) {
-        if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
-        if (MS_UNLIKELY(char_is_special_or_nonascii(*self->input_pos))) break;
-        self->input_pos++;
-    }
+    json_scan_string_nonascii(self);
+    if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
 
-parse_ascii_end:
     OPT_FORCE_RELOAD(*self->input_pos);
 
     if (MS_UNLIKELY(*self->input_pos & 0x80)) {
         *is_ascii = false;
         /* Loop until `"` or `\` */
-        while (self->input_end - self->input_pos >= 8) {
-            repeat8(parse_unicode_pre);
-            self->input_pos += 8;
-            continue;
-            repeat8(parse_unicode_post);
-        }
-        while (true) {
-            if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
-            if (MS_UNLIKELY(char_is_special(*self->input_pos))) break;
-            self->input_pos++;
-        }
+        json_scan_string_special(self);
+        if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
     }
-parse_unicode_end:
     goto top;
 }
 
@@ -15879,19 +16144,9 @@ json_decode_string_view(JSONDecoderState *self, char **out, bool *is_ascii) {
     unsigned char *start = self->input_pos;
 
     /* Loop until `"`, `\`, or a non-ascii character */
-    while (self->input_end - self->input_pos >= 8) {
-        repeat8(parse_ascii_pre);
-        self->input_pos += 8;
-        continue;
-        repeat8(parse_ascii_post);
-    }
-    while (true) {
-        if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
-        if (MS_UNLIKELY(char_is_special_or_nonascii(*self->input_pos))) break;
-        self->input_pos++;
-    }
+    json_scan_string_nonascii(self);
+    if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
 
-parse_ascii_end:
     OPT_FORCE_RELOAD(*self->input_pos);
 
     if (MS_LIKELY(*self->input_pos == '"')) {
@@ -15904,20 +16159,10 @@ parse_ascii_end:
     if (MS_UNLIKELY(*self->input_pos & 0x80)) {
         *is_ascii = false;
         /* Loop until `"` or `\` */
-        while (self->input_end - self->input_pos >= 8) {
-            repeat8(parse_unicode_pre);
-            self->input_pos += 8;
-            continue;
-            repeat8(parse_unicode_post);
-        }
-        while (true) {
-            if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
-            if (MS_UNLIKELY(char_is_special(*self->input_pos))) break;
-            self->input_pos++;
-        }
+        json_scan_string_special(self);
+        if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
     }
 
-parse_unicode_end:
     OPT_FORCE_RELOAD(*self->input_pos);
 
     if (MS_LIKELY(*self->input_pos == '"')) {
@@ -15936,19 +16181,9 @@ json_skip_string(JSONDecoderState *self) {
 
 parse_unicode:
     /* Loop until `"` or `\` */
-    while (self->input_end - self->input_pos >= 8) {
-        repeat8(parse_unicode_pre);
-        self->input_pos += 8;
-        continue;
-        repeat8(parse_unicode_post);
-    }
-    while (true) {
-        if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
-        if (MS_UNLIKELY(char_is_special(*self->input_pos))) break;
-        self->input_pos++;
-    }
+    json_scan_string_special(self);
+    if (MS_UNLIKELY(self->input_pos == self->input_end)) return ms_err_truncated();
 
-parse_unicode_end:
     OPT_FORCE_RELOAD(*self->input_pos);
 
     if (MS_LIKELY(*self->input_pos == '"')) {
@@ -16010,10 +16245,6 @@ parse_unicode_end:
     }
 }
 
-#undef parse_ascii_pre
-#undef parse_ascii_post
-#undef parse_unicode_pre
-#undef parse_unicode_post
 
 /* A table of the corresponding base64 value for each character, or -1 if an
  * invalid character in the base64 alphabet (note the padding char '=' is

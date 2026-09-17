@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- **Performance:** accelerate JSON string encoding and decoding with SIMD scanning.
+- Fix a possible crash during CSV validation when recursive type initialization
+  leaves field type information incomplete; raise `RuntimeError` instead.
+
 ## 0.13.0 (2026-09-15)
 
 - Fix `minItems` in generated JSON schemas for `array_like=True` Structs whose
