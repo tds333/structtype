@@ -21917,7 +21917,7 @@ PyInit__core(void)
 
     /* Initialize cached constant strings */
 #define CACHED_STRING(attr) \
-    if ((st->attr = PyUnicode_InternFromString(#attr + 4)) == NULL) return NULL;
+    if ((st->attr = PyUnicode_InternFromString(&(#attr)[4])) == NULL) return NULL;
     ST_STR_ATTRS(CACHED_STRING)
 #undef CACHED_STRING
 
