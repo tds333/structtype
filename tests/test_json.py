@@ -3,9 +3,11 @@ import datetime
 import decimal
 import enum
 import gc
+import ipaddress
 import itertools
 import json
 import math
+import pathlib
 import string
 import subprocess
 import sys
@@ -3738,6 +3740,104 @@ class TestRemainingCPaths:
         assert adapter.struct_dump_json(u) == (
             b'"c4524ac0-e81e-4aa8-a595-0aec605a659a"'
         )
+
+
+class TestPathAndIpAddress:
+    def test_encode_path(self):
+        class WithPath(Struct):
+            v: pathlib.Path
+
+        obj = WithPath(pathlib.Path("/tmp/a b"))
+        assert obj.struct_dump_json() == b'{"v":"/tmp/a b"}'
+        assert obj.struct_dump() == {"v": "/tmp/a b"}
+
+    @pytest.mark.parametrize(
+        "annotation,value,encoded",
+        [
+            (ipaddress.IPv4Address, ipaddress.IPv4Address("1.2.3.4"), b'"1.2.3.4"'),
+            (ipaddress.IPv6Address, ipaddress.IPv6Address("::1"), b'"::1"'),
+            (
+                ipaddress.IPv6Address,
+                ipaddress.IPv6Address("2001:db8::1"),
+                b'"2001:db8::1"',
+            ),
+        ],
+    )
+    def test_encode_ip_address(self, annotation, value, encoded):
+        assert JSONEncoder().encode(value) == encoded
+        cls = type("WithIp", (Struct,), {"__annotations__": {"v": annotation}})
+        assert cls(value).struct_dump_json() == b'{"v":' + encoded + b"}"
+
+    @pytest.mark.parametrize("strict", [True, False])
+    def test_decode_path(self, strict):
+        cls = type("WithPath", (Struct,), {"__annotations__": {"v": pathlib.Path}})
+        out = cls.struct_validate({"v": "/tmp/a"}, strict=strict)
+        assert out.v == pathlib.Path("/tmp/a")
+        out = cls.struct_validate_json(b'{"v":"/tmp/a"}', strict=strict)
+        assert out.v == pathlib.Path("/tmp/a")
+
+    @pytest.mark.parametrize("strict", [True, False])
+    @pytest.mark.parametrize(
+        "annotation,text,expected",
+        [
+            (ipaddress.IPv4Address, "1.2.3.4", ipaddress.IPv4Address("1.2.3.4")),
+            (ipaddress.IPv6Address, "::1", ipaddress.IPv6Address("::1")),
+        ],
+    )
+    def test_decode_ip_address(self, annotation, text, expected, strict):
+        cls = type("WithIp", (Struct,), {"__annotations__": {"v": annotation}})
+        assert cls.struct_validate({"v": text}, strict=strict).v == expected
+        assert cls.struct_validate_json(
+            b'{"v":"' + text.encode() + b'"}', strict=strict
+        ).v == expected
+
+    def test_no_int_coercion_for_path(self):
+        cls = type("WithPath", (Struct,), {"__annotations__": {"v": pathlib.Path}})
+        with pytest.raises(structtype.ValidationError, match="Expected `path`"):
+            cls.struct_validate({"v": 5}, strict=False)
+
+    def test_decode_invalid_ip_errors(self):
+        cls4 = type("WithIp4", (Struct,), {"__annotations__": {"v": ipaddress.IPv4Address}})
+        with pytest.raises(structtype.ValidationError, match="Invalid IPv4 address"):
+            cls4.struct_validate_json(b'{"v":"not-an-ip"}', strict=False)
+        # Wrong version is rejected
+        with pytest.raises(structtype.ValidationError, match="Invalid IPv4 address"):
+            cls4.struct_validate_json(b'{"v":"::1"}', strict=False)
+
+        cls6 = type("WithIp6", (Struct,), {"__annotations__": {"v": ipaddress.IPv6Address}})
+        with pytest.raises(structtype.ValidationError, match="Invalid IPv6 address"):
+            cls6.struct_validate_json(b'{"v":"1.2.3.4"}', strict=False)
+
+    def test_no_int_coercion_for_ip(self):
+        cls = type("WithIp4", (Struct,), {"__annotations__": {"v": ipaddress.IPv4Address}})
+        with pytest.raises(structtype.ValidationError, match="Expected `ipv4`"):
+            cls.struct_validate({"v": 16909060}, strict=False)
+
+    @pytest.mark.parametrize(
+        "key,annotation",
+        [
+            (pathlib.Path("/tmp/x"), dict[pathlib.Path, int]),
+            (ipaddress.IPv4Address("1.2.3.4"), dict[ipaddress.IPv4Address, int]),
+            (ipaddress.IPv6Address("::1"), dict[ipaddress.IPv6Address, int]),
+        ],
+    )
+    def test_dict_keys(self, key, annotation):
+        from structtype._core import _dump
+
+        msg = {key: 1}
+        body = _json_encode(_dump(msg, str_keys=True))
+        encoded = b'{"v":' + body + b"}"
+        cls = type("Keys", (Struct,), {"__annotations__": {"v": annotation}})
+        assert cls.struct_validate_json(encoded).v == msg
+
+    def test_serializer_allowed(self):
+        ann = Annotated[
+            ipaddress.IPv4Address,
+            Serializer(dump=str, load=ipaddress.IPv4Address),
+        ]
+        cls = type("WithCodec", (Struct,), {"__annotations__": {"v": ann}})
+        obj = cls(ipaddress.IPv4Address("1.2.3.4"))
+        assert obj.struct_dump_json() == b'{"v":"1.2.3.4"}'
 
 
 class TestSubMicrosecondRounding:

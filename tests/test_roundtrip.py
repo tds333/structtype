@@ -2,6 +2,8 @@ import dataclasses
 import datetime
 import decimal
 import enum
+import ipaddress
+import pathlib
 import sys
 import uuid
 from typing import Any, NamedTuple, TypedDict
@@ -65,6 +67,9 @@ ROUNDTRIP_CASES = [
     ("timedelta", datetime.timedelta, datetime.timedelta(days=1)),
     ("uuid", uuid.UUID, uuid.UUID(int=7)),
     ("decimal", decimal.Decimal, decimal.Decimal("3.14")),
+    ("path", pathlib.Path, pathlib.Path("/tmp/a")),
+    ("ipv4", ipaddress.IPv4Address, ipaddress.IPv4Address("1.2.3.4")),
+    ("ipv6", ipaddress.IPv6Address, ipaddress.IPv6Address("::1")),
     ("bytes", bytes, b"hello"),
     ("bytearray", bytearray, bytearray(b"hi")),
     ("memoryview", memoryview, memoryview(b"yo")),
@@ -128,6 +133,9 @@ class KitchenSink(Struct):
     delta: datetime.timedelta
     u: uuid.UUID
     dec: decimal.Decimal
+    p: pathlib.Path
+    ip4: ipaddress.IPv4Address
+    ip6: ipaddress.IPv6Address
     by: bytes
     ba: bytearray
     mv: memoryview
@@ -160,6 +168,9 @@ def _kitchen_sink():
         delta=datetime.timedelta(days=1),
         u=uuid.UUID(int=7),
         dec=decimal.Decimal("3.14"),
+        p=pathlib.Path("/tmp/a"),
+        ip4=ipaddress.IPv4Address("1.2.3.4"),
+        ip6=ipaddress.IPv6Address("::1"),
         by=b"hello",
         ba=bytearray(b"hi"),
         mv=memoryview(b"yo"),
@@ -195,6 +206,9 @@ def test_roundtrip_all_builtin_types():
     assert type(dumped["dec"]) is decimal.Decimal
     assert type(dumped["by"]) is bytes
     assert type(dumped["u"]) is uuid.UUID
+    assert isinstance(dumped["p"], pathlib.Path)
+    assert type(dumped["ip4"]) is ipaddress.IPv4Address
+    assert type(dumped["ip6"]) is ipaddress.IPv6Address
     assert type(dumped["e"]) is Color
     assert type(dumped["st"]) is list
     assert type(dumped["fs"]) is list

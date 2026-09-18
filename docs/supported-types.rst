@@ -37,6 +37,9 @@ For a summary of which types support lax-mode string-to-type conversion, see
 - `datetime.timedelta`
 - `uuid.UUID`
 - `decimal.Decimal`
+- `pathlib.Path`
+- `ipaddress.IPv4Address`
+- `ipaddress.IPv6Address`
 - `enum.Enum` types
 - `enum.IntEnum` types
 - `enum.StrEnum` types
@@ -619,6 +622,75 @@ Passing ``ALL_BUILTIN_TYPES`` keeps every type that would otherwise be
 converted (``bytes``, `datetime.datetime`, `decimal.Decimal`, ...) unchanged.
 This is useful for targets that accept richer types than JSON — for example
 :ref:`DynamoDB <dynamodb-example>`.
+
+
+``pathlib.Path``
+----------------
+
+`pathlib.Path` values are encoded as their string representation in JSON and
+decoded from strings. Decoding a string that `pathlib.Path` cannot construct is
+reported as an ``Invalid path`` error.
+
+.. code-block:: python
+
+    >>> from structtype import StructAdapter
+    >>> import pathlib
+
+    >>> x = pathlib.Path("/tmp/example")
+
+    >>> msg = StructAdapter(pathlib.Path).struct_dump_json(x)
+
+    >>> msg
+    b'"/tmp/example"'
+
+    >>> StructAdapter(pathlib.Path).struct_validate_json(msg)
+    PosixPath('/tmp/example')
+
+Other `pathlib` pure-path classes (for example `pathlib.PureWindowsPath` or
+`pathlib.PurePosixPath`) are not supported natively. Wrap them in a
+:class:`structtype.Serializer` if you need them:
+
+.. code-block:: python
+
+    >>> from typing import Annotated
+    >>> from structtype import Serializer
+
+    >>> Pure = Annotated[pathlib.PureWindowsPath, Serializer(
+    ...     dump=str, load=pathlib.PureWindowsPath)]
+
+
+``ipaddress``
+-------------
+
+`ipaddress.IPv4Address` and `ipaddress.IPv6Address` values are encoded as their
+canonical string representation in JSON and decoded from strings. The address
+family is fixed by the annotated type: decoding an IPv6 string into an
+`ipaddress.IPv4Address` field (or vice versa) is an error.
+
+.. code-block:: python
+
+    >>> from structtype import StructAdapter
+    >>> import ipaddress
+
+    >>> msg = StructAdapter(ipaddress.IPv4Address).struct_dump_json(
+    ...     ipaddress.IPv4Address("127.0.0.1")
+    ... )
+
+    >>> msg
+    b'"127.0.0.1"'
+
+    >>> StructAdapter(ipaddress.IPv4Address).struct_validate_json(msg)
+    IPv4Address('127.0.0.1')
+
+    >>> StructAdapter(ipaddress.IPv4Address).struct_validate_json(b'"::1"')
+    Traceback (most recent call last):
+        File "<stdin>", line 1, in <module>
+    structtype.ValidationError: Invalid IPv4 address
+
+Interface and network classes (`ipaddress.IPv4Interface`,
+`ipaddress.IPv6Interface`, `ipaddress.IPv4Network`, `ipaddress.IPv6Network`) are
+not supported natively. Wrap them in a :class:`structtype.Serializer` if you
+need them.
 
 
 ``list`` / ``tuple`` / ``set`` / ``frozenset``

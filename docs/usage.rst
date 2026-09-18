@@ -1159,6 +1159,7 @@ input type that gets automatically converted.
 
 **Types with no lax mode:** ``str``, ``bytes``, ``bytearray``, ``memoryview``,
 ``datetime.time``, ``datetime.date``, ``uuid.UUID``, ``decimal.Decimal``,
+``pathlib.Path``, ``ipaddress.IPv4Address``, ``ipaddress.IPv6Address``,
 ``enum.Enum``, ``set``, ``frozenset``, ``list``, ``tuple``, ``dict``,
 ``Struct``, ``dataclass``, ``NamedTuple``.  These types never perform implicit
 string-to-type conversion regardless of the ``strict`` setting.
@@ -1239,8 +1240,8 @@ Only **flat scalar** fields are supported. Nested ``Struct`` values and
 ``ValidationError`` on decode, and a ``TypeError`` on dump. On dump, ``None``
 becomes an empty cell, ``True`` / ``False`` become ``true`` / ``false``,
 ``bytes`` become base64 strings, ``Enum`` members use their value, and the
-``datetime`` family, ``uuid.UUID``, and ``decimal.Decimal`` use their standard
-string forms.
+``datetime`` family, ``uuid.UUID``, ``decimal.Decimal``, ``pathlib.Path``, and
+the ``ipaddress`` address types use their standard string forms.
 
 ``struct_dump_csv()`` always returns every field, in declaration order, as one
 positional column, so ``omit_defaults`` does not apply to CSV. For
@@ -1293,9 +1294,10 @@ representation.
   - Value-level conversions of types that don't map directly to builtin
     types: `bytes` / `bytearray` / `memoryview` to base64 string,
     `datetime.datetime` / `datetime.date` / `datetime.time` /
-    `datetime.timedelta` to ISO 8601 string, `uuid.UUID` and
-    `decimal.Decimal` to string, `set` / `frozenset` to `list`,
-    ``frozendict`` to `dict`, `enum.Enum` to its member value.
+    `datetime.timedelta` to ISO 8601 string, `uuid.UUID`,
+    `decimal.Decimal`, `pathlib.Path`, and the `ipaddress` address types to
+    string, `set` / `frozenset` to `list`, ``frozendict`` to `dict`,
+    `enum.Enum` to its member value.
 
 - ``struct_validate`` is the "decoding" half: it takes builtin types and
   validates them against a schema, producing high-level types.
@@ -1519,22 +1521,22 @@ String-constructible custom types
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For a *custom* type that is constructed from a single string argument
-(``IPv4Address``, ``HttpUrl``, ...), attach a :class:`Serializer`:
+(``Fraction``, ``HttpUrl``, ...), attach a :class:`Serializer`:
 
 .. code-block:: python
 
     >>> from structtype import Struct, Serializer
     >>> from typing import Annotated
-    >>> from ipaddress import IPv4Address
+    >>> from fractions import Fraction
 
     >>> class Config(Struct):
-    ...     ip: Annotated[IPv4Address, Serializer(dump=str, load=IPv4Address)]
+    ...     ratio: Annotated[Fraction, Serializer(dump=str, load=Fraction)]
 
-    >>> Config.struct_validate_json(b'{"ip": "10.0.0.1"}')
-    Config(ip=IPv4Address('10.0.0.1'))
+    >>> Config.struct_validate_json(b'{"ratio": "1/3"}')
+    Config(ratio=Fraction(1, 3))
 
-The field stores the ``IPv4Address`` object: ``dump=str`` serializes it to a
-string and ``load=IPv4Address`` parses it back. See :doc:`extending` for
+The field stores the ``Fraction`` object: ``dump=str`` serializes it to a
+string and ``load=Fraction`` parses it back. See :doc:`extending` for
 details on per-field Serializers.
 
 

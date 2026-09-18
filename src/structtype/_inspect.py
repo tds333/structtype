@@ -1,6 +1,8 @@
 import datetime
 import decimal
 import enum
+import ipaddress
+import pathlib
 import sys
 import uuid
 from collections.abc import Iterable
@@ -49,6 +51,8 @@ __all__ = (
     "FloatType",
     "FrozenDictType",
     "FrozenSetType",
+    "IPv4AddressType",
+    "IPv6AddressType",
     "IntType",
     "ListType",
     "LiteralType",
@@ -56,6 +60,7 @@ __all__ = (
     "Metadata",
     "NamedTupleType",
     "NoneType",
+    "PathType",
     "PydanticType",
     "SetType",
     "StrType",
@@ -273,6 +278,18 @@ class UUIDType(Type):
 
 class DecimalType(Type):
     """A type corresponding to `decimal.Decimal`."""
+
+
+class PathType(Type):
+    """A type corresponding to `pathlib.Path`."""
+
+
+class IPv4AddressType(Type):
+    """A type corresponding to `ipaddress.IPv4Address`."""
+
+
+class IPv6AddressType(Type):
+    """A type corresponding to `ipaddress.IPv6Address`."""
 
 
 class EnumType(Type):
@@ -996,6 +1013,12 @@ class _Translator:
             return UUIDType()
         elif t is decimal.Decimal:
             return DecimalType()
+        elif t is pathlib.Path:
+            return PathType()
+        elif t is ipaddress.IPv4Address:
+            return IPv4AddressType()
+        elif t is ipaddress.IPv6Address:
+            return IPv6AddressType()
         elif t is list:
             return ListType(
                 self.translate(args[0]) if args else AnyType(),

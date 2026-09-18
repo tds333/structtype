@@ -1,6 +1,8 @@
 import datetime
 import decimal
 import enum
+import ipaddress
+import pathlib
 import sys
 import uuid
 from typing import Annotated, Any, Final, NewType
@@ -175,6 +177,9 @@ def test_dump_builtin_types():
         b: bytes
         u: uuid.UUID
         dc: decimal.Decimal
+        p: pathlib.Path
+        ip4: ipaddress.IPv4Address
+        ip6: ipaddress.IPv6Address
         color: Color
 
     obj = Obj(
@@ -185,6 +190,9 @@ def test_dump_builtin_types():
         b=b"hello",
         u=uuid.UUID("12345678-1234-5678-1234-567812345678"),
         dc=decimal.Decimal("3.14"),
+        p=pathlib.Path("/tmp/a"),
+        ip4=ipaddress.IPv4Address("1.2.3.4"),
+        ip6=ipaddress.IPv6Address("::1"),
         color=Color.RED,
     )
 
@@ -197,6 +205,9 @@ def test_dump_builtin_types():
     assert isinstance(r["b"], str)
     assert isinstance(r["u"], str)
     assert isinstance(r["dc"], str)
+    assert isinstance(r["p"], str)
+    assert isinstance(r["ip4"], str)
+    assert isinstance(r["ip6"], str)
     assert isinstance(r["color"], int)
 
     # ALL_BUILTIN_TYPES: native types preserved
@@ -208,6 +219,9 @@ def test_dump_builtin_types():
     assert isinstance(r["b"], bytes)
     assert isinstance(r["u"], uuid.UUID)
     assert isinstance(r["dc"], decimal.Decimal)
+    assert isinstance(r["p"], pathlib.Path)
+    assert isinstance(r["ip4"], ipaddress.IPv4Address)
+    assert isinstance(r["ip6"], ipaddress.IPv6Address)
     assert isinstance(r["color"], Color)
 
     # Selective passthrough: only Color

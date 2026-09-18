@@ -21,11 +21,14 @@ from ._inspect import (
     FrozenDictType,
     FrozenSetType,
     IntType,
+    IPv4AddressType,
+    IPv6AddressType,
     LiteralType,
     MemoryViewType,
     Metadata,
     NamedTupleType,
     NoneType,
+    PathType,
     PydanticType,
     SetType,
     StrType,
@@ -352,6 +355,15 @@ class _SchemaGenerator:
         elif isinstance(t, DecimalType):
             schema["type"] = "string"
             schema["format"] = "decimal"
+        elif isinstance(t, PathType):
+            schema["type"] = "string"
+            schema["format"] = "path"
+        elif isinstance(t, IPv4AddressType):
+            schema["type"] = "string"
+            schema["format"] = "ipv4"
+        elif isinstance(t, IPv6AddressType):
+            schema["type"] = "string"
+            schema["format"] = "ipv6"
         elif isinstance(t, CollectionType):
             schema["type"] = "array"
             if not isinstance(t.item_type, AnyType):

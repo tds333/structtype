@@ -1,7 +1,9 @@
 import datetime
 import decimal
 import enum
+import ipaddress
 import json
+import pathlib
 import sys
 import typing
 import uuid
@@ -169,6 +171,27 @@ def test_decimal():
     assert make_schema(decimal.Decimal) == {
         "type": "string",
         "format": "decimal",
+    }
+
+
+def test_path():
+    assert make_schema(pathlib.Path) == {
+        "type": "string",
+        "format": "path",
+    }
+
+
+def test_ipv4_address():
+    assert make_schema(ipaddress.IPv4Address) == {
+        "type": "string",
+        "format": "ipv4",
+    }
+
+
+def test_ipv6_address():
+    assert make_schema(ipaddress.IPv6Address) == {
+        "type": "string",
+        "format": "ipv6",
     }
 
 

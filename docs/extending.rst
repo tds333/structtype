@@ -220,8 +220,6 @@ project. These are common Python stdlib types that ``structtype`` doesn't
 .. code-block:: python
 
     import fractions
-    import ipaddress
-    import pathlib
     import re
     import types
     from collections import deque
@@ -240,10 +238,6 @@ project. These are common Python stdlib types that ``structtype`` doesn't
         dump=list,
         load=deque)]
 
-    Path = Annotated[pathlib.Path, Serializer(
-        dump=str,
-        load=pathlib.Path)]
-
     Pattern = Annotated[re.Pattern, Serializer(
         dump=lambda p: p.pattern,
         load=re.compile)]
@@ -256,15 +250,12 @@ project. These are common Python stdlib types that ``structtype`` doesn't
         dump=vars,
         load=lambda o: types.SimpleNamespace(**o))]
 
-    IPv4Address = Annotated[ipaddress.IPv4Address, Serializer(
-        dump=str, load=ipaddress.IPv4Address)]
-
 These aliases nest (``list[Complex]``, ``dict[str, Fraction]``), and the
 ``dump`` / ``load`` callables must map to :doc:`natively supported
 <supported-types>` values. Serializer aliases are supported on :class:`Struct`
 fields only — :class:`StructAdapter` rejects them (see above). For types you
 control, prefer the ``struct_dump`` / ``struct_validate`` protocol methods.
-Single-argument string-constructible types such as ``IPv4Address`` may also use
+Single-argument string-constructible types may also use
 ``Annotated[T, Serializer(dump=str, load=T)]`` directly. For a field holding
 arbitrary JSON data, see :ref:`arbitrary-json-data` above.
 

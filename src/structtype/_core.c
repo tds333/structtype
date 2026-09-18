@@ -688,6 +688,9 @@ typedef struct {
     PyObject *UUIDType;
     PyObject *uuid_safeuuid_unknown;
     PyObject *DecimalType;
+    PyObject *PathType;
+    PyObject *IPv4AddressType;
+    PyObject *IPv6AddressType;
     PyObject *EnumType;
     PyObject *typing_union;
     PyObject *typing_any;
@@ -4387,6 +4390,7 @@ AssocList_Sort(AssocList* list) {
 #define MS_TYPE_TIMEDELTA           (1ull << 12)
 #define MS_TYPE_UUID                (1ull << 13)
 #define MS_TYPE_DECIMAL             (1ull << 14)
+#define MS_TYPE_PATH                (1ull << 15)
 #define MS_TYPE_STRUCT              (1ull << 16)
 #define MS_TYPE_STRUCT_ARRAY        (1ull << 17)
 #define MS_TYPE_STRUCT_UNION        (1ull << 18)
@@ -4411,6 +4415,8 @@ AssocList_Sort(AssocList* list) {
 // Despite the fact that `frozendict` was added in 3.15,
 // this type is always defined for order consistency:
 #define MS_TYPE_FROZENDICT          ((1ull << 38) | (1ull << 39))
+#define MS_TYPE_IPV4ADDRESS         (1ull << 40)
+#define MS_TYPE_IPV6ADDRESS         (1ull << 41)
 
 /* Types that cannot have a Serializer annotation.  Everything else (bytes,
  * datetime, UUID, Enum, Struct subclasses, Optional[allowed], etc.) is
@@ -5248,6 +5254,15 @@ typenode_simple_repr(TypeNode *self) {
     if (self->types & MS_TYPE_DECIMAL) {
         if (!strbuilder_extend_literal(&builder, "decimal")) return NULL;
     }
+    if (self->types & MS_TYPE_PATH) {
+        if (!strbuilder_extend_literal(&builder, "path")) return NULL;
+    }
+    if (self->types & MS_TYPE_IPV4ADDRESS) {
+        if (!strbuilder_extend_literal(&builder, "ipv4")) return NULL;
+    }
+    if (self->types & MS_TYPE_IPV6ADDRESS) {
+        if (!strbuilder_extend_literal(&builder, "ipv6")) return NULL;
+    }
     if (self->types & (
             MS_TYPE_STRUCT | MS_TYPE_STRUCT_UNION |
             MS_TYPE_TYPEDDICT | MS_TYPE_DATACLASS |
@@ -5926,7 +5941,8 @@ typenode_collect_check_invariants(TypeNodeCollectState *state) {
                 MS_TYPE_STR | MS_TYPE_STRLITERAL | MS_TYPE_ENUM |
                 MS_TYPE_BYTES | MS_TYPE_BYTEARRAY | MS_TYPE_MEMORYVIEW |
                 MS_TYPE_DATETIME | MS_TYPE_DATE | MS_TYPE_TIME |
-                MS_TYPE_TIMEDELTA | MS_TYPE_UUID | MS_TYPE_DECIMAL
+                MS_TYPE_TIMEDELTA | MS_TYPE_UUID | MS_TYPE_DECIMAL |
+                MS_TYPE_PATH | MS_TYPE_IPV4ADDRESS | MS_TYPE_IPV6ADDRESS
             )
         ) > 1
     ) {
@@ -5934,7 +5950,8 @@ typenode_collect_check_invariants(TypeNodeCollectState *state) {
             PyExc_TypeError,
             "Type unions may not contain more than one str-like type (`str`, "
             "`Enum`, `Literal[str values]`, `datetime`, `date`, `time`, `timedelta`, "
-            "`uuid`, `decimal`, `bytes`, `bytearray`) - type `%R` is not supported",
+            "`uuid`, `decimal`, `path`, `ipv4`, `ipv6`, `bytes`, `bytearray`) - "
+            "type `%R` is not supported",
             state->context
         );
         return -1;
@@ -6786,6 +6803,15 @@ typenode_collect_type(TypeNodeCollectState *state, PyObject *obj) {
     }
     else if (t == state->mod->DecimalType) {
         state->types |= MS_TYPE_DECIMAL;
+    }
+    else if (t == state->mod->PathType) {
+        state->types |= MS_TYPE_PATH;
+    }
+    else if (t == state->mod->IPv4AddressType) {
+        state->types |= MS_TYPE_IPV4ADDRESS;
+    }
+    else if (t == state->mod->IPv6AddressType) {
+        state->types |= MS_TYPE_IPV6ADDRESS;
     }
     else if (Py_TYPE(t) == (PyTypeObject *)(state->mod->typing_typevar)) {
         out = typenode_collect_typevar(state, t);
@@ -13744,6 +13770,33 @@ ms_decode_decimal_from_float(double val, PathNode *path, StructspecState *mod) {
     }
 }
 
+/*************************************************************************
+ * Path & IP Address Utilities                                           *
+ *************************************************************************/
+
+static PyObject *
+ms_decode_str_construct(
+    PyObject *cls, PyObject *str, const char *fmt, PathNode *path
+) {
+    PyObject *out = PyObject_CallOneArg(cls, str);
+    if (out == NULL) {
+        ms_error_with_path(fmt, path);
+    }
+    return out;
+}
+
+static PyObject *
+ms_decode_str_construct_from_view(
+    PyObject *cls, const char *view, Py_ssize_t size, bool is_ascii,
+    const char *fmt, PathNode *path
+) {
+    PyObject *str = ms_unicode_from_view(view, size, is_ascii);
+    if (str == NULL) return NULL;
+    PyObject *out = ms_decode_str_construct(cls, str, fmt, path);
+    Py_DECREF(str);
+    return out;
+}
+
 
 /*************************************************************************
  * strict=False Utilities                                                *
@@ -14682,6 +14735,16 @@ json_encode_uuid(EncoderState *self, PyObject *obj)
 }
 
 static int
+json_encode_strlike(EncoderState *self, PyObject *obj)
+{
+    PyObject *temp = PyObject_Str(obj);
+    if (temp == NULL) return -1;
+    int status = json_encode_str(self, temp);
+    Py_DECREF(temp);
+    return status;
+}
+
+static int
 json_encode_decimal(EncoderState *self, PyObject *obj)
 {
     PyObject *temp = PyObject_Str(obj);
@@ -14940,6 +15003,15 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
     }
     else if (type == &PyBytes_Type) {
         return json_encode_bytes(self, obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PathType))) {
+        return json_encode_strlike(self, obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv4AddressType))) {
+        return json_encode_strlike(self, obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv6AddressType))) {
+        return json_encode_strlike(self, obj);
     }
     return ms_encode_err_type_unsupported(type);
 }
@@ -15338,6 +15410,15 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     }
     else if (type == &PyMemoryView_Type) {
         return json_encode_memoryview(self, obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PathType))) {
+        return json_encode_strlike(self, obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv4AddressType))) {
+        return json_encode_strlike(self, obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv6AddressType))) {
+        return json_encode_strlike(self, obj);
     }
     PyObject *attr;
     int found;
@@ -16309,6 +16390,26 @@ json_decode_string(JSONDecoderState *self, TypeNode *type, PathNode *path) {
     else if (MS_UNLIKELY(type->types & MS_TYPE_DECIMAL)) {
         return ms_decode_decimal(view, size, is_ascii, path, NULL);
     }
+    else if (MS_UNLIKELY(type->types & MS_TYPE_PATH)) {
+        StructspecState *mod = structtype_get_global_state();
+        return ms_decode_str_construct_from_view(
+            mod->PathType, view, size, is_ascii, "Invalid path%U", path
+        );
+    }
+    else if (MS_UNLIKELY(type->types & MS_TYPE_IPV4ADDRESS)) {
+        StructspecState *mod = structtype_get_global_state();
+        return ms_decode_str_construct_from_view(
+            mod->IPv4AddressType, view, size, is_ascii,
+            "Invalid IPv4 address%U", path
+        );
+    }
+    else if (MS_UNLIKELY(type->types & MS_TYPE_IPV6ADDRESS)) {
+        StructspecState *mod = structtype_get_global_state();
+        return ms_decode_str_construct_from_view(
+            mod->IPv6AddressType, view, size, is_ascii,
+            "Invalid IPv6 address%U", path
+        );
+    }
     else if (
         MS_UNLIKELY(type->types &
             (MS_TYPE_BYTES | MS_TYPE_BYTEARRAY | MS_TYPE_MEMORYVIEW)
@@ -16371,6 +16472,26 @@ json_decode_dict_key_fallback(
     }
     else if (type->types & MS_TYPE_UUID) {
         return ms_decode_uuid_from_str(view, size, path);
+    }
+    else if (type->types & MS_TYPE_PATH) {
+        StructspecState *mod = structtype_get_global_state();
+        return ms_decode_str_construct_from_view(
+            mod->PathType, view, size, is_ascii, "Invalid path%U", path
+        );
+    }
+    else if (type->types & MS_TYPE_IPV4ADDRESS) {
+        StructspecState *mod = structtype_get_global_state();
+        return ms_decode_str_construct_from_view(
+            mod->IPv4AddressType, view, size, is_ascii,
+            "Invalid IPv4 address%U", path
+        );
+    }
+    else if (type->types & MS_TYPE_IPV6ADDRESS) {
+        StructspecState *mod = structtype_get_global_state();
+        return ms_decode_str_construct_from_view(
+            mod->IPv6AddressType, view, size, is_ascii,
+            "Invalid IPv6 address%U", path
+        );
     }
     else if (type->types & MS_TYPE_DATETIME) {
         return ms_decode_datetime_from_str(view, size, type, path);
@@ -18160,6 +18281,9 @@ structtype_json_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, 
 #define MS_BUILTIN_TIMEDELTA  (1ull << 8)
 #define MS_BUILTIN_FROZENDICT (1ull << 9)
 #define MS_BUILTIN_ENUM       (1ull << 10)
+#define MS_BUILTIN_PATH       (1ull << 11)
+#define MS_BUILTIN_IPV4ADDRESS (1ull << 12)
+#define MS_BUILTIN_IPV6ADDRESS (1ull << 13)
 
 typedef struct {
     StructspecState *mod;
@@ -18777,6 +18901,18 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         PyBuffer_Release(&buffer);
         return out;
     }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PathType))) {
+        if (self->builtin_types & MS_BUILTIN_PATH) goto builtin;
+        return PyObject_Str(obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv4AddressType))) {
+        if (self->builtin_types & MS_BUILTIN_IPV4ADDRESS) goto builtin;
+        return PyObject_Str(obj);
+    }
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv6AddressType))) {
+        if (self->builtin_types & MS_BUILTIN_IPV6ADDRESS) goto builtin;
+        return PyObject_Str(obj);
+    }
     PyObject *attr;
     int found;
 
@@ -18896,6 +19032,15 @@ ms_process_builtin_types(
         }
         else if (type == mod->DecimalType) {
             *mask |= MS_BUILTIN_DECIMAL;
+        }
+        else if (type == mod->PathType) {
+            *mask |= MS_BUILTIN_PATH;
+        }
+        else if (type == mod->IPv4AddressType) {
+            *mask |= MS_BUILTIN_IPV4ADDRESS;
+        }
+        else if (type == mod->IPv6AddressType) {
+            *mask |= MS_BUILTIN_IPV6ADDRESS;
         }
         else if (PyType_Check(type) && Py_TYPE(type) == mod->EnumMetaType) {
             *mask |= MS_BUILTIN_ENUM;
@@ -19267,6 +19412,30 @@ validate_str_uncommon(
         && !(self->builtin_types & MS_BUILTIN_DECIMAL)
     ) {
         return ms_decode_decimal_from_pystr(obj, path, self->mod);
+    }
+    else if (
+        (type->types & MS_TYPE_PATH)
+        && !(self->builtin_types & MS_BUILTIN_PATH)
+    ) {
+        return ms_decode_str_construct(
+            self->mod->PathType, obj, "Invalid path%U", path
+        );
+    }
+    else if (
+        (type->types & MS_TYPE_IPV4ADDRESS)
+        && !(self->builtin_types & MS_BUILTIN_IPV4ADDRESS)
+    ) {
+        return ms_decode_str_construct(
+            self->mod->IPv4AddressType, obj, "Invalid IPv4 address%U", path
+        );
+    }
+    else if (
+        (type->types & MS_TYPE_IPV6ADDRESS)
+        && !(self->builtin_types & MS_BUILTIN_IPV6ADDRESS)
+    ) {
+        return ms_decode_str_construct(
+            self->mod->IPv6AddressType, obj, "Invalid IPv6 address%U", path
+        );
     }
     else if (
         (type->types & MS_TYPE_BYTES)
@@ -20491,6 +20660,21 @@ ms_typenode_accepts_instance(TypeNode *type, PyObject *obj, StructspecState *mod
         PyType_IsSubtype(pytype, (PyTypeObject *)(mod->UUIDType))
     )
         return true;
+    else if (
+        (bits & MS_TYPE_PATH) &&
+        PyType_IsSubtype(pytype, (PyTypeObject *)(mod->PathType))
+    )
+        return true;
+    else if (
+        (bits & MS_TYPE_IPV4ADDRESS) &&
+        PyType_IsSubtype(pytype, (PyTypeObject *)(mod->IPv4AddressType))
+    )
+        return true;
+    else if (
+        (bits & MS_TYPE_IPV6ADDRESS) &&
+        PyType_IsSubtype(pytype, (PyTypeObject *)(mod->IPv6AddressType))
+    )
+        return true;
     else if ((bits & MS_TYPE_SET) && PySet_Check(obj))
         return true;
     else if ((bits & MS_TYPE_FROZENSET) && PyFrozenSet_Check(obj))
@@ -20675,6 +20859,15 @@ validate_obj_dispatch(
     }
     else if (PyAnySet_Check(obj)) {
         return validate_any_set(self, obj, type, path);
+    }
+    else if (PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->PathType))) {
+        return validate_immutable(self, MS_TYPE_PATH, "path", obj, type, path);
+    }
+    else if (PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->IPv4AddressType))) {
+        return validate_immutable(self, MS_TYPE_IPV4ADDRESS, "ipv4", obj, type, path);
+    }
+    else if (PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->IPv6AddressType))) {
+        return validate_immutable(self, MS_TYPE_IPV6ADDRESS, "ipv6", obj, type, path);
     }
     else {
         return validate_other(self, obj, type, path);
@@ -21466,6 +21659,9 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->UUIDType);
     Py_CLEAR(st->uuid_safeuuid_unknown);
     Py_CLEAR(st->DecimalType);
+    Py_CLEAR(st->PathType);
+    Py_CLEAR(st->IPv4AddressType);
+    Py_CLEAR(st->IPv6AddressType);
     Py_CLEAR(st->EnumType);
     Py_CLEAR(st->typing_union);
     Py_CLEAR(st->typing_any);
@@ -21538,6 +21734,9 @@ structtype_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->UUIDType);
     Py_VISIT(st->uuid_safeuuid_unknown);
     Py_VISIT(st->DecimalType);
+    Py_VISIT(st->PathType);
+    Py_VISIT(st->IPv4AddressType);
+    Py_VISIT(st->IPv6AddressType);
     Py_VISIT(st->EnumType);
     Py_VISIT(st->astimezone);
     Py_VISIT(st->re_compile);
@@ -21805,11 +22004,31 @@ PyInit__core(void)
     temp_module = PyImport_ImportModule("decimal");
     if (temp_module == NULL) return NULL;
     st->DecimalType = PyObject_GetAttrString(temp_module, "Decimal");
+    Py_DECREF(temp_module);
     if (st->DecimalType == NULL) return NULL;
+
+    /* pathlib module imports */
+    temp_module = PyImport_ImportModule("pathlib");
+    if (temp_module == NULL) return NULL;
+    st->PathType = PyObject_GetAttrString(temp_module, "Path");
+    Py_DECREF(temp_module);
+    if (st->PathType == NULL) return NULL;
+
+    /* ipaddress module imports */
+    temp_module = PyImport_ImportModule("ipaddress");
+    if (temp_module == NULL) return NULL;
+    st->IPv4AddressType = PyObject_GetAttrString(temp_module, "IPv4Address");
+    if (st->IPv4AddressType == NULL) {
+        Py_DECREF(temp_module);
+        return NULL;
+    }
+    st->IPv6AddressType = PyObject_GetAttrString(temp_module, "IPv6Address");
+    Py_DECREF(temp_module);
+    if (st->IPv6AddressType == NULL) return NULL;
 
     /* Build ALL_BUILTIN_TYPES convenience tuple */
     {
-        Py_ssize_t n = 10;
+        Py_ssize_t n = 13;
 #if PY315_PLUS
         n++;
 #endif
@@ -21834,6 +22053,12 @@ PyInit__core(void)
         PyTuple_SET_ITEM(all_types, idx++, st->UUIDType);
         Py_INCREF(st->DecimalType);
         PyTuple_SET_ITEM(all_types, idx++, st->DecimalType);
+        Py_INCREF(st->PathType);
+        PyTuple_SET_ITEM(all_types, idx++, st->PathType);
+        Py_INCREF(st->IPv4AddressType);
+        PyTuple_SET_ITEM(all_types, idx++, st->IPv4AddressType);
+        Py_INCREF(st->IPv6AddressType);
+        PyTuple_SET_ITEM(all_types, idx++, st->IPv6AddressType);
         Py_INCREF(st->EnumType);
         PyTuple_SET_ITEM(all_types, idx++, st->EnumType);
 #if PY315_PLUS

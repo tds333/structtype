@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Add native support for `pathlib.Path`, `ipaddress.IPv4Address`, and
+  `ipaddress.IPv6Address`. They serialize to strings in JSON and accept string
+  input for validation, are preserved by `builtin_types` / `ALL_BUILTIN_TYPES`,
+  and map to the `path`, `ipv4`, and `ipv6` JSON schema `format`s. Other
+  `pathlib` pure-path and `ipaddress` interface/network classes remain custom
+  types and can be handled with a `Serializer`.
 - **Performance:** accelerate JSON string encoding and decoding with SIMD scanning.
 - Fix a possible crash during CSV validation when recursive type initialization
   leaves field type information incomplete; raise `RuntimeError` instead.

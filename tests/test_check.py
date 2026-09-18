@@ -470,6 +470,8 @@ def test_from_attributes_missing_attr_errors():
 
 import decimal
 import enum
+import ipaddress
+import pathlib
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, NamedTuple, TypedDict as _TypedDict
@@ -521,6 +523,9 @@ VALIDATOR_MATRIX = [
     ("timedelta", datetime.timedelta, datetime.timedelta(seconds=1), 1),
     ("uuid", UUID, UUID(int=7), 7),
     ("decimal", decimal.Decimal, decimal.Decimal("1.5"), [1]),
+    ("path", pathlib.Path, pathlib.Path("/tmp/x"), 5),
+    ("ipv4", ipaddress.IPv4Address, ipaddress.IPv4Address("1.2.3.4"), 5),
+    ("ipv6", ipaddress.IPv6Address, ipaddress.IPv6Address("::1"), 5),
     ("enum", Color, Color.RED, "nope"),
     ("any-set", Any, object(), None),
     ("set-coerce-list", set[int], [1, 2], ["x"]),
@@ -584,6 +589,9 @@ def test_validator_matrix_rejects_invalid(label, annotation, good, bad):
         (decimal.Decimal, 3, decimal.Decimal("3")),
         (decimal.Decimal, "1.5", decimal.Decimal("1.5")),
         (decimal.Decimal, 1.5, decimal.Decimal("1.5")),
+        (pathlib.Path, "/tmp/x", pathlib.Path("/tmp/x")),
+        (ipaddress.IPv4Address, "1.2.3.4", ipaddress.IPv4Address("1.2.3.4")),
+        (ipaddress.IPv6Address, "::1", ipaddress.IPv6Address("::1")),
         (float, 3, 3.0),
     ],
 )

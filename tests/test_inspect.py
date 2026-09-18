@@ -2,6 +2,8 @@ import collections
 import datetime
 import decimal
 import enum
+import ipaddress
+import pathlib
 import sys
 import typing
 import uuid
@@ -168,6 +170,18 @@ def test_uuid():
 
 def test_decimal():
     assert mi.type_info(decimal.Decimal) == mi.DecimalType()
+
+
+def test_path():
+    assert mi.type_info(pathlib.Path) == mi.PathType()
+
+
+def test_ipv4_address():
+    assert mi.type_info(ipaddress.IPv4Address) == mi.IPv4AddressType()
+
+
+def test_ipv6_address():
+    assert mi.type_info(ipaddress.IPv6Address) == mi.IPv6AddressType()
 
 
 def test_msgpack_ext():
