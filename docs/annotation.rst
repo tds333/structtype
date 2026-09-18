@@ -392,4 +392,21 @@ Add arbitrary extra properties to the generated JSON Schema for a field:
     >>> class Product(Struct):
     ...     sku: Annotated[str, Field(json_schema_extra={"format": "sku"})]
 
+Unlike the other ``Field`` parameters, ``json_schema_extra`` is applied after
+the type's own schema is generated, so it takes precedence over generated
+properties such as ``type`` and ``format`` (matching pydantic). This is useful
+for a custom or natively supported type whose JSON representation is more
+specific than the default. For example, a UUID rendered as a URN:
+
+.. code-block:: python
+
+    >>> import uuid
+    >>> class Event(Struct):
+    ...     id: Annotated[uuid.UUID, Field(
+    ...         json_schema_extra={"format": "urn-uuid"}
+    ...     )]
+
+``json_schema_extra`` is also what lets a custom type produce a JSON schema at
+all — see :ref:`custom-json-schema`.
+
 .. _timezone-aware: https://docs.python.org/3/library/datetime.html#aware-and-naive-objects

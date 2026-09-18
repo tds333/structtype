@@ -259,6 +259,33 @@ Single-argument string-constructible types may also use
 ``Annotated[T, Serializer(dump=str, load=T)]`` directly. For a field holding
 arbitrary JSON data, see :ref:`arbitrary-json-data` above.
 
+.. _custom-json-schema:
+
+JSON schema for string-encoded custom types
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A custom type that serializes as a string needs both a ``Serializer`` and,
+for a useful JSON Schema, a ``format``. Attach the latter with
+``Field(json_schema_extra=...)``; it is applied after the generated schema and
+therefore overrides it:
+
+.. code-block:: python
+
+    from typing import Annotated
+    from pydantic import AnyUrl
+    from structtype import Field, Serializer
+
+    Url = Annotated[
+        AnyUrl,
+        Serializer(dump=str, load=AnyUrl),
+        Field(json_schema_extra={"type": "string", "format": "uri"}),
+    ]
+
+`pydantic.AnyUrl` / `HttpUrl`, `yarl.URL`, and `httpx.URL` all work this way —
+swap the class in ``dump`` / ``load`` and adjust the ``format`` (``http``,
+``https``, ...). URLs are JSON strings, so ``dump=str`` and ``load=AnyUrl`` are
+all the conversion required.
+
 .. _native-subclass-formats:
 
 Custom formats for natively supported types

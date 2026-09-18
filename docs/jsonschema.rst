@@ -136,6 +136,8 @@ You can enrich the generated JSON Schema using several ``Field`` parameters
 (``title``, ``description``, ``examples``, ``deprecated``, ``json_schema_extra``)
 and validation via ``NumericConstraint``.
 These are covered on the :doc:`Field Annotations <annotation>` page.
+``json_schema_extra`` is applied last, so it can override generated keys such as
+``type`` and ``format`` (matching pydantic).
 
 Dictionary Keys
 ---------------

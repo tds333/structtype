@@ -1376,6 +1376,38 @@ def test_generic_metadata():
     }
 
 
+def test_json_schema_extra_overrides_native_format():
+    typ = Annotated[pathlib.Path, Field(json_schema_extra={"format": "uri"})]
+    assert make_schema(typ) == {"type": "string", "format": "uri"}
+
+
+def test_json_schema_extra_overrides_native_type():
+    typ = Annotated[decimal.Decimal, Field(json_schema_extra={"type": "number"})]
+    assert make_schema(typ) == {"type": "number", "format": "decimal"}
+
+
+def test_json_schema_extra_format_on_custom_type():
+    typ = Annotated[complex, Field(json_schema_extra={"format": "uri"})]
+    assert make_schema(typ) == {"format": "uri"}
+
+
+def test_json_schema_extra_replaces_list_values():
+    typ = Annotated[
+        Literal["a", "b"], Field(json_schema_extra={"enum": ["a", "b", "c"]})
+    ]
+    assert make_schema(typ) == {"enum": ["a", "b", "c"]}
+
+
+def test_json_schema_extra_merges_with_ref():
+    class Ex(structtype.Struct):
+        x: int
+
+    typ = Annotated[Ex, Field(json_schema_extra={"description": "custom"})]
+    (s,), components = json_schema_components([typ])
+    assert s == {"$ref": "#/$defs/Ex", "description": "custom"}
+    assert components["Ex"]["type"] == "object"
+
+
 def test_deprecated_metadata():
     typ = Annotated[str, Field(deprecated=True)]
     assert make_schema(typ) == {"type": "string", "deprecated": True}

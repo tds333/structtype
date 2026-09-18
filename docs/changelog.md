@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- `Field(json_schema_extra=...)` is now applied after the type's generated JSON
+  schema, so it can override generated keys such as `type` and `format`
+  (matching pydantic). Its values replace list properties instead of being
+  concatenated with them.
 - Add native support for `pathlib.Path`, `ipaddress.IPv4Address`, and
   `ipaddress.IPv6Address`. They serialize to strings in JSON and accept string
   input for validation, are preserved by `builtin_types` / `ALL_BUILTIN_TYPES`,

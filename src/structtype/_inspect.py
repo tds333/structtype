@@ -902,6 +902,23 @@ def _merge_json(a, b):
     return a
 
 
+def _update_json(a, b):
+    """Merge ``b`` onto ``a``, with ``b`` taking precedence on conflicts.
+
+    Unlike :func:`_merge_json`, list values are replaced rather than
+    concatenated. Neither input is mutated.
+    """
+    if b:
+        a = a.copy()
+        for key, b_val in b.items():
+            a_val = a.get(key)
+            if isinstance(a_val, dict) and isinstance(b_val, dict):
+                a[key] = _update_json(a_val, b_val)
+            else:
+                a[key] = b_val
+    return a
+
+
 class _Translator:
     def __init__(self, types):
         self.types = tuple(types)

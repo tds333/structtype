@@ -42,6 +42,7 @@ from ._inspect import (
     UUIDType,
     _merge_json,
     _sort_literal_args,
+    _update_json,
     multi_type_info,
 )
 
@@ -290,15 +291,25 @@ class _SchemaGenerator:
 
     def to_schema(self, t: Type, check_ref: bool = True) -> dict[str, Any]:
         """Converts a Type to a json-schema."""
-        schema: dict[str, Any] = {}
-
+        # `Field` metadata (including `json_schema_extra`) is applied *after*
+        # the type-specific schema is built, so it can override generated keys
+        # such as `type` and `format` (mirroring pydantic). `_inspect` combines
+        # multiple `Field`s into one Metadata dict, but nested `Metadata`
+        # wrappers are also handled here.
+        extras: list[dict[str, Any]] = []
         while isinstance(t, Metadata):
-            schema = _merge_json(schema, t.json_schema_extra)
+            if t.json_schema_extra:
+                extras.append(t.json_schema_extra)
             t = t.type
+        has_extra = bool(extras)
 
         if check_ref and hasattr(t, "cls") and (name := self.name_map.get(t.cls)):
-            schema["$ref"] = self.ref_template.format(name=name)
+            schema: dict[str, Any] = {"$ref": self.ref_template.format(name=name)}
+            for extra in extras:
+                schema = _update_json(schema, extra)
             return schema
+
+        schema = {}
 
         if isinstance(t, AnyType):
             pass
@@ -543,7 +554,7 @@ class _SchemaGenerator:
                     schema = _merge_json(self.schema_hook(t.cls), schema)
                 except NotImplementedError:
                     pass
-            if not schema:
+            if not schema and not has_extra:
                 raise TypeError(
                     "Generating JSON schema for custom types requires either:\n"
                     "- specifying a `schema_hook`\n"
@@ -556,5 +567,8 @@ class _SchemaGenerator:
             raise TypeError(
                 f"json-schema doesn't support type {t!r}"
             )  # pragma: no cover
+
+        for extra in extras:
+            schema = _update_json(schema, extra)
 
         return schema
