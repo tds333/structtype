@@ -7,6 +7,7 @@ import ipaddress
 import itertools
 import json
 import math
+import os
 import pathlib
 import string
 import subprocess
@@ -3747,9 +3748,12 @@ class TestPathAndIpAddress:
         class WithPath(Struct):
             v: pathlib.Path
 
-        obj = WithPath(pathlib.Path("/tmp/a b"))
-        assert obj.struct_dump_json() == b'{"v":"/tmp/a b"}'
-        assert obj.struct_dump() == {"v": "/tmp/a b"}
+        p = pathlib.Path("/tmp/a b")
+        s = os.fspath(p)
+        obj = WithPath(p)
+        expected = json.dumps({"v": s}, separators=(",", ":")).encode()
+        assert obj.struct_dump_json() == expected
+        assert obj.struct_dump() == {"v": s}
 
     @pytest.mark.parametrize(
         "annotation,value,encoded",

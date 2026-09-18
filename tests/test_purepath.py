@@ -11,13 +11,14 @@ from structtype._json_schema import json_schema as make_schema
 
 PURE_PATH_CLASSES = [
     pathlib.Path,
-    pathlib.PosixPath,
     pathlib.PurePath,
     pathlib.PurePosixPath,
     pathlib.PureWindowsPath,
 ]
 if sys.platform == "win32":
     PURE_PATH_CLASSES.append(pathlib.WindowsPath)
+else:
+    PURE_PATH_CLASSES.append(pathlib.PosixPath)
 
 
 def _struct(annotation):
@@ -72,7 +73,7 @@ def test_decode_constructs_declared_pureposix():
 
 def test_path_field_rejects_non_path():
     cls = _struct(pathlib.Path)
-    cls(pathlib.PosixPath("a")).struct_check_types()
+    cls(pathlib.Path("a")).struct_check_types()
     with pytest.raises(structtype.ValidationError):
         cls(pathlib.PurePosixPath("a")).struct_check_types()
     with pytest.raises(structtype.ValidationError):
@@ -83,7 +84,6 @@ def test_purepath_field_accepts_every_flavour():
     cls = _struct(pathlib.PurePath)
     for value in (
         pathlib.Path("a"),
-        pathlib.PosixPath("a"),
         pathlib.PurePosixPath("a"),
         pathlib.PureWindowsPath("a"),
     ):
