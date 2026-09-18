@@ -52,7 +52,11 @@ __all__ = (
     "FrozenDictType",
     "FrozenSetType",
     "IPv4AddressType",
+    "IPv4InterfaceType",
+    "IPv4NetworkType",
     "IPv6AddressType",
+    "IPv6InterfaceType",
+    "IPv6NetworkType",
     "IntType",
     "ListType",
     "LiteralType",
@@ -290,6 +294,22 @@ class IPv4AddressType(Type):
 
 class IPv6AddressType(Type):
     """A type corresponding to `ipaddress.IPv6Address`."""
+
+
+class IPv4NetworkType(Type):
+    """A type corresponding to `ipaddress.IPv4Network`."""
+
+
+class IPv6NetworkType(Type):
+    """A type corresponding to `ipaddress.IPv6Network`."""
+
+
+class IPv4InterfaceType(Type):
+    """A type corresponding to `ipaddress.IPv4Interface`."""
+
+
+class IPv6InterfaceType(Type):
+    """A type corresponding to `ipaddress.IPv6Interface`."""
 
 
 class EnumType(Type):
@@ -1032,9 +1052,17 @@ class _Translator:
             return DecimalType()
         elif isinstance(t, type) and issubclass(t, pathlib.PurePath):
             return PathType()
-        elif t is ipaddress.IPv4Address:
-            return IPv4AddressType()
-        elif t is ipaddress.IPv6Address:
+        elif isinstance(t, type) and issubclass(t, ipaddress._IPAddressBase):
+            if issubclass(t, ipaddress.IPv4Network):
+                return IPv4NetworkType()
+            if issubclass(t, ipaddress.IPv6Network):
+                return IPv6NetworkType()
+            if issubclass(t, ipaddress.IPv4Interface):
+                return IPv4InterfaceType()
+            if issubclass(t, ipaddress.IPv6Interface):
+                return IPv6InterfaceType()
+            if issubclass(t, ipaddress.IPv4Address):
+                return IPv4AddressType()
             return IPv6AddressType()
         elif t is list:
             return ListType(

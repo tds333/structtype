@@ -526,6 +526,8 @@ VALIDATOR_MATRIX = [
     ("purepath", pathlib.PureWindowsPath, pathlib.PureWindowsPath("tmp/x"), 5),
     ("ipv4", ipaddress.IPv4Address, ipaddress.IPv4Address("1.2.3.4"), 5),
     ("ipv6", ipaddress.IPv6Address, ipaddress.IPv6Address("::1"), 5),
+    ("ipv4network", ipaddress.IPv4Network, ipaddress.IPv4Network("1.2.3.0/24"), 5),
+    ("ipv6interface", ipaddress.IPv6Interface, ipaddress.IPv6Interface("::1/128"), 5),
     ("enum", Color, Color.RED, "nope"),
     ("any-set", Any, object(), None),
     ("set-coerce-list", set[int], [1, 2], ["x"]),

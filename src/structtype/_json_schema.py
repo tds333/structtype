@@ -22,7 +22,11 @@ from ._inspect import (
     FrozenSetType,
     IntType,
     IPv4AddressType,
+    IPv4InterfaceType,
+    IPv4NetworkType,
     IPv6AddressType,
+    IPv6InterfaceType,
+    IPv6NetworkType,
     LiteralType,
     MemoryViewType,
     Metadata,
@@ -375,6 +379,18 @@ class _SchemaGenerator:
         elif isinstance(t, IPv6AddressType):
             schema["type"] = "string"
             schema["format"] = "ipv6"
+        elif isinstance(t, IPv4NetworkType):
+            schema["type"] = "string"
+            schema["format"] = "ipv4network"
+        elif isinstance(t, IPv6NetworkType):
+            schema["type"] = "string"
+            schema["format"] = "ipv6network"
+        elif isinstance(t, IPv4InterfaceType):
+            schema["type"] = "string"
+            schema["format"] = "ipv4interface"
+        elif isinstance(t, IPv6InterfaceType):
+            schema["type"] = "string"
+            schema["format"] = "ipv6interface"
         elif isinstance(t, CollectionType):
             schema["type"] = "array"
             if not isinstance(t.item_type, AnyType):

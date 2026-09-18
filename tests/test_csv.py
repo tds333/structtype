@@ -1,7 +1,7 @@
 import io
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from ipaddress import IPv4Address, IPv6Address
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Interface
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
@@ -299,8 +299,16 @@ def test_validate_csv_path_ip_roundtrip():
         p: Path
         ip4: IPv4Address
         ip6: IPv6Address
+        net4: IPv4Network
+        iface6: IPv6Interface
 
-    t = T(Path("/tmp/a"), IPv4Address("1.2.3.4"), IPv6Address("::1"))
+    t = T(
+        Path("/tmp/a"),
+        IPv4Address("1.2.3.4"),
+        IPv6Address("::1"),
+        IPv4Network("1.2.3.0/24"),
+        IPv6Interface("::1/128"),
+    )
     stream = io.StringIO(newline="")
     _writer(stream).writerow(t.struct_dump_csv())
     assert _one(T, stream.getvalue()) == t

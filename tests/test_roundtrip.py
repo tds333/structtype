@@ -70,6 +70,8 @@ ROUNDTRIP_CASES = [
     ("path", pathlib.Path, pathlib.Path("/tmp/a")),
     ("ipv4", ipaddress.IPv4Address, ipaddress.IPv4Address("1.2.3.4")),
     ("ipv6", ipaddress.IPv6Address, ipaddress.IPv6Address("::1")),
+    ("ipv4network", ipaddress.IPv4Network, ipaddress.IPv4Network("1.2.3.0/24")),
+    ("ipv6interface", ipaddress.IPv6Interface, ipaddress.IPv6Interface("::1/128")),
     ("bytes", bytes, b"hello"),
     ("bytearray", bytearray, bytearray(b"hi")),
     ("memoryview", memoryview, memoryview(b"yo")),

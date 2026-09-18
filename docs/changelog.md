@@ -8,15 +8,18 @@
   concatenated with them.
 - Add native support for `pathlib.PurePath` and all of its subclasses
   (`pathlib.Path`, `pathlib.PurePosixPath`, `pathlib.PureWindowsPath`,
-  `pathlib.PosixPath`, `pathlib.WindowsPath`), plus `ipaddress.IPv4Address` and
-  `ipaddress.IPv6Address`. They serialize to strings in JSON and accept string
-  input for validation, are preserved by `builtin_types` / `ALL_BUILTIN_TYPES`,
-  and map to the `path`, `ipv4`, and `ipv6` JSON schema `format`s. Path values
-  decode to the annotated class (the platform flavour for `pathlib.Path` and
+  `pathlib.PosixPath`, `pathlib.WindowsPath`). Path values decode to the
+  annotated class (the platform flavour for `pathlib.Path` and
   `pathlib.PurePath`), are serialized through `__fspath__`, and validation is
   strict per annotation (a `pathlib.Path` field rejects a
-  `pathlib.PurePosixPath`). Other `ipaddress` interface/network classes remain
-  custom types and can be handled with a `Serializer`.
+  `pathlib.PurePosixPath`).
+- Add native support for the full `ipaddress` family: `IPv4Address`,
+  `IPv6Address`, `IPv4Network`, `IPv6Network`, `IPv4Interface`, and
+  `IPv6Interface`, plus user subclasses. They serialize to strings in JSON and
+  accept string input for validation, are preserved by `builtin_types` /
+  `ALL_BUILTIN_TYPES`, decode to the annotated class (networks are constructed
+  strictly), and map to the `ipv4`, `ipv6`, `ipv4network`, `ipv6network`,
+  `ipv4interface`, and `ipv6interface` JSON schema `format`s.
 - **Performance:** accelerate JSON string encoding and decoding with SIMD scanning.
 - Fix a possible crash during CSV validation when recursive type initialization
   leaves field type information incomplete; raise `RuntimeError` instead.

@@ -671,10 +671,14 @@ validating already-constructed objects: a `pathlib.Path` field rejects a
 ``ipaddress``
 -------------
 
-`ipaddress.IPv4Address` and `ipaddress.IPv6Address` values are encoded as their
-canonical string representation in JSON and decoded from strings. The address
-family is fixed by the annotated type: decoding an IPv6 string into an
-`ipaddress.IPv4Address` field (or vice versa) is an error.
+`ipaddress.IPv4Address`, `ipaddress.IPv6Address`, `ipaddress.IPv4Network`,
+`ipaddress.IPv6Network`, `ipaddress.IPv4Interface`, and
+`ipaddress.IPv6Interface` are supported natively, as are user subclasses of
+those classes. Values are encoded as their canonical string representation in
+JSON and decoded from strings. The family and category are fixed by the
+annotated type: decoding an IPv6 string into an `ipaddress.IPv4Address` field
+(or vice versa) is an error, and networks are constructed strictly (host bits
+set is an error; a bare address becomes a ``/32`` or ``/128`` network).
 
 .. code-block:: python
 
@@ -696,10 +700,17 @@ family is fixed by the annotated type: decoding an IPv6 string into an
         File "<stdin>", line 1, in <module>
     structtype.ValidationError: Invalid IPv4 address
 
-Interface and network classes (`ipaddress.IPv4Interface`,
-`ipaddress.IPv6Interface`, `ipaddress.IPv4Network`, `ipaddress.IPv6Network`) are
-not supported natively. Wrap them in a :class:`structtype.Serializer` if you
-need them.
+    >>> net = StructAdapter(ipaddress.IPv4Network)
+    >>> net.struct_validate_json(b'"192.168.1.0/24"')
+    IPv4Network('192.168.1.0/24')
+
+    >>> net.struct_validate_json(b'"192.168.1.1/24"')
+    Traceback (most recent call last):
+        File "<stdin>", line 1, in <module>
+    structtype.ValidationError: Invalid IPv4 network
+
+They map to the JSON schema ``format`` values ``ipv4``, ``ipv6``,
+``ipv4network``, ``ipv6network``, ``ipv4interface``, and ``ipv6interface``.
 
 
 ``list`` / ``tuple`` / ``set`` / ``frozenset``
