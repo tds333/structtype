@@ -1680,8 +1680,8 @@ class TestUserConstraintInvocation:
         assert Outer.struct_validate({"inner": Inner()}).inner.y == 0
 
     def test_numeric_fast_subclass_as_instance_still_fires(self):
-        # Fast subclasses lower to bitflag checks; the ge=0 violation must
-        # still be caught even though no USER_VALIDATOR call happens.
+        # Fast subclasses lower to compiled constraint checks; the ge=0
+        # violation must still be caught even though no user Constraint runs.
         class Ex(Struct):
             x: Annotated[int, NumericConstraint(ge=0)]
 
@@ -2137,6 +2137,27 @@ class TestConstraintApplicability:
 
         obj = Good(Color((1, 2, 3)))
         assert obj.struct_dump_json() == b'{"x":[1,2,3]}'
+
+    def test_serializer_and_compiled_constraint_together(self):
+        """A Serializer and a compiled Constraint share a field: the codec
+        detail and the side ConstraintNode must both be located correctly,
+        and constraints apply to the loaded value."""
+        ann = Annotated[
+            bytes,
+            Serializer(load=lambda s: s.encode(), dump=lambda b: b.decode()),
+            BytesConstraint(min_length=2, max_length=4),
+        ]
+
+        class Good(Struct):
+            v: ann
+
+        out = Good.struct_validate({"v": "abc"})
+        assert out.v == b"abc"
+        assert out.struct_dump_json() == b'{"v":"abc"}'
+        with pytest.raises(ValidationError, match="length"):
+            Good.struct_validate({"v": "a"})
+        with pytest.raises(ValidationError, match="length"):
+            Good.struct_validate({"v": "abcde"})
 
     def test_nested_collection_element_validator(self):
         """Constraint on element type inside a collection defers (inner is leaf)."""

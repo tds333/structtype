@@ -4443,31 +4443,52 @@ AssocList_Sort(AssocList* list) {
 #define MS_ANY_DICT                 MS_TYPE_DICT
 #endif
 
-/* Constraints */
-#define MS_CONSTR_INT_MIN           (1ull << 42)
-#define MS_CONSTR_INT_MAX           (1ull << 43)
-#define MS_CONSTR_INT_MULTIPLE_OF   (1ull << 44)
-#define MS_CONSTR_FLOAT_GT          (1ull << 45)
-#define MS_CONSTR_FLOAT_GE          (1ull << 46)
-#define MS_CONSTR_FLOAT_LT          (1ull << 47)
-#define MS_CONSTR_FLOAT_LE          (1ull << 48)
-#define MS_CONSTR_FLOAT_MULTIPLE_OF (1ull << 49)
-#define MS_CONSTR_STR_REGEX         (1ull << 50)
-#define MS_CONSTR_STR_MIN_LENGTH    (1ull << 51)
-#define MS_CONSTR_STR_MAX_LENGTH    (1ull << 52)
-#define MS_CONSTR_BYTES_MIN_LENGTH  (1ull << 53)
-#define MS_CONSTR_BYTES_MAX_LENGTH  (1ull << 54)
-#define MS_CONSTR_ARRAY_MIN_LENGTH  (1ull << 55)
-#define MS_CONSTR_ARRAY_MAX_LENGTH  (1ull << 56)
-#define MS_CONSTR_MAP_MIN_LENGTH    (1ull << 57)
-#define MS_CONSTR_MAP_MAX_LENGTH    (1ull << 58)
-#define MS_CONSTR_TZ_AWARE          (1ull << 59)
-#define MS_CONSTR_TZ_NAIVE          (1ull << 60)
+/* Constraints compiled by the C layer live in a side `ConstraintNode` with
+ * their own 64-bit mask. */
+#define MS_CN_STR_REGEX            (1ull << 0)
+#define MS_CN_INT_MIN              (1ull << 1)
+#define MS_CN_INT_MAX              (1ull << 2)
+#define MS_CN_INT_MULTIPLE_OF      (1ull << 3)
+#define MS_CN_FLOAT_GT             (1ull << 4)
+#define MS_CN_FLOAT_GE             (1ull << 5)
+#define MS_CN_FLOAT_LT             (1ull << 6)
+#define MS_CN_FLOAT_LE             (1ull << 7)
+#define MS_CN_FLOAT_MULTIPLE_OF    (1ull << 8)
+#define MS_CN_STR_MIN_LENGTH       (1ull << 9)
+#define MS_CN_STR_MAX_LENGTH       (1ull << 10)
+#define MS_CN_BYTES_MIN_LENGTH     (1ull << 11)
+#define MS_CN_BYTES_MAX_LENGTH     (1ull << 12)
+#define MS_CN_ARRAY_MIN_LENGTH     (1ull << 13)
+#define MS_CN_ARRAY_MAX_LENGTH     (1ull << 14)
+#define MS_CN_MAP_MIN_LENGTH       (1ull << 15)
+#define MS_CN_MAP_MAX_LENGTH       (1ull << 16)
+#define MS_CN_TZ_AWARE             (1ull << 17)
+#define MS_CN_TZ_NAIVE             (1ull << 18)
+
+/* Common constraint groups */
+#define MS_CN_INT_CONSTRS   (MS_CN_INT_MIN | MS_CN_INT_MAX | MS_CN_INT_MULTIPLE_OF)
+#define MS_CN_FLOAT_CONSTRS ( \
+    MS_CN_FLOAT_GT | MS_CN_FLOAT_GE | MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | \
+    MS_CN_FLOAT_MULTIPLE_OF \
+)
+#define MS_CN_STR_CONSTRS   ( \
+    MS_CN_STR_REGEX | MS_CN_STR_MIN_LENGTH | MS_CN_STR_MAX_LENGTH \
+)
+#define MS_CN_BYTES_CONSTRS (MS_CN_BYTES_MIN_LENGTH | MS_CN_BYTES_MAX_LENGTH)
+#define MS_CN_ARRAY_CONSTRS (MS_CN_ARRAY_MIN_LENGTH | MS_CN_ARRAY_MAX_LENGTH)
+#define MS_CN_MAP_CONSTRS   (MS_CN_MAP_MIN_LENGTH | MS_CN_MAP_MAX_LENGTH)
+#define MS_CN_TIME_CONSTRS  (MS_CN_TZ_AWARE | MS_CN_TZ_NAIVE)
+
+/* Flags in the `types` mask that aren't type identity: a `Serializer` codec,
+ * a base/user `Constraint` hook, and the presence of a side `ConstraintNode`. */
+#define MS_HAS_CONSTR               (1ull << 41)
 #define MS_CONSTR_CODEC             (1ull << 61)
 /* Base/user `Constraint` instances; the instance itself is stored in details */
-#define MS_CONSTR_USER_VALIDATOR    (1ull << 62)
+#define MS_CONSTR_USER              (1ull << 62)
 /* Extra flag bit, used by TypedDict/dataclass implementations */
 #define MS_EXTRA_FLAG               (1ull << 63)
+/* Bits 42-60 are free (freed by moving compiled constraints to
+ * `ConstraintNode`); bit 42+ are available for new type bits. */
 
 /* A TypeNode encodes information about all types at the same hierarchy in the
  * type tree. They can encode both single types (`int`) and unions of types
@@ -4477,13 +4498,12 @@ AssocList_Sort(AssocList* list) {
  * extra *details* (`TypeDetail` objects) stored in a variable length array.
  *
  * The encoding is *compressed* - only fields that are set are stored. To know
- * which fields are set, a bitmask of `types` is used, masking both the types
- * and constraints set on the node.
+ * which fields are set, a bitmask of `types` is used.
  *
  * The order these details are stored is consistent, allowing the offset of a
  * field to be computed using an efficient bitmask and popcount.
  *
- * The order is documented below:
+ * The order of the main node's details is documented below:
  *
  * O | STRUCT | STRUCT_ARRAY | STRUCT_UNION | STRUCT_ARRAY_UNION | CUSTOM |
  * O | PATH | IP |
@@ -4491,26 +4511,25 @@ AssocList_Sort(AssocList* list) {
  * O | ENUM | STRLITERAL |
  * O | TYPEDDICT | DATACLASS |
  * O | NAMEDTUPLE |
- * C | CODEC (custom types only) |
- * O | USER_VALIDATOR |
- * O | STR_REGEX |
+ * C | CODEC |
+ * O | USER_CONSTR |
  * T | DICT [key, value] | FROZENDICT [key, value] |
  * T | LIST | SET | FROZENSET | VARTUPLE |
- * I | INT_MIN |
- * I | INT_MAX |
- * I | INT_MULTIPLE_OF |
+ * T | FIXTUPLE [size, types ...] |
+ * P | CONSTRAINTS (ConstraintNode)
+ *
+ * A `ConstraintNode` (present iff `MS_HAS_CONSTR` is set in `types`) stores
+ * the C-compiled constraints in its own `mask`/`details`:
+ *
+ * O | STR_REGEX |
+ * I | INT_MIN | INT_MAX | INT_MULTIPLE_OF |
  * F | FLOAT_GT | FLOAT_GE |
  * F | FLOAT_LT | FLOAT_LE |
  * F | FLOAT_MULTIPLE_OF |
- * S | STR_MIN_LENGTH |
- * S | STR_MAX_LENGTH |
- * S | BYTES_MIN_LENGTH |
- * S | BYTES_MAX_LENGTH |
- * S | ARRAY_MIN_LENGTH |
- * S | ARRAY_MAX_LENGTH |
- * S | MAP_MIN_LENGTH |
- * S | MAP_MAX_LENGTH |
- * T | FIXTUPLE [size, types ...]
+ * S | STR_MIN_LENGTH | STR_MAX_LENGTH |
+ * S | BYTES_MIN_LENGTH | BYTES_MAX_LENGTH |
+ * S | ARRAY_MIN_LENGTH | ARRAY_MAX_LENGTH |
+ * S | MAP_MIN_LENGTH | MAP_MAX_LENGTH |
  * */
 
 #define SLOT_00 ( \
@@ -4523,33 +4542,11 @@ AssocList_Sort(AssocList* list) {
 #define SLOT_02 (MS_TYPE_ENUM | MS_TYPE_STRLITERAL)
 #define SLOT_03 (MS_TYPE_TYPEDDICT | MS_TYPE_DATACLASS)
 #define SLOT_04 MS_TYPE_NAMEDTUPLE
-#define SLOT_05 MS_CONSTR_STR_REGEX
 #define SLOT_06 MS_ANY_DICT
 #define SLOT_07 (MS_TYPE_LIST | MS_TYPE_VARTUPLE | MS_TYPE_SET | MS_TYPE_FROZENSET)
-#define SLOT_08 MS_CONSTR_INT_MIN
-#define SLOT_09 MS_CONSTR_INT_MAX
-#define SLOT_10 MS_CONSTR_INT_MULTIPLE_OF
-#define SLOT_11 (MS_CONSTR_FLOAT_GE | MS_CONSTR_FLOAT_GT)
-#define SLOT_12 (MS_CONSTR_FLOAT_LE | MS_CONSTR_FLOAT_LT)
-#define SLOT_13 MS_CONSTR_FLOAT_MULTIPLE_OF
-#define SLOT_14 MS_CONSTR_STR_MIN_LENGTH
-#define SLOT_15 MS_CONSTR_STR_MAX_LENGTH
-#define SLOT_16 MS_CONSTR_BYTES_MIN_LENGTH
-#define SLOT_17 MS_CONSTR_BYTES_MAX_LENGTH
-#define SLOT_18 MS_CONSTR_ARRAY_MIN_LENGTH
-#define SLOT_19 MS_CONSTR_ARRAY_MAX_LENGTH
-#define SLOT_20 MS_CONSTR_MAP_MIN_LENGTH
-#define SLOT_21 MS_CONSTR_MAP_MAX_LENGTH
-#define SLOT_22 MS_CONSTR_USER_VALIDATOR
 
-/* Common groups */
-#define MS_INT_CONSTRS (SLOT_08 | SLOT_09 | SLOT_10)
-#define MS_FLOAT_CONSTRS (SLOT_11 | SLOT_12 | SLOT_13)
-#define MS_STR_CONSTRS (SLOT_05 | SLOT_14 | SLOT_15)
-#define MS_BYTES_CONSTRS (SLOT_16 | SLOT_17)
-#define MS_ARRAY_CONSTRS (SLOT_18 | SLOT_19)
-#define MS_MAP_CONSTRS (SLOT_20 | SLOT_21)
-#define MS_TIME_CONSTRS (MS_CONSTR_TZ_AWARE | MS_CONSTR_TZ_NAIVE)
+/* Main-node object detail slots (before the codec). */
+#define MS_TYPE_OBJ_SLOTS (SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04)
 
 typedef union TypeDetail {
     int64_t i64;
@@ -4562,6 +4559,12 @@ typedef struct TypeNode {
     uint64_t types;
     TypeDetail details[];
 } TypeNode;
+
+/* C-compiled constraints, referenced from a `TypeNode` detail. */
+typedef struct ConstraintNode {
+    uint64_t mask;
+    TypeDetail details[];
+} ConstraintNode;
 
 /* A simple extension of TypeNode to allow for static allocation */
 typedef struct {
@@ -4861,24 +4864,16 @@ ms_ip_error_fmt(PyObject *cls) {
 
 static MS_INLINE PyObject *
 TypeNode_get_codec(TypeNode *type) {
-    /* The Serializer is packed after the type-specific detail slots
-     * (SLOT_00..SLOT_04) and before the user validator / constraint slots. */
-    Py_ssize_t i = ms_popcount(
-        type->types & (SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04)
-    );
+    /* The Serializer is packed after the type-specific object details. */
+    Py_ssize_t i = ms_popcount(type->types & MS_TYPE_OBJ_SLOTS);
     return type->details[i].pointer;
 }
 
 static MS_INLINE PyObject *
-TypeNode_get_user_validator(TypeNode *type) {
-    /* The Constraint packs after the object details (SLOT_00..SLOT_04) and an
-     * optional Serializer, but BEFORE regex/dict/array/scalar constraint details,
-     * so only those preceding slots may be counted here. */
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 | MS_CONSTR_CODEC
-        )
-    );
+TypeNode_get_user_constraint(TypeNode *type) {
+    /* The base/user `Constraint` packs after the object details and an
+     * optional Serializer. */
+    Py_ssize_t i = ms_popcount(type->types & (MS_TYPE_OBJ_SLOTS | MS_CONSTR_CODEC));
     return type->details[i].pointer;
 }
 
@@ -4970,25 +4965,10 @@ TypeNode_get_namedtuple_info(TypeNode *type) {
     return info;
 }
 
-static MS_INLINE PyObject *
-TypeNode_get_constr_str_regex(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR | SLOT_22
-        )
-    );
-    return type->details[i].pointer;
-}
-
 static MS_INLINE void
 TypeNode_get_dict(TypeNode *type, TypeNode **key, TypeNode **val) {
     Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_22
-        )
+        type->types & (MS_TYPE_OBJ_SLOTS | MS_CONSTR_CODEC | MS_CONSTR_USER)
     );
     *key = type->details[i].pointer;
     *val = type->details[i + 1].pointer;
@@ -4998,202 +4978,193 @@ static MS_INLINE TypeNode *
 TypeNode_get_array(TypeNode *type) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 |
-            SLOT_22
+            MS_TYPE_OBJ_SLOTS | MS_CONSTR_CODEC | MS_CONSTR_USER | MS_ANY_DICT
         )
     );
     return type->details[i].pointer;
-}
-
-static MS_INLINE int64_t
-TypeNode_get_constr_int_min(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_22
-        )
-    );
-    return type->details[i].i64;
-}
-
-static MS_INLINE int64_t
-TypeNode_get_constr_int_max(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_22
-        )
-    );
-    return type->details[i].i64;
-}
-
-static MS_INLINE int64_t
-TypeNode_get_constr_int_multiple_of(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_22
-        )
-    );
-    return type->details[i].i64;
-}
-
-static MS_INLINE double
-TypeNode_get_constr_float_min(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_22
-        )
-    );
-    return type->details[i].f64;
-}
-
-static MS_INLINE double
-TypeNode_get_constr_float_max(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_22
-        )
-    );
-    return type->details[i].f64;
-}
-
-static MS_INLINE double
-TypeNode_get_constr_float_multiple_of(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_22
-        )
-    );
-    return type->details[i].f64;
-}
-
-static MS_INLINE Py_ssize_t
-TypeNode_get_constr_str_min_length(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_22
-        )
-    );
-    return type->details[i].py_ssize_t;
-}
-
-static MS_INLINE Py_ssize_t
-TypeNode_get_constr_str_max_length(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_22
-        )
-    );
-    return type->details[i].py_ssize_t;
-}
-
-static MS_INLINE Py_ssize_t
-TypeNode_get_constr_bytes_min_length(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_22
-        )
-    );
-    return type->details[i].py_ssize_t;
-}
-
-static MS_INLINE Py_ssize_t
-TypeNode_get_constr_bytes_max_length(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_22
-        )
-    );
-    return type->details[i].py_ssize_t;
-}
-
-static MS_INLINE Py_ssize_t
-TypeNode_get_constr_array_min_length(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_22
-        )
-    );
-    return type->details[i].py_ssize_t;
-}
-
-static MS_INLINE Py_ssize_t
-TypeNode_get_constr_array_max_length(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_22
-        )
-    );
-    return type->details[i].py_ssize_t;
-}
-
-static MS_INLINE Py_ssize_t
-TypeNode_get_constr_map_min_length(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_22
-        )
-    );
-    return type->details[i].py_ssize_t;
-}
-
-static MS_INLINE Py_ssize_t
-TypeNode_get_constr_map_max_length(TypeNode *type) {
-    Py_ssize_t i = ms_popcount(
-        type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 | SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_20 | SLOT_22
-        )
-    );
-    return type->details[i].py_ssize_t;
 }
 
 static MS_INLINE void
 TypeNode_get_fixtuple(TypeNode *type, Py_ssize_t *offset, Py_ssize_t *size) {
     Py_ssize_t i = ms_popcount(
         type->types & (
-            SLOT_00 | SLOT_01 | SLOT_02 | SLOT_03 | SLOT_04 |
-            MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR |
-            SLOT_05 | SLOT_06 | SLOT_07 |
-            SLOT_08 | SLOT_09 | SLOT_10 | SLOT_11 | SLOT_12 | SLOT_13 | SLOT_14 | SLOT_15 |
-            SLOT_16 | SLOT_17 | SLOT_18 | SLOT_19 | SLOT_20 | SLOT_21 | SLOT_22
+            MS_TYPE_OBJ_SLOTS | MS_CONSTR_CODEC | MS_CONSTR_USER | MS_ANY_DICT
         )
     );
     *size = type->details[i].py_ssize_t;
     *offset = i + 1;
+}
+
+/* --- ConstraintNode accessors (index into the side node's `details`) --- */
+
+static MS_INLINE PyObject *
+ConstraintNode_get_str_regex(ConstraintNode *cn) {
+    return cn->details[0].pointer;
+}
+
+static MS_INLINE int64_t
+ConstraintNode_get_int_min(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(cn->mask & MS_CN_STR_REGEX);
+    return cn->details[i].i64;
+}
+
+static MS_INLINE int64_t
+ConstraintNode_get_int_max(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(cn->mask & (MS_CN_STR_REGEX | MS_CN_INT_MIN));
+    return cn->details[i].i64;
+}
+
+static MS_INLINE int64_t
+ConstraintNode_get_int_multiple_of(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX)
+    );
+    return cn->details[i].i64;
+}
+
+static MS_INLINE double
+ConstraintNode_get_float_min(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX | MS_CN_INT_MULTIPLE_OF
+        )
+    );
+    return cn->details[i].f64;
+}
+
+static MS_INLINE double
+ConstraintNode_get_float_max(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE
+        )
+    );
+    return cn->details[i].f64;
+}
+
+static MS_INLINE double
+ConstraintNode_get_float_multiple_of(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE
+        )
+    );
+    return cn->details[i].f64;
+}
+
+static MS_INLINE Py_ssize_t
+ConstraintNode_get_str_min_length(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF
+        )
+    );
+    return cn->details[i].py_ssize_t;
+}
+
+static MS_INLINE Py_ssize_t
+ConstraintNode_get_str_max_length(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF |
+            MS_CN_STR_MIN_LENGTH
+        )
+    );
+    return cn->details[i].py_ssize_t;
+}
+
+static MS_INLINE Py_ssize_t
+ConstraintNode_get_bytes_min_length(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF |
+            MS_CN_STR_MIN_LENGTH | MS_CN_STR_MAX_LENGTH
+        )
+    );
+    return cn->details[i].py_ssize_t;
+}
+
+static MS_INLINE Py_ssize_t
+ConstraintNode_get_bytes_max_length(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF |
+            MS_CN_STR_MIN_LENGTH | MS_CN_STR_MAX_LENGTH |
+            MS_CN_BYTES_MIN_LENGTH
+        )
+    );
+    return cn->details[i].py_ssize_t;
+}
+
+static MS_INLINE Py_ssize_t
+ConstraintNode_get_array_min_length(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF |
+            MS_CN_STR_MIN_LENGTH | MS_CN_STR_MAX_LENGTH |
+            MS_CN_BYTES_MIN_LENGTH | MS_CN_BYTES_MAX_LENGTH
+        )
+    );
+    return cn->details[i].py_ssize_t;
+}
+
+static MS_INLINE Py_ssize_t
+ConstraintNode_get_array_max_length(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF |
+            MS_CN_STR_MIN_LENGTH | MS_CN_STR_MAX_LENGTH |
+            MS_CN_BYTES_MIN_LENGTH | MS_CN_BYTES_MAX_LENGTH |
+            MS_CN_ARRAY_MIN_LENGTH
+        )
+    );
+    return cn->details[i].py_ssize_t;
+}
+
+static MS_INLINE Py_ssize_t
+ConstraintNode_get_map_min_length(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF |
+            MS_CN_STR_MIN_LENGTH | MS_CN_STR_MAX_LENGTH |
+            MS_CN_BYTES_MIN_LENGTH | MS_CN_BYTES_MAX_LENGTH |
+            MS_CN_ARRAY_MIN_LENGTH | MS_CN_ARRAY_MAX_LENGTH
+        )
+    );
+    return cn->details[i].py_ssize_t;
+}
+
+static MS_INLINE Py_ssize_t
+ConstraintNode_get_map_max_length(ConstraintNode *cn) {
+    Py_ssize_t i = ms_popcount(
+        cn->mask & (
+            MS_CN_STR_REGEX | MS_CN_INT_MIN | MS_CN_INT_MAX |
+            MS_CN_INT_MULTIPLE_OF | MS_CN_FLOAT_GT | MS_CN_FLOAT_GE |
+            MS_CN_FLOAT_LT | MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF |
+            MS_CN_STR_MIN_LENGTH | MS_CN_STR_MAX_LENGTH |
+            MS_CN_BYTES_MIN_LENGTH | MS_CN_BYTES_MAX_LENGTH |
+            MS_CN_ARRAY_MIN_LENGTH | MS_CN_ARRAY_MAX_LENGTH |
+            MS_CN_MAP_MIN_LENGTH
+        )
+    );
+    return cn->details[i].py_ssize_t;
 }
 
 static void
@@ -5208,7 +5179,7 @@ TypeNode_get_traverse_ranges(
         if (type->types & MS_CONSTR_CODEC) {
             n_obj += 1;
         }
-        if (type->types & MS_CONSTR_USER_VALIDATOR) {
+        if (type->types & MS_CONSTR_USER) {
             n_obj += 1;
         }
     }
@@ -5223,7 +5194,7 @@ TypeNode_get_traverse_ranges(
                 MS_TYPE_ENUM | MS_TYPE_STRLITERAL |
                 MS_TYPE_TYPEDDICT | MS_TYPE_DATACLASS |
                 MS_TYPE_NAMEDTUPLE |
-                MS_CONSTR_USER_VALIDATOR | MS_CONSTR_CODEC
+                MS_CONSTR_USER | MS_CONSTR_CODEC
             )
         );
         /* Number of typenode details */
@@ -5241,6 +5212,43 @@ TypeNode_get_traverse_ranges(
     *n_typenode = n_type;
     *fixtuple_offset = ft_offset;
     *fixtuple_size = ft_size;
+}
+
+/* The side constraint node is packed after all other details. Scalar
+ * constrained nodes (int/float/str/bytes) carry no preceding details, so
+ * they hit the fast path and avoid the offset computation entirely. */
+static MS_INLINE ConstraintNode *
+TypeNode_get_constraints(TypeNode *type) {
+    if (!(type->types & MS_HAS_CONSTR)) return NULL;
+    if (MS_LIKELY(!(type->types & (
+            MS_TYPE_OBJ_SLOTS | MS_ANY_DICT | SLOT_07 | MS_TYPE_FIXTUPLE |
+            MS_CONSTR_CODEC | MS_CONSTR_USER
+        )))) {
+        return (ConstraintNode *)type->details[0].pointer;
+    }
+    Py_ssize_t n_obj, n_type, ft_offset, ft_size;
+    TypeNode_get_traverse_ranges(type, &n_obj, &n_type, &ft_offset, &ft_size);
+    Py_ssize_t i = n_obj + n_type;
+    if (type->types & MS_TYPE_FIXTUPLE) i += 1 + ft_size;
+    return (ConstraintNode *)type->details[i].pointer;
+}
+
+static void
+ConstraintNode_Free(ConstraintNode *cn) {
+    if (cn == NULL) return;
+    if (cn->mask & MS_CN_STR_REGEX) {
+        Py_XDECREF(ConstraintNode_get_str_regex(cn));
+    }
+    PyMem_Free(cn);
+}
+
+static int
+ConstraintNode_traverse(ConstraintNode *cn, visitproc visit, void *arg) {
+    if (cn == NULL) return 0;
+    if (cn->mask & MS_CN_STR_REGEX) {
+        Py_VISIT(ConstraintNode_get_str_regex(cn));
+    }
+    return 0;
 }
 
 static void
@@ -5261,6 +5269,7 @@ TypeNode_Free(TypeNode *self) {
         TypeNode *node = (TypeNode *)(self->details[i + fixtuple_offset].pointer);
         TypeNode_Free(node);
     }
+    ConstraintNode_Free(TypeNode_get_constraints(self));
     PyMem_Free(self);
 }
 
@@ -5283,6 +5292,10 @@ TypeNode_traverse(TypeNode *self, visitproc visit, void *arg) {
         int out;
         TypeNode *node = (TypeNode *)(self->details[i + fixtuple_offset].pointer);
         if ((out = TypeNode_traverse(node, visit, arg)) != 0) return out;
+    }
+    int out;
+    if ((out = ConstraintNode_traverse(TypeNode_get_constraints(self), visit, arg)) != 0) {
+        return out;
     }
     return 0;
 }
@@ -5362,13 +5375,14 @@ typenode_simple_repr(TypeNode *self) {
 
 typedef struct {
     PyObject *serializer;  /* the Serializer carrying load/dump, or NULL */
-    PyObject *validator;   /* the Constraint instance (never .fn), or NULL */
+    PyObject *user_constraint;  /* the Constraint instance (never .fn), or NULL */
 } Constraints;
 
 typedef struct {
     StructspecState *mod;
     PyObject *context;
     uint64_t types;
+    uint64_t constr_mask;  /* compiled constraints (MS_CN_*), or 0 */
     PyObject *struct_obj;
     PyObject *struct_info;
     PyObject *structs_set;
@@ -5401,7 +5415,7 @@ typedef struct {
     double c_float_multiple_of;
     PyObject *c_str_regex;
     PyObject *serializer_obj;  /* Serializer* with load/dump, or NULL */
-    PyObject *validator_obj;   /* owned Constraint instance (never .fn), or NULL */
+    PyObject *user_constr_obj;   /* owned Constraint instance (never .fn), or NULL */
     Py_ssize_t c_str_min_length;
     Py_ssize_t c_str_max_length;
     Py_ssize_t c_bytes_min_length;
@@ -5416,7 +5430,7 @@ static MS_INLINE bool
 constraints_is_empty(Constraints *self) {
     return (
         self->serializer == NULL &&
-        self->validator == NULL
+        self->user_constraint == NULL
     );
 }
 
@@ -5542,52 +5556,52 @@ typenode_collect_constraints(
     /* Fast `Constraint` subclasses lower into the same constraint machinery as
      * constraints via `Constraint` subclasses; user-defined constraints are kept
      * as instances for the decode path. */
-    if (constraints->validator != NULL) {
-        Constraint *validator = (Constraint *)constraints->validator;
+    if (constraints->user_constraint != NULL) {
+        Constraint *validator = (Constraint *)constraints->user_constraint;
         PyTypeObject *vtype = Py_TYPE(validator);
         if (vtype == &NumericConstraint_Type) {
             NumericConstraint *v = (NumericConstraint *)validator;
             if (kind == CK_INT) {
                 if (v->gt != NULL) {
-                    state->types |= MS_CONSTR_INT_MIN;
+                    state->constr_mask |= MS_CN_INT_MIN;
                     if (!_constr_as_i64(v->gt, &(state->c_int_min), 1)) return -1;
                 }
                 else if (v->ge != NULL) {
-                    state->types |= MS_CONSTR_INT_MIN;
+                    state->constr_mask |= MS_CN_INT_MIN;
                     if (!_constr_as_i64(v->ge, &(state->c_int_min), 0)) return -1;
                 }
                 if (v->lt != NULL) {
-                    state->types |= MS_CONSTR_INT_MAX;
+                    state->constr_mask |= MS_CN_INT_MAX;
                     if (!_constr_as_i64(v->lt, &(state->c_int_max), -1)) return -1;
                 }
                 else if (v->le != NULL) {
-                    state->types |= MS_CONSTR_INT_MAX;
+                    state->constr_mask |= MS_CN_INT_MAX;
                     if (!_constr_as_i64(v->le, &(state->c_int_max), 0)) return -1;
                 }
                 if (v->multiple_of != NULL) {
-                    state->types |= MS_CONSTR_INT_MULTIPLE_OF;
+                    state->constr_mask |= MS_CN_INT_MULTIPLE_OF;
                     if (!_constr_as_i64(v->multiple_of, &(state->c_int_multiple_of), 0)) return -1;
                 }
             }
             else if (kind == CK_FLOAT) {
                 if (v->gt != NULL) {
-                    state->types |= MS_CONSTR_FLOAT_GT;
+                    state->constr_mask |= MS_CN_FLOAT_GT;
                     if (!_constr_as_f64(v->gt, &(state->c_float_min), 1)) return -1;
                 }
                 else if (v->ge != NULL) {
-                    state->types |= MS_CONSTR_FLOAT_GE;
+                    state->constr_mask |= MS_CN_FLOAT_GE;
                     if (!_constr_as_f64(v->ge, &(state->c_float_min), 0)) return -1;
                 }
                 if (v->lt != NULL) {
-                    state->types |= MS_CONSTR_FLOAT_LT;
+                    state->constr_mask |= MS_CN_FLOAT_LT;
                     if (!_constr_as_f64(v->lt, &(state->c_float_max), -1)) return -1;
                 }
                 else if (v->le != NULL) {
-                    state->types |= MS_CONSTR_FLOAT_LE;
+                    state->constr_mask |= MS_CN_FLOAT_LE;
                     if (!_constr_as_f64(v->le, &(state->c_float_max), 0)) return -1;
                 }
                 if (v->multiple_of != NULL) {
-                    state->types |= MS_CONSTR_FLOAT_MULTIPLE_OF;
+                    state->constr_mask |= MS_CN_FLOAT_MULTIPLE_OF;
                     if (!_constr_as_f64(v->multiple_of, &(state->c_float_multiple_of), 0)) return -1;
                 }
             }
@@ -5609,16 +5623,16 @@ typenode_collect_constraints(
             }
             else {
                 if (v->regex != NULL) {
-                    state->types |= MS_CONSTR_STR_REGEX;
+                    state->constr_mask |= MS_CN_STR_REGEX;
                     Py_INCREF(v->regex);
                     state->c_str_regex = v->regex;
                 }
                 if (v->min_length != NULL) {
-                    state->types |= MS_CONSTR_STR_MIN_LENGTH;
+                    state->constr_mask |= MS_CN_STR_MIN_LENGTH;
                     if (!_constr_as_py_ssize_t(v->min_length, &(state->c_str_min_length))) return -1;
                 }
                 if (v->max_length != NULL) {
-                    state->types |= MS_CONSTR_STR_MAX_LENGTH;
+                    state->constr_mask |= MS_CN_STR_MAX_LENGTH;
                     if (!_constr_as_py_ssize_t(v->max_length, &(state->c_str_max_length))) return -1;
                 }
             }
@@ -5631,11 +5645,11 @@ typenode_collect_constraints(
             }
             else {
                 if (v->min_length != NULL) {
-                    state->types |= MS_CONSTR_BYTES_MIN_LENGTH;
+                    state->constr_mask |= MS_CN_BYTES_MIN_LENGTH;
                     if (!_constr_as_py_ssize_t(v->min_length, &(state->c_bytes_min_length))) return -1;
                 }
                 if (v->max_length != NULL) {
-                    state->types |= MS_CONSTR_BYTES_MAX_LENGTH;
+                    state->constr_mask |= MS_CN_BYTES_MAX_LENGTH;
                     if (!_constr_as_py_ssize_t(v->max_length, &(state->c_bytes_max_length))) return -1;
                 }
             }
@@ -5644,21 +5658,21 @@ typenode_collect_constraints(
             CollectionConstraint *v = (CollectionConstraint *)validator;
             if (kind == CK_ARRAY) {
                 if (v->min_length != NULL) {
-                    state->types |= MS_CONSTR_ARRAY_MIN_LENGTH;
+                    state->constr_mask |= MS_CN_ARRAY_MIN_LENGTH;
                     if (!_constr_as_py_ssize_t(v->min_length, &(state->c_array_min_length))) return -1;
                 }
                 if (v->max_length != NULL) {
-                    state->types |= MS_CONSTR_ARRAY_MAX_LENGTH;
+                    state->constr_mask |= MS_CN_ARRAY_MAX_LENGTH;
                     if (!_constr_as_py_ssize_t(v->max_length, &(state->c_array_max_length))) return -1;
                 }
             }
             else if (kind == CK_MAP) {
                 if (v->min_length != NULL) {
-                    state->types |= MS_CONSTR_MAP_MIN_LENGTH;
+                    state->constr_mask |= MS_CN_MAP_MIN_LENGTH;
                     if (!_constr_as_py_ssize_t(v->min_length, &(state->c_map_min_length))) return -1;
                 }
                 if (v->max_length != NULL) {
-                    state->types |= MS_CONSTR_MAP_MAX_LENGTH;
+                    state->constr_mask |= MS_CN_MAP_MAX_LENGTH;
                     if (!_constr_as_py_ssize_t(v->max_length, &(state->c_map_max_length))) return -1;
                 }
             }
@@ -5673,18 +5687,18 @@ typenode_collect_constraints(
                 return err_invalid_constraint("tz", "datetime or time", obj);
             }
             else if (v->tz == Py_True) {
-                state->types |= MS_CONSTR_TZ_AWARE;
+                state->constr_mask |= MS_CN_TZ_AWARE;
             }
             else {
-                state->types |= MS_CONSTR_TZ_NAIVE;
+                state->constr_mask |= MS_CN_TZ_NAIVE;
             }
         }
         else {
             /* Base `Constraint` or a user-defined Python subclass: keep the
              * instance itself for the decode path */
-            state->types |= MS_CONSTR_USER_VALIDATOR;
+            state->types |= MS_CONSTR_USER;
             Py_INCREF(validator);
-            state->validator_obj = (PyObject *)validator;
+            state->user_constr_obj = (PyObject *)validator;
         }
     }
 
@@ -5708,27 +5722,15 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
             MS_TYPE_ENUM | MS_TYPE_STRLITERAL |
             MS_TYPE_TYPEDDICT | MS_TYPE_DATACLASS |
             MS_TYPE_NAMEDTUPLE |
-            MS_CONSTR_STR_REGEX |
             MS_ANY_DICT |
             MS_TYPE_LIST | MS_TYPE_SET | MS_TYPE_FROZENSET | MS_TYPE_VARTUPLE |
-            MS_CONSTR_INT_MIN |
-            MS_CONSTR_INT_MAX |
-            MS_CONSTR_INT_MULTIPLE_OF |
-            MS_CONSTR_FLOAT_GT | MS_CONSTR_FLOAT_GE |
-            MS_CONSTR_FLOAT_LT | MS_CONSTR_FLOAT_LE |
-            MS_CONSTR_FLOAT_MULTIPLE_OF |
-            MS_CONSTR_STR_MIN_LENGTH |
-            MS_CONSTR_STR_MAX_LENGTH |
-            MS_CONSTR_BYTES_MIN_LENGTH |
-            MS_CONSTR_BYTES_MAX_LENGTH |
-            MS_CONSTR_ARRAY_MIN_LENGTH |
-            MS_CONSTR_ARRAY_MAX_LENGTH |
-            MS_CONSTR_MAP_MIN_LENGTH |
-            MS_CONSTR_MAP_MAX_LENGTH |
             MS_CONSTR_CODEC |
-            MS_CONSTR_USER_VALIDATOR
+            MS_CONSTR_USER
         )
     );
+    if (state->constr_mask != 0) {
+        n_extra += 1;  /* side `ConstraintNode` pointer */
+    }
     if (state->types & MS_TYPE_FIXTUPLE) {
         has_fixtuple = true;
         fixtuple_size = PyTuple_GET_SIZE(state->array_el_obj);
@@ -5755,6 +5757,9 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
     }
 
     out->types = state->types;
+    if (state->constr_mask != 0) {
+        out->types |= MS_HAS_CONSTR;
+    }
     /* Populate `details` fields in order */
     e_ind = 0;
     if (state->custom_obj != NULL) {
@@ -5824,13 +5829,9 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
         Py_INCREF(state->serializer_obj);
         out->details[e_ind++].pointer = state->serializer_obj;
     }
-    if (state->types & MS_CONSTR_USER_VALIDATOR) {
-        Py_INCREF(state->validator_obj);
-        out->details[e_ind++].pointer = state->validator_obj;
-    }
-    if (state->types & MS_CONSTR_STR_REGEX) {
-        Py_INCREF(state->c_str_regex);
-        out->details[e_ind++].pointer = state->c_str_regex;
+    if (state->types & MS_CONSTR_USER) {
+        Py_INCREF(state->user_constr_obj);
+        out->details[e_ind++].pointer = state->user_constr_obj;
     }
     if (state->dict_key_obj != NULL && state->dict_val_obj != NULL) {
         TypeNode *temp = TypeNode_Convert(state->dict_key_obj);
@@ -5858,47 +5859,76 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
             out->details[e_ind++].pointer = temp;
         }
     }
-    if (state->types & MS_CONSTR_INT_MIN) {
-        out->details[e_ind++].i64 = state->c_int_min;
-    }
-    if (state->types & MS_CONSTR_INT_MAX) {
-        out->details[e_ind++].i64 = state->c_int_max;
-    }
-    if (state->types & MS_CONSTR_INT_MULTIPLE_OF) {
-        out->details[e_ind++].i64 = state->c_int_multiple_of;
-    }
-    if (state->types & (MS_CONSTR_FLOAT_GT | MS_CONSTR_FLOAT_GE)) {
-        out->details[e_ind++].f64 = state->c_float_min;
-    }
-    if (state->types & (MS_CONSTR_FLOAT_LT | MS_CONSTR_FLOAT_LE)) {
-        out->details[e_ind++].f64 = state->c_float_max;
-    }
-    if (state->types & MS_CONSTR_FLOAT_MULTIPLE_OF) {
-        out->details[e_ind++].f64 = state->c_float_multiple_of;
-    }
-    if (state->types & MS_CONSTR_STR_MIN_LENGTH) {
-        out->details[e_ind++].py_ssize_t = state->c_str_min_length;
-    }
-    if (state->types & MS_CONSTR_STR_MAX_LENGTH) {
-        out->details[e_ind++].py_ssize_t = state->c_str_max_length;
-    }
-    if (state->types & MS_CONSTR_BYTES_MIN_LENGTH) {
-        out->details[e_ind++].py_ssize_t = state->c_bytes_min_length;
-    }
-    if (state->types & MS_CONSTR_BYTES_MAX_LENGTH) {
-        out->details[e_ind++].py_ssize_t = state->c_bytes_max_length;
-    }
-    if (state->types & MS_CONSTR_ARRAY_MIN_LENGTH) {
-        out->details[e_ind++].py_ssize_t = state->c_array_min_length;
-    }
-    if (state->types & MS_CONSTR_ARRAY_MAX_LENGTH) {
-        out->details[e_ind++].py_ssize_t = state->c_array_max_length;
-    }
-    if (state->types & MS_CONSTR_MAP_MIN_LENGTH) {
-        out->details[e_ind++].py_ssize_t = state->c_map_min_length;
-    }
-    if (state->types & MS_CONSTR_MAP_MAX_LENGTH) {
-        out->details[e_ind++].py_ssize_t = state->c_map_max_length;
+    if (state->constr_mask != 0) {
+        uint64_t m = state->constr_mask;
+        Py_ssize_t n_cn = ms_popcount(
+            m & (
+                MS_CN_STR_REGEX |
+                MS_CN_INT_MIN | MS_CN_INT_MAX | MS_CN_INT_MULTIPLE_OF |
+                MS_CN_FLOAT_GT | MS_CN_FLOAT_GE | MS_CN_FLOAT_LT |
+                MS_CN_FLOAT_LE | MS_CN_FLOAT_MULTIPLE_OF |
+                MS_CN_STR_MIN_LENGTH | MS_CN_STR_MAX_LENGTH |
+                MS_CN_BYTES_MIN_LENGTH | MS_CN_BYTES_MAX_LENGTH |
+                MS_CN_ARRAY_MIN_LENGTH | MS_CN_ARRAY_MAX_LENGTH |
+                MS_CN_MAP_MIN_LENGTH | MS_CN_MAP_MAX_LENGTH
+            )
+        );
+        ConstraintNode *cn = (ConstraintNode *)PyMem_Calloc(
+            1, sizeof(ConstraintNode) + n_cn * sizeof(TypeDetail)
+        );
+        if (cn == NULL) {
+            PyErr_NoMemory();
+            goto error;
+        }
+        cn->mask = m;
+        Py_ssize_t c_ind = 0;
+        if (m & MS_CN_STR_REGEX) {
+            Py_INCREF(state->c_str_regex);
+            cn->details[c_ind++].pointer = state->c_str_regex;
+        }
+        if (m & MS_CN_INT_MIN) {
+            cn->details[c_ind++].i64 = state->c_int_min;
+        }
+        if (m & MS_CN_INT_MAX) {
+            cn->details[c_ind++].i64 = state->c_int_max;
+        }
+        if (m & MS_CN_INT_MULTIPLE_OF) {
+            cn->details[c_ind++].i64 = state->c_int_multiple_of;
+        }
+        if (m & (MS_CN_FLOAT_GT | MS_CN_FLOAT_GE)) {
+            cn->details[c_ind++].f64 = state->c_float_min;
+        }
+        if (m & (MS_CN_FLOAT_LT | MS_CN_FLOAT_LE)) {
+            cn->details[c_ind++].f64 = state->c_float_max;
+        }
+        if (m & MS_CN_FLOAT_MULTIPLE_OF) {
+            cn->details[c_ind++].f64 = state->c_float_multiple_of;
+        }
+        if (m & MS_CN_STR_MIN_LENGTH) {
+            cn->details[c_ind++].py_ssize_t = state->c_str_min_length;
+        }
+        if (m & MS_CN_STR_MAX_LENGTH) {
+            cn->details[c_ind++].py_ssize_t = state->c_str_max_length;
+        }
+        if (m & MS_CN_BYTES_MIN_LENGTH) {
+            cn->details[c_ind++].py_ssize_t = state->c_bytes_min_length;
+        }
+        if (m & MS_CN_BYTES_MAX_LENGTH) {
+            cn->details[c_ind++].py_ssize_t = state->c_bytes_max_length;
+        }
+        if (m & MS_CN_ARRAY_MIN_LENGTH) {
+            cn->details[c_ind++].py_ssize_t = state->c_array_min_length;
+        }
+        if (m & MS_CN_ARRAY_MAX_LENGTH) {
+            cn->details[c_ind++].py_ssize_t = state->c_array_max_length;
+        }
+        if (m & MS_CN_MAP_MIN_LENGTH) {
+            cn->details[c_ind++].py_ssize_t = state->c_map_min_length;
+        }
+        if (m & MS_CN_MAP_MAX_LENGTH) {
+            cn->details[c_ind++].py_ssize_t = state->c_map_max_length;
+        }
+        out->details[e_ind++].pointer = cn;
     }
     return (TypeNode *)out;
 
@@ -5946,7 +5976,7 @@ typenode_collect_check_invariants(TypeNodeCollectState *state) {
     if (
         state->custom_obj != NULL &&
         state->types & ~(MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | MS_TYPE_NONE |
-                         MS_CONSTR_CODEC | MS_CONSTR_USER_VALIDATOR)
+                         MS_CONSTR_CODEC | MS_CONSTR_USER)
     ) {
         PyErr_Format(
             PyExc_TypeError,
@@ -6594,7 +6624,8 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
     Py_CLEAR(state->literal_str_lookup);
     Py_CLEAR(state->c_str_regex);
     Py_CLEAR(state->serializer_obj);
-    Py_CLEAR(state->validator_obj);
+    Py_CLEAR(state->user_constr_obj);
+    state->constr_mask = 0;
 }
 
 /* This decomposes an input type `obj`, stripping out any "wrapper" types
@@ -6680,7 +6711,7 @@ typenode_origin_args_metadata(
                         constraints->serializer = (PyObject *)ser;
                     }
                     else if (PyObject_TypeCheck(annot, (PyTypeObject *)&Constraint_Type)) {
-                        if (constraints->validator != NULL) {
+                        if (constraints->user_constraint != NULL) {
                             PyErr_Format(
                                 PyExc_TypeError,
                                 "Multiple `Constraint` annotations found, "
@@ -6690,7 +6721,7 @@ typenode_origin_args_metadata(
                             Py_DECREF(metadata);
                             goto error;
                         }
-                        constraints->validator = annot;
+                        constraints->user_constraint = annot;
                     }
                 }
                 Py_DECREF(metadata);
@@ -7288,18 +7319,18 @@ ms_maybe_wrap_validation_error(PathNode *path) {
 }
 
 /* Invoke the stored base/user `Constraint` instance on `value`. Only call
- * this when `MS_CONSTR_USER_VALIDATOR` is set. Takes ownership of `value`;
+ * this when `MS_CONSTR_USER` is set. Takes ownership of `value`;
  * returns it unchanged when validation passes, or NULL (having DECREF'd
  * `value`) after wrapping ValueError/TypeError failures into a
  * ValidationError with path context. */
 static PyObject *
-ms_call_user_validator(PyObject *value, TypeNode *type, PathNode *path) {
+ms_call_user_constraint(PyObject *value, TypeNode *type, PathNode *path) {
     /* Like the fast constraints, validators are skipped for optional
      * (`X | None`) values decoding to `null` */
     if (value == Py_None && type->types & MS_TYPE_NONE) {
         return value;
     }
-    PyObject *validator = TypeNode_get_user_validator(type);
+    PyObject *validator = TypeNode_get_user_constraint(type);
     PyObject *result = PyObject_CallOneArg(validator, value);
     if (MS_UNLIKELY(result == NULL)) {
         Py_DECREF(value);
@@ -8207,7 +8238,7 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
     int n_fields = 0;
     int n_serializers = 0;
     int n_validators = 0;
-    PyObject *validator_obj = NULL;
+    PyObject *user_constr_obj = NULL;
 
     /* Strip Annotated wrappers, enforcing composition rules and collecting
      * Serializers at each level. */
@@ -8308,7 +8339,7 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
                     Py_DECREF(origin);
                     goto error;
                 }
-                validator_obj = item;
+                user_constr_obj = item;
             }
         }
         Py_DECREF(metadata);
@@ -8317,10 +8348,10 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
 
     /* Validate Constraint-vs-type-kind applicability.  After stripping all
      * Annotated wrappers `t` is the base type for this position. */
-    if (validator_obj != NULL) {
+    if (user_constr_obj != NULL) {
         enum constraint_kind kind = classify_annotation_kind(t, mod);
         if (kind != CK_OTHER) {
-            if (validate_fast_validator_kind(validator_obj, kind, ctx) < 0) {
+            if (validate_fast_validator_kind(user_constr_obj, kind, ctx) < 0) {
                 goto error;
             }
         }
@@ -12084,9 +12115,9 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
     }
 
 validate:
-    /* User validators run last, on the fully decoded/loaded value */
-    if (out != NULL && type->types & MS_CONSTR_USER_VALIDATOR) {
-        out = ms_call_user_validator(out, type, path);
+    /* User constraints run last, on the fully decoded/loaded value */
+    if (out != NULL && type->types & MS_CONSTR_USER) {
+        out = ms_call_user_constraint(out, type, path);
     }
 
     if (generic) {
@@ -12102,23 +12133,23 @@ _err_int_constraint(const char *msg, int64_t c, PathNode *path) {
 }
 
 static MS_NOINLINE PyObject *
-ms_decode_constr_int(int64_t x, TypeNode *type, PathNode *path) {
-    if (type->types & MS_CONSTR_INT_MIN) {
-        int64_t c = TypeNode_get_constr_int_min(type);
+ms_decode_constr_int(int64_t x, ConstraintNode *cn, PathNode *path) {
+    if (cn->mask & MS_CN_INT_MIN) {
+        int64_t c = ConstraintNode_get_int_min(cn);
         bool ok = x >= c;
         if (MS_UNLIKELY(!ok)) {
             return _err_int_constraint("Expected `int` >= %lld%U", c, path);
         }
     }
-    if (type->types & MS_CONSTR_INT_MAX) {
-        int64_t c = TypeNode_get_constr_int_max(type);
+    if (cn->mask & MS_CN_INT_MAX) {
+        int64_t c = ConstraintNode_get_int_max(cn);
         bool ok = x <= c;
         if (MS_UNLIKELY(!ok)) {
             return _err_int_constraint("Expected `int` <= %lld%U", c, path);
         }
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_INT_MULTIPLE_OF)) {
-        int64_t c = TypeNode_get_constr_int_multiple_of(type);
+    if (MS_UNLIKELY(cn->mask & MS_CN_INT_MULTIPLE_OF)) {
+        int64_t c = ConstraintNode_get_int_multiple_of(cn);
         bool ok = (x % c) == 0;
         if (MS_UNLIKELY(!ok)) {
             return _err_int_constraint(
@@ -12131,8 +12162,9 @@ ms_decode_constr_int(int64_t x, TypeNode *type, PathNode *path) {
 
 static MS_INLINE PyObject *
 ms_decode_int(int64_t x, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_INT_CONSTRS)) {
-        return ms_decode_constr_int(x, type, path);
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_INT_CONSTRS))) {
+        return ms_decode_constr_int(x, cn, path);
     }
     return PyLong_FromLongLong(x);
 }
@@ -12140,7 +12172,7 @@ ms_decode_int(int64_t x, TypeNode *type, PathNode *path) {
 /* Pure type-check path for struct_check_types / check_types_on_init:
  * isinstance-checks the value against the custom type and raises on
  * mismatch.  No conversion (load, protocol, auto-coerce) is performed.
- * Any annotated user validator (MS_CONSTR_USER_VALIDATOR) is still called
+ * Any annotated user constraint (MS_CONSTR_USER) is still called
  * on the already-typed value. */
 static PyObject *
 ms_decode_custom_check_only(PyObject *obj, TypeNode *type, PathNode *path) {
@@ -12183,9 +12215,9 @@ ms_decode_custom_check_only(PyObject *obj, TypeNode *type, PathNode *path) {
         Py_CLEAR(obj);
     }
 
-    /* Run any annotated user validator */
-    if (obj != NULL && type->types & MS_CONSTR_USER_VALIDATOR) {
-        obj = ms_call_user_validator(obj, type, path);
+    /* Run any annotated user constraint */
+    if (obj != NULL && type->types & MS_CONSTR_USER) {
+        obj = ms_call_user_constraint(obj, type, path);
     }
 
     if (generic) Py_DECREF(custom_cls);
@@ -12193,13 +12225,13 @@ ms_decode_custom_check_only(PyObject *obj, TypeNode *type, PathNode *path) {
 }
 
 static MS_NOINLINE PyObject *
-ms_decode_constr_uint(uint64_t x, TypeNode *type, PathNode *path) {
-    if (type->types & MS_CONSTR_INT_MAX) {
-        int64_t c = TypeNode_get_constr_int_max(type);
+ms_decode_constr_uint(uint64_t x, ConstraintNode *cn, PathNode *path) {
+    if (cn->mask & MS_CN_INT_MAX) {
+        int64_t c = ConstraintNode_get_int_max(cn);
         return _err_int_constraint("Expected `int` <= %lld%U", c, path);
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_INT_MULTIPLE_OF)) {
-        int64_t c = TypeNode_get_constr_int_multiple_of(type);
+    if (MS_UNLIKELY(cn->mask & MS_CN_INT_MULTIPLE_OF)) {
+        int64_t c = ConstraintNode_get_int_multiple_of(cn);
         bool ok = (x % c) == 0;
         if (MS_UNLIKELY(!ok)) {
             return _err_int_constraint(
@@ -12212,19 +12244,20 @@ ms_decode_constr_uint(uint64_t x, TypeNode *type, PathNode *path) {
 
 static MS_INLINE PyObject *
 ms_decode_uint(uint64_t x, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_INT_CONSTRS)) {
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_INT_CONSTRS))) {
         if (MS_LIKELY(x <= LLONG_MAX)) {
             return ms_decode_int(x, type, path);
         }
-        return ms_decode_constr_uint(x, type, path);
+        return ms_decode_constr_uint(x, cn, path);
     }
     return PyLong_FromUnsignedLongLong(x);
 }
 
 static MS_NOINLINE bool
-ms_passes_int_constraints(uint64_t ux, bool neg, TypeNode *type, PathNode *path) {
-    if (type->types & MS_CONSTR_INT_MIN) {
-        int64_t c = TypeNode_get_constr_int_min(type);
+ms_passes_int_constraints(uint64_t ux, bool neg, ConstraintNode *cn, PathNode *path) {
+    if (cn->mask & MS_CN_INT_MIN) {
+        int64_t c = ConstraintNode_get_int_min(cn);
         bool ok = (
             neg ? ((-(int64_t)ux) >= c) :
             ((c < 0) || (ux >= (uint64_t)c))
@@ -12234,8 +12267,8 @@ ms_passes_int_constraints(uint64_t ux, bool neg, TypeNode *type, PathNode *path)
             return false;
         }
     }
-    if (type->types & MS_CONSTR_INT_MAX) {
-        int64_t c = TypeNode_get_constr_int_max(type);
+    if (cn->mask & MS_CN_INT_MAX) {
+        int64_t c = ConstraintNode_get_int_max(cn);
         bool ok = (
             neg ? ((-(int64_t)ux) <= c) :
             ((c >= 0) && (ux <= (uint64_t)c))
@@ -12245,8 +12278,8 @@ ms_passes_int_constraints(uint64_t ux, bool neg, TypeNode *type, PathNode *path)
             return false;
         }
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_INT_MULTIPLE_OF)) {
-        int64_t c = TypeNode_get_constr_int_multiple_of(type);
+    if (MS_UNLIKELY(cn->mask & MS_CN_INT_MULTIPLE_OF)) {
+        int64_t c = ConstraintNode_get_int_multiple_of(cn);
         bool ok = (ux % c) == 0;
         if (MS_UNLIKELY(!ok)) {
             _err_int_constraint(
@@ -12260,7 +12293,7 @@ ms_passes_int_constraints(uint64_t ux, bool neg, TypeNode *type, PathNode *path)
 
 /* Constraint checks for a PyLong that is known not to fit into a uint64/int64 */
 static bool
-ms_passes_big_int_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
+ms_passes_big_int_constraints(PyObject *obj, ConstraintNode *cn, PathNode *path) {
 #if PY314_PLUS
     /* obj is always a PyLong here, so PyLong_GetSign can't fail */
     int sign = 0;
@@ -12270,22 +12303,22 @@ ms_passes_big_int_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
     bool neg = _PyLong_Sign(obj) < 0;
 #endif
 
-    if (type->types & MS_CONSTR_INT_MIN) {
+    if (cn->mask & MS_CN_INT_MIN) {
         if (neg) {
-            int64_t c = TypeNode_get_constr_int_min(type);
+            int64_t c = ConstraintNode_get_int_min(cn);
             _err_int_constraint("Expected `int` >= %lld%U", c, path);
             return false;
         }
     }
-    if (type->types & MS_CONSTR_INT_MAX) {
+    if (cn->mask & MS_CN_INT_MAX) {
         if (!neg) {
-            int64_t c = TypeNode_get_constr_int_max(type);
+            int64_t c = ConstraintNode_get_int_max(cn);
             _err_int_constraint("Expected `int` <= %lld%U", c, path);
             return false;
         }
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_INT_MULTIPLE_OF)) {
-        int64_t c = TypeNode_get_constr_int_multiple_of(type);
+    if (MS_UNLIKELY(cn->mask & MS_CN_INT_MULTIPLE_OF)) {
+        int64_t c = ConstraintNode_get_int_multiple_of(cn);
         PyObject *base = PyLong_FromLongLong(c);
         if (base == NULL) return false;
         PyObject *remainder = PyNumber_Remainder(obj, base);
@@ -12305,8 +12338,9 @@ ms_passes_big_int_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
 
 static MS_NOINLINE PyObject *
 ms_decode_big_pyint(PyObject *obj, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_INT_CONSTRS)) {
-        if (!ms_passes_big_int_constraints(obj, type, path)) return NULL;
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_INT_CONSTRS))) {
+        if (!ms_passes_big_int_constraints(obj, cn, path)) return NULL;
     }
     if (MS_LIKELY(PyLong_CheckExact(obj))) {
         Py_INCREF(obj);
@@ -12325,8 +12359,9 @@ ms_decode_pyint(PyObject *obj, TypeNode *type, PathNode *path) {
     if (MS_UNLIKELY(overflow)) {
         return ms_decode_big_pyint(obj, type, path);
     }
-    if (MS_UNLIKELY(type->types & MS_INT_CONSTRS)) {
-        if (!ms_passes_int_constraints(ux, neg, type, path)) return NULL;
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_INT_CONSTRS))) {
+        if (!ms_passes_int_constraints(ux, neg, cn, path)) return NULL;
     }
     if (MS_LIKELY(PyLong_CheckExact(obj))) {
         Py_INCREF(obj);
@@ -12382,8 +12417,9 @@ ms_decode_bigint(const char *buf, Py_ssize_t size, TypeNode *type, PathNode *pat
         }
     }
 
-    if (MS_UNLIKELY(type->types & MS_INT_CONSTRS)) {
-        if (!ms_passes_big_int_constraints(out, type, path)) {
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_INT_CONSTRS))) {
+        if (!ms_passes_big_int_constraints(out, cn, path)) {
             Py_CLEAR(out);
         }
     }
@@ -12412,12 +12448,12 @@ _err_float_constraint(
 }
 
 static MS_INLINE bool
-ms_passes_float_constraints_inline(double x, TypeNode *type, PathNode *path) {
-    if (type->types & (MS_CONSTR_FLOAT_GE | MS_CONSTR_FLOAT_GT)) {
-        double c = TypeNode_get_constr_float_min(type);
+ms_passes_float_constraints_inline(double x, ConstraintNode *cn, PathNode *path) {
+    if (cn->mask & (MS_CN_FLOAT_GE | MS_CN_FLOAT_GT)) {
+        double c = ConstraintNode_get_float_min(cn);
         bool ok = x >= c;
         if (MS_UNLIKELY(!ok)) {
-            bool eq = type->types & MS_CONSTR_FLOAT_GE;
+            bool eq = cn->mask & MS_CN_FLOAT_GE;
             _err_float_constraint(
                 eq ? ">=" : ">",
                 eq ? 0 : -1,
@@ -12427,11 +12463,11 @@ ms_passes_float_constraints_inline(double x, TypeNode *type, PathNode *path) {
             return false;
         }
     }
-    if (type->types & (MS_CONSTR_FLOAT_LE | MS_CONSTR_FLOAT_LT)) {
-        double c = TypeNode_get_constr_float_max(type);
+    if (cn->mask & (MS_CN_FLOAT_LE | MS_CN_FLOAT_LT)) {
+        double c = ConstraintNode_get_float_max(cn);
         bool ok = x <= c;
         if (MS_UNLIKELY(!ok)) {
-            bool eq = type->types & MS_CONSTR_FLOAT_LE;
+            bool eq = cn->mask & MS_CN_FLOAT_LE;
             _err_float_constraint(
                 eq ? "<=" : "<",
                 eq ? 0 : 1,
@@ -12441,8 +12477,8 @@ ms_passes_float_constraints_inline(double x, TypeNode *type, PathNode *path) {
             return false;
         }
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_FLOAT_MULTIPLE_OF)) {
-        double c = TypeNode_get_constr_float_multiple_of(type);
+    if (MS_UNLIKELY(cn->mask & MS_CN_FLOAT_MULTIPLE_OF)) {
+        double c = ConstraintNode_get_float_multiple_of(cn);
         bool ok = x == 0 || fmod(x, c) == 0.0;
         if (MS_UNLIKELY(!ok)) {
             _err_float_constraint(
@@ -12455,31 +12491,33 @@ ms_passes_float_constraints_inline(double x, TypeNode *type, PathNode *path) {
 }
 
 static MS_NOINLINE PyObject *
-ms_decode_constr_float(double x, TypeNode *type, PathNode *path) {
-    if (!ms_passes_float_constraints_inline(x, type, path)) return NULL;
+ms_decode_constr_float(double x, ConstraintNode *cn, PathNode *path) {
+    if (!ms_passes_float_constraints_inline(x, cn, path)) return NULL;
     return PyFloat_FromDouble(x);
 }
 
 static MS_INLINE PyObject *
 ms_decode_float(double x, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_FLOAT_CONSTRS)) {
-        return ms_decode_constr_float(x, type, path);
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_FLOAT_CONSTRS))) {
+        return ms_decode_constr_float(x, cn, path);
     }
     return PyFloat_FromDouble(x);
 }
 
 static MS_NOINLINE PyObject *
-_ms_check_float_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
+_ms_check_float_constraints(PyObject *obj, ConstraintNode *cn, PathNode *path) {
     double x = PyFloat_AS_DOUBLE(obj);
-    if (ms_passes_float_constraints_inline(x, type, path)) return obj;
+    if (ms_passes_float_constraints_inline(x, cn, path)) return obj;
     Py_DECREF(obj);
     return NULL;
 }
 
 static MS_INLINE PyObject *
 ms_check_float_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
-    if (MS_LIKELY(!(type->types & MS_FLOAT_CONSTRS))) return obj;
-    return _ms_check_float_constraints(obj, type, path);
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_LIKELY(cn == NULL || !(cn->mask & MS_CN_FLOAT_CONSTRS))) return obj;
+    return _ms_check_float_constraints(obj, cn, path);
 }
 
 static MS_NOINLINE bool
@@ -12489,13 +12527,13 @@ _err_py_ssize_t_constraint(const char *msg, Py_ssize_t c, PathNode *path) {
 }
 
 static MS_NOINLINE PyObject *
-_ms_check_str_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
+_ms_check_str_constraints(PyObject *obj, ConstraintNode *cn, PathNode *path) {
     if (obj == NULL) return NULL;
 
     Py_ssize_t len = PyUnicode_GET_LENGTH(obj);
 
-    if (type->types & MS_CONSTR_STR_MIN_LENGTH) {
-        Py_ssize_t c = TypeNode_get_constr_str_min_length(type);
+    if (cn->mask & MS_CN_STR_MIN_LENGTH) {
+        Py_ssize_t c = ConstraintNode_get_str_min_length(cn);
         if (len < c) {
             _err_py_ssize_t_constraint(
                 "Expected `str` of length >= %zd%U", c, path
@@ -12503,8 +12541,8 @@ _ms_check_str_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
             goto error;
         }
     }
-    if (type->types & MS_CONSTR_STR_MAX_LENGTH) {
-        Py_ssize_t c = TypeNode_get_constr_str_max_length(type);
+    if (cn->mask & MS_CN_STR_MAX_LENGTH) {
+        Py_ssize_t c = ConstraintNode_get_str_max_length(cn);
         if (len > c) {
             _err_py_ssize_t_constraint(
                 "Expected `str` of length <= %zd%U", c, path
@@ -12512,9 +12550,9 @@ _ms_check_str_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
             goto error;
         }
     }
-    if (type->types & MS_CONSTR_STR_REGEX) {
+    if (cn->mask & MS_CN_STR_REGEX) {
         StructspecState *st = structtype_get_global_state();
-        PyObject *regex = TypeNode_get_constr_str_regex(type);
+        PyObject *regex = ConstraintNode_get_str_regex(cn);
         PyObject *res = PyObject_CallMethodObjArgs(
             regex, st->str_search, obj, NULL
         );
@@ -12540,22 +12578,23 @@ error:
 
 static MS_INLINE PyObject *
 ms_check_str_constraints(PyObject *obj, TypeNode *type, PathNode *path) {
-    if (MS_LIKELY(!(type->types & MS_STR_CONSTRS))) return obj;
-    return _ms_check_str_constraints(obj, type, path);
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_LIKELY(cn == NULL || !(cn->mask & MS_CN_STR_CONSTRS))) return obj;
+    return _ms_check_str_constraints(obj, cn, path);
 }
 
 static MS_NOINLINE bool
-_ms_passes_bytes_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_CONSTR_BYTES_MIN_LENGTH)) {
-        Py_ssize_t c = TypeNode_get_constr_bytes_min_length(type);
+_ms_passes_bytes_constraints(Py_ssize_t size, ConstraintNode *cn, PathNode *path) {
+    if (MS_UNLIKELY(cn->mask & MS_CN_BYTES_MIN_LENGTH)) {
+        Py_ssize_t c = ConstraintNode_get_bytes_min_length(cn);
         if (size < c) {
             return _err_py_ssize_t_constraint(
                 "Expected `bytes` of length >= %zd%U", c, path
             );
         }
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_BYTES_MAX_LENGTH)) {
-        Py_ssize_t c = TypeNode_get_constr_bytes_max_length(type);
+    if (MS_UNLIKELY(cn->mask & MS_CN_BYTES_MAX_LENGTH)) {
+        Py_ssize_t c = ConstraintNode_get_bytes_max_length(cn);
         if (size > c) {
             return _err_py_ssize_t_constraint(
                 "Expected `bytes` of length <= %zd%U", c, path
@@ -12567,24 +12606,25 @@ _ms_passes_bytes_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
 
 static MS_INLINE bool
 ms_passes_bytes_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_BYTES_CONSTRS)) {
-        return _ms_passes_bytes_constraints(size, type, path);
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_BYTES_CONSTRS))) {
+        return _ms_passes_bytes_constraints(size, cn, path);
     }
     return true;
 }
 
 static MS_NOINLINE bool
-_ms_passes_array_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_CONSTR_ARRAY_MIN_LENGTH)) {
-        Py_ssize_t c = TypeNode_get_constr_array_min_length(type);
+_ms_passes_array_constraints(Py_ssize_t size, ConstraintNode *cn, PathNode *path) {
+    if (MS_UNLIKELY(cn->mask & MS_CN_ARRAY_MIN_LENGTH)) {
+        Py_ssize_t c = ConstraintNode_get_array_min_length(cn);
         if (size < c) {
             return _err_py_ssize_t_constraint(
                 "Expected `array` of length >= %zd%U", c, path
             );
         }
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_ARRAY_MAX_LENGTH)) {
-        Py_ssize_t c = TypeNode_get_constr_array_max_length(type);
+    if (MS_UNLIKELY(cn->mask & MS_CN_ARRAY_MAX_LENGTH)) {
+        Py_ssize_t c = ConstraintNode_get_array_max_length(cn);
         if (size > c) {
             return _err_py_ssize_t_constraint(
                 "Expected `array` of length <= %zd%U", c, path
@@ -12596,24 +12636,25 @@ _ms_passes_array_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
 
 static MS_INLINE bool
 ms_passes_array_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_ARRAY_CONSTRS)) {
-        return _ms_passes_array_constraints(size, type, path);
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_ARRAY_CONSTRS))) {
+        return _ms_passes_array_constraints(size, cn, path);
     }
     return true;
 }
 
 static MS_NOINLINE bool
-_ms_passes_map_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_CONSTR_MAP_MIN_LENGTH)) {
-        Py_ssize_t c = TypeNode_get_constr_map_min_length(type);
+_ms_passes_map_constraints(Py_ssize_t size, ConstraintNode *cn, PathNode *path) {
+    if (MS_UNLIKELY(cn->mask & MS_CN_MAP_MIN_LENGTH)) {
+        Py_ssize_t c = ConstraintNode_get_map_min_length(cn);
         if (size < c) {
             return _err_py_ssize_t_constraint(
                 "Expected `object` of length >= %zd%U", c, path
             );
         }
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_MAP_MAX_LENGTH)) {
-        Py_ssize_t c = TypeNode_get_constr_map_max_length(type);
+    if (MS_UNLIKELY(cn->mask & MS_CN_MAP_MAX_LENGTH)) {
+        Py_ssize_t c = ConstraintNode_get_map_max_length(cn);
         if (size > c) {
            return _err_py_ssize_t_constraint(
                 "Expected `object` of length <= %zd%U", c, path
@@ -12625,24 +12666,25 @@ _ms_passes_map_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
 
 static MS_INLINE bool
 ms_passes_map_constraints(Py_ssize_t size, TypeNode *type, PathNode *path) {
-    if (MS_UNLIKELY(type->types & MS_MAP_CONSTRS)) {
-        return _ms_passes_map_constraints(size, type, path);
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_MAP_CONSTRS))) {
+        return _ms_passes_map_constraints(size, cn, path);
     }
     return true;
 }
 
 static MS_NOINLINE bool
 _ms_passes_tz_constraint(
-    PyObject *tz, TypeNode *type, PathNode *path
+    PyObject *tz, TypeNode *type, ConstraintNode *cn, PathNode *path
 ) {
     char *err, *type_str;
     if (tz == Py_None) {
-        if (type->types & MS_CONSTR_TZ_AWARE) {
+        if (cn->mask & MS_CN_TZ_AWARE) {
             err = "Expected `%s` with a timezone component%U";
             goto error;
         }
     }
-    else if (type->types & MS_CONSTR_TZ_NAIVE) {
+    else if (cn->mask & MS_CN_TZ_NAIVE) {
         err = "Expected `%s` with no timezone component%U";
         goto error;
     }
@@ -12664,8 +12706,9 @@ static MS_INLINE bool
 ms_passes_tz_constraint(
     PyObject *tz, TypeNode *type, PathNode *path
 ) {
-    if (MS_UNLIKELY(type->types & MS_TIME_CONSTRS)) {
-        return _ms_passes_tz_constraint(tz, type, path);
+    ConstraintNode *cn = TypeNode_get_constraints(type);
+    if (MS_UNLIKELY(cn != NULL && (cn->mask & MS_CN_TIME_CONSTRS))) {
+        return _ms_passes_tz_constraint(tz, type, cn, path);
     }
     return true;
 }
@@ -16562,7 +16605,7 @@ json_decode_dict_key_fallback(
     const char *view, Py_ssize_t size, bool is_ascii, TypeNode *type, PathNode *path
 ) {
     /* Codec with `load` on a non-custom key type takes over: the key
-     * string is handed to `load` (the user validator is applied by the
+     * string is handed to `load` (the user constraint is applied by the
      * caller, `json_decode_dict_key`). */
     if (MS_UNLIKELY(type->types & MS_CONSTR_CODEC) &&
         !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC)))
@@ -16646,14 +16689,14 @@ json_decode_dict_key(JSONDecoderState *self, TypeNode *type, PathNode *path) {
     size = json_decode_string_view(self, &view, &is_ascii);
     if (size < 0) return NULL;
     PyObject *key = json_decode_dict_key_fallback(self, view, size, is_ascii, type, path);
-    /* Custom keys already had any user validator applied by
+    /* Custom keys already had any user constraint applied by
      * `ms_decode_custom` inside the fallback */
     if (
-        MS_UNLIKELY(type->types & MS_CONSTR_USER_VALIDATOR) &&
+        MS_UNLIKELY(type->types & MS_CONSTR_USER) &&
         !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC)) &&
         key != NULL
     ) {
-        return ms_call_user_validator(key, type, path);
+        return ms_call_user_constraint(key, type, path);
     }
     return key;
 }
@@ -18001,8 +18044,8 @@ json_decode(
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
         return ms_decode_custom(obj, type, path);
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_USER_VALIDATOR) && obj != NULL) {
-        return ms_call_user_validator(obj, type, path);
+    if (MS_UNLIKELY(type->types & MS_CONSTR_USER) && obj != NULL) {
+        return ms_call_user_constraint(obj, type, path);
     }
     return obj;
 }
@@ -21087,12 +21130,12 @@ validate_obj(
     }
     PyObject *out = validate_obj_dispatch(self, obj, type, path);
     Py_XDECREF(codec_temp);
-    /* Custom types had any user validator applied by `ms_decode_custom` */
+    /* Custom types had any user constraint applied by `ms_decode_custom` */
     if (MS_UNLIKELY(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC))) {
         return out;
     }
-    if (MS_UNLIKELY(type->types & MS_CONSTR_USER_VALIDATOR) && out != NULL) {
-        return ms_call_user_validator(out, type, path);
+    if (MS_UNLIKELY(type->types & MS_CONSTR_USER) && out != NULL) {
+        return ms_call_user_constraint(out, type, path);
     }
     return out;
 }
@@ -21120,9 +21163,9 @@ validate_loaded_json_value(
     if (
         out != NULL &&
         !(type->types & (MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC)) &&
-        (type->types & MS_CONSTR_USER_VALIDATOR)
+        (type->types & MS_CONSTR_USER)
     ) {
-        out = ms_call_user_validator(out, type, path);
+        out = ms_call_user_constraint(out, type, path);
     }
     return out;
 }
@@ -21554,7 +21597,7 @@ Struct_dump_csv(
 /* If `val` is a struct instance matching `field_type` (a direct struct or a
  * struct union member), recurse into it. Returns 1 if recursed, 0 if the value
  * isn't a matching struct, and -1 on error. When `apply_validator` is true, a
- * user validator attached to `field_type` is applied after a successful
+ * user constraint attached to `field_type` is applied after a successful
  * recursion. */
 static int
 struct_check_maybe_recurse(
@@ -21580,10 +21623,10 @@ struct_check_maybe_recurse(
     if (!matches) return 0;
 
     if (struct_check_recursive(val, mod, field_path) < 0) return -1;
-    if (apply_validator && field_type->types & MS_CONSTR_USER_VALIDATOR) {
-        /* `ms_call_user_validator` steals the reference */
+    if (apply_validator && field_type->types & MS_CONSTR_USER) {
+        /* `ms_call_user_constraint` steals the reference */
         Py_INCREF(val);
-        PyObject *checked = ms_call_user_validator(val, field_type, field_path);
+        PyObject *checked = ms_call_user_constraint(val, field_type, field_path);
         Py_XDECREF(checked);
         if (checked == NULL) return -1;
     }
@@ -21674,7 +21717,7 @@ struct_check_recursive(
         PathNode field_path = {path, i, (PyObject *)st_type};
 
         /* Direct struct fields and struct unions: recurse into matching
-         * struct instances, applying the field's user validator. */
+         * struct instances, applying the field's user constraint. */
         int r = struct_check_maybe_recurse(val, field_type, mod, &field_path, true);
         if (r < 0) { ret = -1; break; }
         if (r == 1) continue;
