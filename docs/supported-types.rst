@@ -624,12 +624,19 @@ This is useful for targets that accept richer types than JSON — for example
 :ref:`DynamoDB <dynamodb-example>`.
 
 
-``pathlib.Path``
-----------------
+``pathlib.PurePath``
+--------------------
 
-`pathlib.Path` values are encoded as their string representation in JSON and
-decoded from strings. Decoding a string that `pathlib.Path` cannot construct is
-reported as an ``Invalid path`` error.
+`pathlib.PurePath` and all of its subclasses — `pathlib.Path`,
+`pathlib.PurePosixPath`, `pathlib.PureWindowsPath`, `pathlib.PosixPath`,
+`pathlib.WindowsPath`, and user subclasses — are supported natively. Values are
+encoded as their string representation in JSON and decoded from strings.
+Decoding a string that the annotated class cannot construct is reported as an
+``Invalid path`` error.
+
+The annotated class is preserved on decode: a `pathlib.PureWindowsPath` field
+decodes to `pathlib.PureWindowsPath`, while a `pathlib.Path` field decodes to
+the platform's concrete `pathlib.Path` flavour.
 
 .. code-block:: python
 
@@ -646,17 +653,19 @@ reported as an ``Invalid path`` error.
     >>> StructAdapter(pathlib.Path).struct_validate_json(msg)
     PosixPath('/tmp/example')
 
-Other `pathlib` pure-path classes (for example `pathlib.PureWindowsPath` or
-`pathlib.PurePosixPath`) are not supported natively. Wrap them in a
-:class:`structtype.Serializer` if you need them:
+    >>> win = pathlib.PureWindowsPath("C:/tmp/example")
+    >>> out = StructAdapter(pathlib.PureWindowsPath).struct_validate_json(
+    ...     StructAdapter(pathlib.PureWindowsPath).struct_dump_json(win))
+    >>> out
+    PureWindowsPath('C:/tmp/example')
 
-.. code-block:: python
+Serialization uses the `os.PathLike` protocol (`__fspath__`), not `__str__`, so
+a subclass that overrides `__str__` for display still serializes its true path.
+An `__fspath__` that returns `bytes` is reported as a `TypeError`.
 
-    >>> from typing import Annotated
-    >>> from structtype import Serializer
-
-    >>> Pure = Annotated[pathlib.PureWindowsPath, Serializer(
-    ...     dump=str, load=pathlib.PureWindowsPath)]
+Only instances of the annotated class (or a subclass) are accepted when
+validating already-constructed objects: a `pathlib.Path` field rejects a
+`pathlib.PurePosixPath` value, since the latter is not a `pathlib.Path`.
 
 
 ``ipaddress``

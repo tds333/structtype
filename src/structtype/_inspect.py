@@ -281,7 +281,7 @@ class DecimalType(Type):
 
 
 class PathType(Type):
-    """A type corresponding to `pathlib.Path`."""
+    """A type corresponding to `pathlib.PurePath` and its subclasses."""
 
 
 class IPv4AddressType(Type):
@@ -1030,7 +1030,7 @@ class _Translator:
             return UUIDType()
         elif t is decimal.Decimal:
             return DecimalType()
-        elif t is pathlib.Path:
+        elif isinstance(t, type) and issubclass(t, pathlib.PurePath):
             return PathType()
         elif t is ipaddress.IPv4Address:
             return IPv4AddressType()

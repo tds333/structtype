@@ -465,7 +465,6 @@ def test_from_attributes_missing_attr_errors():
         Target.struct_validate(Empty(), from_attributes=True)
 
 
-
 # ── validator type matrix ──
 
 import decimal
@@ -524,6 +523,7 @@ VALIDATOR_MATRIX = [
     ("uuid", UUID, UUID(int=7), 7),
     ("decimal", decimal.Decimal, decimal.Decimal("1.5"), [1]),
     ("path", pathlib.Path, pathlib.Path("/tmp/x"), 5),
+    ("purepath", pathlib.PureWindowsPath, pathlib.PureWindowsPath("tmp/x"), 5),
     ("ipv4", ipaddress.IPv4Address, ipaddress.IPv4Address("1.2.3.4"), 5),
     ("ipv6", ipaddress.IPv6Address, ipaddress.IPv6Address("::1"), 5),
     ("enum", Color, Color.RED, "nope"),
@@ -797,9 +797,7 @@ def test_validator_float_constraint_checked():
         x: Annotated[float, NumericConstraint(gt=0)]
 
     assert RangedF.struct_validate({"x": 1.5}).x == 1.5
-    with pytest.raises(
-        structtype.ValidationError, match=r"Expected `float` > 0\.0"
-    ):
+    with pytest.raises(structtype.ValidationError, match=r"Expected `float` > 0\.0"):
         RangedF.struct_validate({"x": -1.0})
     with pytest.raises(structtype.ValidationError):
         RangedF.struct_validate({"x": 0.0})

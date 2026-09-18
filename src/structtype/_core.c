@@ -688,7 +688,7 @@ typedef struct {
     PyObject *UUIDType;
     PyObject *uuid_safeuuid_unknown;
     PyObject *DecimalType;
-    PyObject *PathType;
+    PyObject *PurePathType;
     PyObject *IPv4AddressType;
     PyObject *IPv6AddressType;
     PyObject *EnumType;
@@ -4481,6 +4481,7 @@ AssocList_Sort(AssocList* list) {
  * The order is documented below:
  *
  * O | STRUCT | STRUCT_ARRAY | STRUCT_UNION | STRUCT_ARRAY_UNION | CUSTOM |
+ * O | PATH |
  * O | INTENUM | INTLITERAL |
  * O | ENUM | STRLITERAL |
  * O | TYPEDDICT | DATACLASS |
@@ -4510,7 +4511,8 @@ AssocList_Sort(AssocList* list) {
 #define SLOT_00 ( \
     MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY | \
     MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION | \
-    MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC \
+    MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC | \
+    MS_TYPE_PATH \
 )
 #define SLOT_01 (MS_TYPE_INTENUM | MS_TYPE_INTLITERAL)
 #define SLOT_02 (MS_TYPE_ENUM | MS_TYPE_STRLITERAL)
@@ -4785,6 +4787,14 @@ static MS_INLINE PyObject *
 TypeNode_get_custom(TypeNode *type) {
     /* Custom types can't be mixed with anything */
     return type->details[0].pointer;
+}
+
+static MS_INLINE PyObject *
+TypeNode_get_path_class(TypeNode *type) {
+    /* The declared path class is packed after the other SLOT_00 details
+     * (custom / struct) and before the int enum details. */
+    Py_ssize_t i = ms_popcount(type->types & (SLOT_00 & ~MS_TYPE_PATH));
+    return type->details[i].pointer;
 }
 
 static MS_INLINE PyObject *
@@ -5146,6 +5156,7 @@ TypeNode_get_traverse_ranges(
             type->types & (
                 MS_TYPE_STRUCT | MS_TYPE_STRUCT_UNION |
                 MS_TYPE_STRUCT_ARRAY | MS_TYPE_STRUCT_ARRAY_UNION |
+                MS_TYPE_PATH |
                 MS_TYPE_INTENUM | MS_TYPE_INTLITERAL |
                 MS_TYPE_ENUM | MS_TYPE_STRLITERAL |
                 MS_TYPE_TYPEDDICT | MS_TYPE_DATACLASS |
@@ -5303,6 +5314,7 @@ typedef struct {
     PyObject *intenum_obj;
     PyObject *enum_obj;
     PyObject *custom_obj;
+    PyObject *path_obj;  /* declared pathlib.PurePath subclass, or NULL */
     PyObject *array_el_obj;
     PyObject *dict_key_obj;
     PyObject *dict_val_obj;
@@ -5628,6 +5640,7 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
             MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY |
             MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION |
             MS_TYPE_CUSTOM | MS_TYPE_CUSTOM_GENERIC |
+            MS_TYPE_PATH |
             MS_TYPE_INTENUM | MS_TYPE_INTLITERAL |
             MS_TYPE_ENUM | MS_TYPE_STRLITERAL |
             MS_TYPE_TYPEDDICT | MS_TYPE_DATACLASS |
@@ -5696,6 +5709,10 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
     if (state->structs_lookup != NULL) {
         Py_INCREF(state->structs_lookup);
         out->details[e_ind++].pointer = state->structs_lookup;
+    }
+    if (state->path_obj != NULL) {
+        Py_INCREF(state->path_obj);
+        out->details[e_ind++].pointer = state->path_obj;
     }
     if (state->intenum_obj != NULL) {
         PyObject *member_map = PyObject_GetAttr(state->intenum_obj, state->mod->str__value2member_map_);
@@ -6060,6 +6077,18 @@ typenode_collect_custom(TypeNodeCollectState *state, uint64_t type, PyObject *ob
     state->types |= type;
     Py_INCREF(obj);
     state->custom_obj = obj;
+    return 0;
+}
+
+static int
+typenode_collect_path(TypeNodeCollectState *state, PyObject *obj) {
+    if (state->path_obj != NULL) {
+        if (state->path_obj == obj) return 0;
+        return typenode_collect_err_unique(state, "path");
+    }
+    state->types |= MS_TYPE_PATH;
+    Py_INCREF(obj);
+    state->path_obj = obj;
     return 0;
 }
 
@@ -6471,6 +6500,7 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
     Py_CLEAR(state->intenum_obj);
     Py_CLEAR(state->enum_obj);
     Py_CLEAR(state->custom_obj);
+    Py_CLEAR(state->path_obj);
     Py_CLEAR(state->array_el_obj);
     Py_CLEAR(state->dict_key_obj);
     Py_CLEAR(state->dict_val_obj);
@@ -6804,8 +6834,13 @@ typenode_collect_type(TypeNodeCollectState *state, PyObject *obj) {
     else if (t == state->mod->DecimalType) {
         state->types |= MS_TYPE_DECIMAL;
     }
-    else if (t == state->mod->PathType) {
-        state->types |= MS_TYPE_PATH;
+    else if (
+        PyType_Check(t)
+        && PyType_IsSubtype(
+            (PyTypeObject *)t, (PyTypeObject *)(state->mod->PurePathType)
+        )
+    ) {
+        out = typenode_collect_path(state, t);
     }
     else if (t == state->mod->IPv4AddressType) {
         state->types |= MS_TYPE_IPV4ADDRESS;
@@ -13797,6 +13832,26 @@ ms_decode_str_construct_from_view(
     return out;
 }
 
+/* Serialize a path-like object through the `os.PathLike` protocol
+ * (`__fspath__`) rather than `str()`, so a subclass that overrides
+ * `__str__` for display still serializes its true path.  Only `str`
+ * results are accepted; `bytes` is rejected. */
+static PyObject *
+ms_path_to_str(PyObject *obj) {
+    PyObject *out = PyOS_FSPath(obj);
+    if (out == NULL) return NULL;
+    if (!PyUnicode_Check(out)) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "__fspath__ returned %.200s, expected str",
+            Py_TYPE(out)->tp_name
+        );
+        Py_DECREF(out);
+        return NULL;
+    }
+    return out;
+}
+
 
 /*************************************************************************
  * strict=False Utilities                                                *
@@ -14745,6 +14800,16 @@ json_encode_strlike(EncoderState *self, PyObject *obj)
 }
 
 static int
+json_encode_path(EncoderState *self, PyObject *obj)
+{
+    PyObject *temp = ms_path_to_str(obj);
+    if (temp == NULL) return -1;
+    int status = json_encode_str(self, temp);
+    Py_DECREF(temp);
+    return status;
+}
+
+static int
 json_encode_decimal(EncoderState *self, PyObject *obj)
 {
     PyObject *temp = PyObject_Str(obj);
@@ -15004,8 +15069,8 @@ json_encode_dict_key_noinline(EncoderState *self, PyObject *obj) {
     else if (type == &PyBytes_Type) {
         return json_encode_bytes(self, obj);
     }
-    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PathType))) {
-        return json_encode_strlike(self, obj);
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PurePathType))) {
+        return json_encode_path(self, obj);
     }
     else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv4AddressType))) {
         return json_encode_strlike(self, obj);
@@ -15411,8 +15476,8 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     else if (type == &PyMemoryView_Type) {
         return json_encode_memoryview(self, obj);
     }
-    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PathType))) {
-        return json_encode_strlike(self, obj);
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PurePathType))) {
+        return json_encode_path(self, obj);
     }
     else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv4AddressType))) {
         return json_encode_strlike(self, obj);
@@ -16393,7 +16458,7 @@ json_decode_string(JSONDecoderState *self, TypeNode *type, PathNode *path) {
     else if (MS_UNLIKELY(type->types & MS_TYPE_PATH)) {
         StructspecState *mod = structtype_get_global_state();
         return ms_decode_str_construct_from_view(
-            mod->PathType, view, size, is_ascii, "Invalid path%U", path
+            TypeNode_get_path_class(type), view, size, is_ascii, "Invalid path%U", path
         );
     }
     else if (MS_UNLIKELY(type->types & MS_TYPE_IPV4ADDRESS)) {
@@ -16476,7 +16541,7 @@ json_decode_dict_key_fallback(
     else if (type->types & MS_TYPE_PATH) {
         StructspecState *mod = structtype_get_global_state();
         return ms_decode_str_construct_from_view(
-            mod->PathType, view, size, is_ascii, "Invalid path%U", path
+            TypeNode_get_path_class(type), view, size, is_ascii, "Invalid path%U", path
         );
     }
     else if (type->types & MS_TYPE_IPV4ADDRESS) {
@@ -18901,9 +18966,9 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
         PyBuffer_Release(&buffer);
         return out;
     }
-    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PathType))) {
+    else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->PurePathType))) {
         if (self->builtin_types & MS_BUILTIN_PATH) goto builtin;
-        return PyObject_Str(obj);
+        return ms_path_to_str(obj);
     }
     else if (PyType_IsSubtype(type, (PyTypeObject *)(self->mod->IPv4AddressType))) {
         if (self->builtin_types & MS_BUILTIN_IPV4ADDRESS) goto builtin;
@@ -19033,7 +19098,12 @@ ms_process_builtin_types(
         else if (type == mod->DecimalType) {
             *mask |= MS_BUILTIN_DECIMAL;
         }
-        else if (type == mod->PathType) {
+        else if (
+            PyType_Check(type)
+            && PyType_IsSubtype(
+                (PyTypeObject *)type, (PyTypeObject *)(mod->PurePathType)
+            )
+        ) {
             *mask |= MS_BUILTIN_PATH;
         }
         else if (type == mod->IPv4AddressType) {
@@ -19418,7 +19488,7 @@ validate_str_uncommon(
         && !(self->builtin_types & MS_BUILTIN_PATH)
     ) {
         return ms_decode_str_construct(
-            self->mod->PathType, obj, "Invalid path%U", path
+            TypeNode_get_path_class(type), obj, "Invalid path%U", path
         );
     }
     else if (
@@ -19646,6 +19716,21 @@ validate_immutable(
         return obj;
     }
     return ms_validation_error(expected, type, path);
+}
+
+/* Path types are anchored on `PurePath` for runtime dispatch, but each
+ * annotated field only accepts values that are instances of its declared
+ * class (e.g. a `Path` field rejects a `PurePosixPath`). */
+static PyObject *
+validate_path(
+    ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
+) {
+    PyObject *path_cls = TypeNode_get_path_class(type);
+    if (PyType_IsSubtype(Py_TYPE(obj), (PyTypeObject *)path_cls)) {
+        Py_INCREF(obj);
+        return obj;
+    }
+    return ms_validation_error(Py_TYPE(obj)->tp_name, type, path);
 }
 
 
@@ -20662,7 +20747,7 @@ ms_typenode_accepts_instance(TypeNode *type, PyObject *obj, StructspecState *mod
         return true;
     else if (
         (bits & MS_TYPE_PATH) &&
-        PyType_IsSubtype(pytype, (PyTypeObject *)(mod->PathType))
+        PyType_IsSubtype(pytype, (PyTypeObject *)TypeNode_get_path_class(type))
     )
         return true;
     else if (
@@ -20860,8 +20945,8 @@ validate_obj_dispatch(
     else if (PyAnySet_Check(obj)) {
         return validate_any_set(self, obj, type, path);
     }
-    else if (PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->PathType))) {
-        return validate_immutable(self, MS_TYPE_PATH, "path", obj, type, path);
+    else if (PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->PurePathType))) {
+        return validate_path(self, obj, type, path);
     }
     else if (PyType_IsSubtype(pytype, (PyTypeObject *)(self->mod->IPv4AddressType))) {
         return validate_immutable(self, MS_TYPE_IPV4ADDRESS, "ipv4", obj, type, path);
@@ -21659,7 +21744,7 @@ structtype_clear(PyObject *m)
     Py_CLEAR(st->UUIDType);
     Py_CLEAR(st->uuid_safeuuid_unknown);
     Py_CLEAR(st->DecimalType);
-    Py_CLEAR(st->PathType);
+    Py_CLEAR(st->PurePathType);
     Py_CLEAR(st->IPv4AddressType);
     Py_CLEAR(st->IPv6AddressType);
     Py_CLEAR(st->EnumType);
@@ -21734,7 +21819,7 @@ structtype_traverse(PyObject *m, visitproc visit, void *arg)
     Py_VISIT(st->UUIDType);
     Py_VISIT(st->uuid_safeuuid_unknown);
     Py_VISIT(st->DecimalType);
-    Py_VISIT(st->PathType);
+    Py_VISIT(st->PurePathType);
     Py_VISIT(st->IPv4AddressType);
     Py_VISIT(st->IPv6AddressType);
     Py_VISIT(st->EnumType);
@@ -22010,9 +22095,9 @@ PyInit__core(void)
     /* pathlib module imports */
     temp_module = PyImport_ImportModule("pathlib");
     if (temp_module == NULL) return NULL;
-    st->PathType = PyObject_GetAttrString(temp_module, "Path");
+    st->PurePathType = PyObject_GetAttrString(temp_module, "PurePath");
     Py_DECREF(temp_module);
-    if (st->PathType == NULL) return NULL;
+    if (st->PurePathType == NULL) return NULL;
 
     /* ipaddress module imports */
     temp_module = PyImport_ImportModule("ipaddress");
@@ -22053,8 +22138,8 @@ PyInit__core(void)
         PyTuple_SET_ITEM(all_types, idx++, st->UUIDType);
         Py_INCREF(st->DecimalType);
         PyTuple_SET_ITEM(all_types, idx++, st->DecimalType);
-        Py_INCREF(st->PathType);
-        PyTuple_SET_ITEM(all_types, idx++, st->PathType);
+        Py_INCREF(st->PurePathType);
+        PyTuple_SET_ITEM(all_types, idx++, st->PurePathType);
         Py_INCREF(st->IPv4AddressType);
         PyTuple_SET_ITEM(all_types, idx++, st->IPv4AddressType);
         Py_INCREF(st->IPv6AddressType);
