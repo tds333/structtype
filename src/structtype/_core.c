@@ -16575,7 +16575,6 @@ json_decode_string(JSONDecoderState *self, TypeNode *type, PathNode *path) {
         return ms_decode_decimal(view, size, is_ascii, path, NULL);
     }
     else if (MS_UNLIKELY(type->types & MS_TYPE_PATH)) {
-        StructspecState *mod = structtype_get_global_state();
         return ms_decode_str_construct_from_view(
             TypeNode_get_path_class(type), view, size, is_ascii, "Invalid path%U", path
         );
@@ -16650,7 +16649,6 @@ json_decode_dict_key_fallback(
         return ms_decode_uuid_from_str(view, size, path);
     }
     else if (type->types & MS_TYPE_PATH) {
-        StructspecState *mod = structtype_get_global_state();
         return ms_decode_str_construct_from_view(
             TypeNode_get_path_class(type), view, size, is_ascii, "Invalid path%U", path
         );
