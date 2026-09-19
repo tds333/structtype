@@ -1408,6 +1408,14 @@ def test_json_schema_extra_merges_with_ref():
     assert components["Ex"]["type"] == "object"
 
 
+def test_json_schema_extra_merges_nested_dicts():
+    typ = Annotated[list[str], Field(json_schema_extra={"items": {"minLength": 3}})]
+    assert make_schema(typ) == {
+        "type": "array",
+        "items": {"type": "string", "minLength": 3},
+    }
+
+
 def test_deprecated_metadata():
     typ = Annotated[str, Field(deprecated=True)]
     assert make_schema(typ) == {"type": "string", "deprecated": True}
