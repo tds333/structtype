@@ -1159,7 +1159,10 @@ input type that gets automatically converted.
 
 **Types with no lax mode:** ``str``, ``bytes``, ``bytearray``, ``memoryview``,
 ``datetime.time``, ``datetime.date``, ``uuid.UUID``, ``decimal.Decimal``,
-``pathlib.Path``, ``ipaddress.IPv4Address``, ``ipaddress.IPv6Address``,
+``pathlib.PurePath`` / ``pathlib.Path``, ``ipaddress.IPv4Address``,
+``ipaddress.IPv6Address``, ``ipaddress.IPv4Network``,
+``ipaddress.IPv6Network``, ``ipaddress.IPv4Interface``,
+``ipaddress.IPv6Interface``,
 ``enum.Enum``, ``set``, ``frozenset``, ``list``, ``tuple``, ``dict``,
 ``Struct``, ``dataclass``, ``NamedTuple``.  These types never perform implicit
 string-to-type conversion regardless of the ``strict`` setting.
@@ -1241,7 +1244,7 @@ Only **flat scalar** fields are supported. Nested ``Struct`` values and
 becomes an empty cell, ``True`` / ``False`` become ``true`` / ``false``,
 ``bytes`` become base64 strings, ``Enum`` members use their value, and the
 ``datetime`` family, ``uuid.UUID``, ``decimal.Decimal``, ``pathlib.Path``, and
-the ``ipaddress`` address types use their standard string forms.
+the ``ipaddress`` family use their standard string forms.
 
 ``struct_dump_csv()`` always returns every field, in declaration order, as one
 positional column, so ``omit_defaults`` does not apply to CSV. For
@@ -1295,7 +1298,7 @@ representation.
     types: `bytes` / `bytearray` / `memoryview` to base64 string,
     `datetime.datetime` / `datetime.date` / `datetime.time` /
     `datetime.timedelta` to ISO 8601 string, `uuid.UUID`,
-    `decimal.Decimal`, `pathlib.Path`, and the `ipaddress` address types to
+    `decimal.Decimal`, `pathlib.Path`, and the `ipaddress` family to
     string, `set` / `frozenset` to `list`, ``frozendict`` to `dict`,
     `enum.Enum` to its member value.
 

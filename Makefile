@@ -147,6 +147,10 @@ bench-codecs: ## run Constraint + Serializer heavy benchmarks
 bench-csv-1m: ## run 1M-row on-disk CSV benchmark
 	uv run -p 3.15 benchmarks/bench_csv_1m.py
 
+.PHONY: bench-strings
+bench-strings: ## run long-string JSON codec benchmark
+	uv run -p 3.15 benchmarks/bench_strings.py
+
 ##@ Utility
 .PHONY: clean
 clean: ## Delete all temporary files

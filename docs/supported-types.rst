@@ -37,9 +37,13 @@ For a summary of which types support lax-mode string-to-type conversion, see
 - `datetime.timedelta`
 - `uuid.UUID`
 - `decimal.Decimal`
-- `pathlib.Path`
+- `pathlib.PurePath` / `pathlib.Path` and their subclasses
 - `ipaddress.IPv4Address`
 - `ipaddress.IPv6Address`
+- `ipaddress.IPv4Network`
+- `ipaddress.IPv6Network`
+- `ipaddress.IPv4Interface`
+- `ipaddress.IPv6Interface`
 - `enum.Enum` types
 - `enum.IntEnum` types
 - `enum.StrEnum` types

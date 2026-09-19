@@ -79,48 +79,51 @@ The full benchmark source can be found
 `here <https://github.com/tds333/structtype/blob/main/benchmarks/bench_libs.py>`__.
 
 .. code-block:: text
-    :caption: Historical snapshot: Python 3.15t (free-threaded), structtype 0.10.1.dev, msgspec 0.21.1, pydantic 2.13.5
+    :caption: Historical snapshot: Python 3.15.0rc2 (free-threaded), structtype 0.13.1.dev9, msgspec 0.21.1, pydantic 2.13.5
 
     Dump (struct → dict)
     -------------------------------------------------------
-      structtype           1302.1 μs   (1.00x)
-      msgspec              1337.5 μs   (1.03x)
-      pydantic             6021.8 μs   (4.62x)
+      structtype           1299.2 μs   (1.00x)
+      msgspec              1335.2 μs   (1.03x)
+      pydantic             5811.3 μs   (4.47x)
 
     Load (dict → struct)
     -------------------------------------------------------
-      structtype           1329.3 μs   (1.00x)
-      msgspec              1401.8 μs   (1.05x)
-      pydantic             7581.7 μs   (5.70x)
+      structtype           1445.8 μs   (1.01x)
+      msgspec              1424.8 μs   (1.00x)
+      pydantic             6823.5 μs   (4.79x)
 
     Dump JSON (struct → bytes)
     -------------------------------------------------------
-      structtype            948.5 μs   (1.00x)
-      msgspec              1098.1 μs   (1.16x)
-      pydantic             5133.1 μs   (5.41x)
+      structtype            927.8 μs   (1.00x)
+      msgspec              1067.0 μs   (1.15x)
+      pydantic             4682.7 μs   (5.05x)
 
     Load JSON (bytes → struct)
     -------------------------------------------------------
-      structtype           2245.6 μs   (1.00x)
-      msgspec              2466.1 μs   (1.10x)
-      pydantic             9552.4 μs   (4.25x)
+      structtype           2184.4 μs   (1.02x)
+      msgspec              2148.9 μs   (1.00x)
+      pydantic             8849.7 μs   (4.12x)
 
     Dump JSON (tagged union)
     -------------------------------------------------------
-      structtype              1.8 μs   (1.00x)
-      msgspec                 1.9 μs   (1.07x)
-      pydantic               28.8 μs   (16.26x)
+      structtype              1.5 μs   (1.00x)
+      msgspec                 1.8 μs   (1.20x)
+      pydantic               27.5 μs   (18.33x)
 
     Load JSON (tagged union)
     -------------------------------------------------------
-      structtype              4.4 μs   (1.00x)
-      msgspec                 4.6 μs   (1.04x)
-      pydantic               28.4 μs   (6.46x)
+      structtype              4.4 μs   (1.02x)
+      msgspec                 4.3 μs   (1.00x)
+      pydantic               26.3 μs   (6.12x)
 
-For flat data, ``structtype`` is consistently the fastest: ``msgspec`` runs
-3–16% behind across all operations, while ``pydantic`` is 4.5–5.7x slower. The
-tagged union benchmark tells the same story: ``msgspec`` runs 4–7% behind,
-with ``pydantic`` 6–16x behind across all measurement types.
+For flat data the two libraries trade places: ``structtype`` is fastest at
+encoding — 3% ahead of ``msgspec`` for ``struct → dict`` and 15% for ``struct →
+JSON`` — while ``msgspec`` edges ahead on decoding (under 1% for ``dict →
+struct`` and ~2% for ``JSON → struct``). ``pydantic`` is 4.1–5.1x slower
+throughout. The tagged union benchmark shows the same split: ``structtype`` is
+20% faster to encode and ``msgspec`` 2% faster to decode, with ``pydantic``
+6.1–18.3x behind.
 
 Why is it faster than pydantic? 
 
@@ -161,42 +164,42 @@ The full benchmark source can be found `here
 Run it with ``make bench-validators``.
 
 .. code-block:: text
-    :caption: Historical snapshot: Python 3.15t (free-threaded), structtype 0.10.1.dev, pydantic 2.13.5
+    :caption: Historical snapshot: Python 3.15.0rc2 (free-threaded), structtype 0.13.1.dev9, pydantic 2.13.5
 
     Load (dict -> object)
     -------------------------------------------------------
-      structtype            384.5 μs   (1.00x)
-      pydantic             1109.5 μs   (2.89x)
+      structtype            371.2 μs   (1.00x)
+      pydantic             1002.9 μs   (2.70x)
 
     Dump (object -> dict)
     -------------------------------------------------------
-      structtype            192.7 μs   (1.00x)
-      pydantic              937.8 μs   (4.87x)
+      structtype            166.6 μs   (1.00x)
+      pydantic              858.8 μs   (5.15x)
 
     Load JSON (bytes -> object)
     -------------------------------------------------------
-      structtype            528.8 μs   (1.00x)
-      pydantic             1299.5 μs   (2.46x)
+      structtype            506.5 μs   (1.00x)
+      pydantic             1152.2 μs   (2.27x)
 
     Dump JSON (object -> bytes)
     -------------------------------------------------------
-      structtype            162.3 μs   (1.00x)
-      pydantic              941.6 μs   (5.80x)
+      structtype            143.2 μs   (1.00x)
+      pydantic              856.2 μs   (5.98x)
 
     Init (no validation)
     -------------------------------------------------------
-      structtype            102.2 μs   (1.00x)
-      pydantic             1085.2 μs   (10.62x)
+      structtype             92.4 μs   (1.00x)
+      pydantic              991.7 μs   (10.73x)
 
     Init (with validation)
     -------------------------------------------------------
-      structtype            352.7 μs   (1.00x)
-      pydantic             1086.5 μs   (3.08x)
+      structtype            334.6 μs   (1.00x)
+      pydantic              991.2 μs   (2.96x)
 
 With every field doing validation or Serializer conversion work, structtype is
-~2.5–5.8x faster than pydantic on load/dump operations. The largest gap is
-construction: structtype's default (no init validation) is ~10.6x faster, and
-even with ``check_types_on_init=True`` it is still ~3.1x faster than pydantic's
+~2.3–6.0x faster than pydantic on load/dump operations. The largest gap is
+construction: structtype's default (no init validation) is ~10.7x faster, and
+even with ``check_types_on_init=True`` it is still ~3.0x faster than pydantic's
 always-on construction-time validation.
 
 
@@ -210,7 +213,8 @@ performance against other similar libraries. The cases compared are:
 
 - Standard Python classes
 - dataclasses_
-- structtype_ (0.10.1.dev)
+- structtype_ (0.13.1.dev9)
+- msgspec_ (0.21.1)
 - attrs_ (26.1.0)
 - pydantic_ (2.13.5)
 
@@ -231,29 +235,29 @@ The full benchmark source can be found `here
   compared to other options.
 - Structs are optimized to be cheap to create, and that shows for the creation
   benchmark. They're roughly 4x faster than standard
-  classes/``attrs``/``dataclasses``, and 15x faster than ``pydantic``.
-- For equality comparison, structtype Structs are roughly 2.5x to 48x faster than
+  classes/``attrs``/``dataclasses``, and 17x faster than ``pydantic``.
+- For equality comparison, structtype Structs are roughly 4x to 93x faster than
   the alternatives.
-- For order comparison, structtype Structs are roughly 4x to 60x faster than the
+- For order comparison, structtype Structs are roughly 4x to 59x faster than the
   alternatives.
 
 .. code-block:: text
-    :caption: Historical snapshot: Python 3.15t (free-threaded), structtype 0.10.1.dev, attrs 26.1.0, msgspec 0.21.1, pydantic 2.13.5
+    :caption: Historical snapshot: Python 3.15.0rc2 (free-threaded), structtype 0.13.1.dev9, attrs 26.1.0, msgspec 0.21.1, pydantic 2.13.5
 
     +----------------------+-------------+-------------+---------------+------------+
     |                      | import (μs) | create (μs) | equality (μs) | order (μs) |
     +======================+=============+=============+===============+============+
-    | **structtype**       | 21.50       | 0.08        | 0.02          | 0.03       |
+    | **structtype**       | 19.17       | 0.07        | 0.01          | 0.03       |
     +----------------------+-------------+-------------+---------------+------------+
-    | **msgspec**          | 16.96       | 0.08        | 0.02          | 0.03       |
+    | **msgspec**          | 15.04       | 0.07        | 0.01          | 0.03       |
     +----------------------+-------------+-------------+---------------+------------+
-    | **standard classes** | 15.48       | 0.32        | 0.06          | 0.15       |
+    | **standard classes** | 13.65       | 0.30        | 0.05          | 0.13       |
     +----------------------+-------------+-------------+---------------+------------+
-    | **attrs**            | 448.59      | 0.30        | 0.05          | 1.86       |
+    | **attrs**            | 395.30      | 0.27        | 0.04          | 1.78       |
     +----------------------+-------------+-------------+---------------+------------+
-    | **dataclasses**      | 386.61      | 0.29        | 0.05          | 0.12       |
+    | **dataclasses**      | 379.02      | 0.29        | 0.05          | 0.13       |
     +----------------------+-------------+-------------+---------------+------------+
-    | **pydantic**         | 301.63      | 1.19        | 0.96          | N/A        |
+    | **pydantic**         | 294.69      | 1.16        | 0.93          | N/A        |
     +----------------------+-------------+-------------+---------------+------------+
 
 .. _struct-gc-benchmark:
@@ -288,17 +292,47 @@ The full benchmark source can be found `here
   tracking a full GC pass completes in a fraction of the time.
 
 .. code-block:: text
-    :caption: Historical snapshot: Python 3.15t (free-threaded), structtype 0.10.1.dev
+    :caption: Historical snapshot: Python 3.15.0rc2 (free-threaded), structtype 0.13.1.dev9
 
     +-----------------------------------+--------------+-------------------+
     |                                   | GC time (ms) | Memory Used (MiB) |
     +===================================+==============+===================+
-    | **standard class**                | 52.26        | 219.29            |
+    | **standard class**                | 48.97        | 219.29            |
     +-----------------------------------+--------------+-------------------+
-    | **standard class with __slots__** | 42.77        | 135.37            |
+    | **standard class with __slots__** | 41.78        | 135.37            |
     +-----------------------------------+--------------+-------------------+
-    | **structtype struct**             | 26.80        | 135.37            |
+    | **structtype struct**             | 22.84        | 135.37            |
     +-----------------------------------+--------------+-------------------+
+
+.. _string-benchmark:
+
+String-heavy workloads
+----------------------
+
+The JSON codec scans strings a machine word at a time to locate characters that
+need escaping (SIMD where available, a portable SWAR fallback otherwise). This
+benchmark round-trips a struct with a single 100,000 character ``str`` field in
+three flavours — pure ASCII, non-ASCII, and escape-heavy (embedded newlines and
+quotes) — and reports nanoseconds per UTF-8 byte, compared against msgspec and
+pydantic.
+
+The full benchmark source can be found `here
+<https://github.com/tds333/structtype/blob/main/benchmarks/bench_strings.py>`__.
+
+.. code-block:: text
+    :caption: Historical snapshot: Python 3.15.0rc2 (free-threaded), structtype 0.13.1.dev9, msgspec 0.21.1, pydantic 2.13.5
+
+    long str struct dump_json (100000 chars, ns/byte)
+      case       structtype      msgspec     pydantic  vs pydantic
+      ascii           0.067        0.283        0.492        7.34x
+      nonascii        0.068        0.259        1.302       19.15x
+      escape          0.126        0.277        0.577        4.58x
+
+    long str struct validate_json (100000 chars, ns/byte)
+      case       structtype      msgspec     pydantic  vs pydantic
+      ascii           0.080        0.278        0.446        5.58x
+      nonascii        0.655        0.882        1.630        2.49x
+      escape          0.272        0.395        0.679        2.50x
 
 .. _structtype: https://structtype.dev
 .. _msgspec: https://jcristharif.com/msgspec/

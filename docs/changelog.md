@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## 0.14.0 (2026-09-19)
 
 - `Field(json_schema_extra=...)` is now applied after the type's generated JSON
   schema, so it can override generated keys such as `type` and `format`
