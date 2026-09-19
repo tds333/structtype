@@ -3,7 +3,7 @@
 ## Project
 
 Fast struct validation + JSON serialization for Python.
-Core is a monolithic C extension (`src/structtype/_core.c`, ~21K lines).
+Core is a monolithic C extension (`src/structtype/_core.c`, ~22K lines).
 No runtime deps.
 
 ## Setup
@@ -25,16 +25,23 @@ Use `make` targets where available. Targeted tests can be run directly with
 | Coverage (Python + C) | `make test-cov-c` |
 | Coverage (Python + C, all Pythons, merged) | `make test-cov-c-all` |
 | Tests in all supported Pythons | `make test-all` |
+| Doctests | `make test-doc` |
+| Build sdist + wheel | `make build` |
 | Build docs | `make docs` |
 | Format | `make format` |
 | Lint | `make ruff-check` |
 | Type check | `make type-check` |
 | Static checks | `make check` |
 
+Benchmark targets: `make bench`, `make bench-validators`, `make bench-codecs`,
+`make bench-csv-1m`, `make bench-strings` (run sequentially; CPU-bound).
+
 ## Conventions
 
 - **88-char lines**, formatted with `ruff format`
-- `ruff check` with rules `E`, `F`, `I`, `W`
+- `ruff check` with Ruff's default rule set (the project config sets only
+  `target-version` and isort `combine-as-imports`; line length is enforced by
+  `ruff format`, not `E501`)
 - Private modules/functions prefixed with `_`
 - C code uses `ms_`/`MS_` prefix
 - Type stubs (`.pyi`) alongside public modules
@@ -59,6 +66,8 @@ Use `make` targets where available. Targeted tests can be run directly with
 - `obj.struct_check_types()` — validate field values against types + constraints (pure type-check, no conversion)
 - `cls.struct_validate_json(buf, *, strict=True)` — deserialize from JSON
 - `cls.struct_validate(obj, *, strict=True, from_attributes=False)` — convert built-in types to struct
+- `obj.struct_dump_csv()` — encode one row as `list[str]` for `csv.writer.writerow()`; flat scalar fields only, positional
+- `cls.struct_validate_csv(row, *, null_values=("",))` — decode one CSV row (sequence of cell strings); always lax
 
 ### Dict & Iteration Protocol
 
