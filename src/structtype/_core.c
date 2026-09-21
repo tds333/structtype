@@ -9059,6 +9059,84 @@ structmeta_apply_spec(StructMetaInfo *info, PyObject *spec) {
 }
 
 
+/* Known struct_* member names are reserved: a *new* field whose name both
+ * starts with "struct_" and matches a member defined by structtype itself
+ * (the struct_* methods on _StructMixin, or struct_config on the base
+ * Struct class) warns at class creation. Shadowing remains allowed — a
+ * warnings filter set to "error" is the escalation path. Other inherited
+ * attributes (parent methods, dunders) shadow silently, as in plain
+ * Python. `field_names` holds only *new* field names (`info.slots` right
+ * after structmeta_collect_fields): re-declared struct fields stay in
+ * defaults_lk and never reach slots, so normal field overriding is silent. */
+static int
+structmeta_check_shadowing(StructspecState *mod, PyObject *field_names)
+{
+    static const Py_UCS4 prefix[7] = {'s', 't', 'r', 'u', 'c', 't', '_'};
+    Py_ssize_t nfields = PyList_GET_SIZE(field_names);
+    if (nfields == 0) return 0;
+
+    PyObject *mixin_dict = MS_GET_TYPE_DICT(&StructMixinType);
+    PyObject *struct_dict = NULL;
+    if (mod != NULL && mod->StructType != NULL) {
+        struct_dict = MS_GET_TYPE_DICT((PyTypeObject *)mod->StructType);
+    }
+
+    for (Py_ssize_t f = 0; f < nfields; f++) {
+        PyObject *field_name = PyList_GET_ITEM(field_names, f);
+
+        /* Fast path: only struct_ prefixed names can be known members. */
+        if (!PyUnicode_CheckExact(field_name)) continue;
+        if (PyUnicode_GetLength(field_name) < 7) continue;
+        int prefixed = 1;
+        for (Py_ssize_t i = 0; i < 7; i++) {
+            Py_UCS4 c = PyUnicode_ReadChar(field_name, i);
+            if (c == (Py_UCS4)-1 && PyErr_Occurred()) {
+                PyErr_Clear();
+                prefixed = 0;
+                break;
+            }
+            if (c != prefix[i]) {
+                prefixed = 0;
+                break;
+            }
+        }
+        if (!prefixed) continue;
+
+        /* Known member? Check the dictionaries structtype itself defines
+         * them on: _StructMixin (the methods) and Struct (struct_config). */
+        PyObject *value = NULL;
+        if (mixin_dict != NULL) {
+            value = PyDict_GetItemWithError(mixin_dict, field_name);
+            if (value == NULL && PyErr_Occurred()) return -1;
+        }
+        if (value == NULL && struct_dict != NULL) {
+            value = PyDict_GetItemWithError(struct_dict, field_name);
+            if (value == NULL && PyErr_Occurred()) return -1;
+        }
+        if (value == NULL) continue;
+
+        int status;
+        if (PyCallable_Check(value)) {
+            status = PyErr_WarnFormat(
+                PyExc_UserWarning, 1,
+                "Field name '%U' shadows struct method '%U'; "
+                "instances will not be able to call it",
+                field_name, field_name
+            );
+        }
+        else {
+            status = PyErr_WarnFormat(
+                PyExc_UserWarning, 1,
+                "Field name '%U' shadows struct attribute '%U'",
+                field_name, field_name
+            );
+        }
+        if (status < 0) return -1;
+    }
+    return 0;
+}
+
+
 static PyObject *
 StructMeta_new_inner(
      PyTypeObject *type, PyObject *name, PyObject *bases, PyObject *namespace,
@@ -9149,6 +9227,11 @@ StructMeta_new_inner(
 
     /* Collect new fields and defaults */
     if (structmeta_collect_fields(&info, mod, info.kw_only == OPT_TRUE) < 0) goto cleanup;
+
+    /* Warn when a new field uses a known struct_* member name. Shadowing
+     * stays allowed; a warnings filter set to "error" escalates this to a
+     * hard class-creation failure. */
+    if (structmeta_check_shadowing(mod, info.slots) < 0) goto cleanup;
 
     /* Construct fields and defaults */
     if (structmeta_construct_fields(&info, mod) < 0) goto cleanup;

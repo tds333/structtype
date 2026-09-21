@@ -3,20 +3,21 @@
 import gc
 import re
 import secrets
+import warnings
 from abc import ABCMeta, _abc_init, abstractmethod
 
 import pytest
-
-import structtype
-from structtype import Struct, StructMeta
 from structtype._core import _json_decode, _json_encode
 
+import structtype
+from structtype import Struct, StructConfig, StructMeta
+
 from .utils import temp_module
-from structtype import StructConfig
 
 
 def test_class_body_struct_config():
     """Test that struct_config in class body is applied."""
+
     class S(Struct):
         struct_config = StructConfig(frozen=True)
         x: int
@@ -29,6 +30,7 @@ def test_class_body_struct_config():
 
 def test_struct_config_present_on_class_without_declaration():
     """struct_config is always present; defaults to {} when never declared."""
+
     class Plain(Struct):
         x: int
 
@@ -52,6 +54,7 @@ def test_struct_config_present_on_instance_without_declaration():
 
 def test_struct_config_undeclared_subclass_inherits_parent_view():
     """An undeclared subclass still sees the nearest declared parent dict."""
+
     class Base(Struct):
         struct_config = StructConfig(frozen=True, tag="base")
         x: int
@@ -65,6 +68,7 @@ def test_struct_config_undeclared_subclass_inherits_parent_view():
 
 def test_struct_config_merge_inheritance():
     """Test that child inherits parent config and can override specific options."""
+
     class Base(Struct):
         struct_config = StructConfig(frozen=True, tag="base")
         x: int
@@ -82,6 +86,7 @@ def test_struct_config_merge_inheritance():
 
 def test_kw_only_inherits_to_new_fields():
     """Test that kw_only from parent applies to child's new fields."""
+
     class Base(Struct):
         struct_config = StructConfig(kw_only=True)
         x: int
@@ -98,6 +103,7 @@ def test_kw_only_inherits_to_new_fields():
 
 def test_empty_struct_config_is_noop():
     """Test that child with StructConfig() inherits all from parent."""
+
     class Base(Struct):
         struct_config = StructConfig(frozen=True)
         x: int
@@ -135,6 +141,7 @@ def test_class_kwargs_pass_to_init_subclass():
 def test_plain_struct_rejects_class_kwargs():
     """A plain Struct subclass rejects class-statement kwargs (like pydantic)."""
     with pytest.raises(TypeError, match="__init_subclass__"):
+
         class Bad(Struct, frozen=True):
             x: int = 1
 
@@ -160,12 +167,14 @@ def test_custom_metaclass_can_intercept_kwargs():
 def test_struct_config_must_be_dict():
     """Test that passing a non-dict as struct_config raises TypeError."""
     with pytest.raises(TypeError, match="struct_config must be a dict"):
+
         class Bad(Struct):
             struct_config = "not a dict"
 
 
 def test_custom_meta_injects_struct_config():
     """Test that a custom metaclass can use dict merge to modify struct_config."""
+
     class KwOnlyMeta(StructMeta):
         def __new__(mcls, name, bases, namespace, **kwargs):
             cfg = namespace.get("struct_config", StructConfig())
@@ -375,6 +384,7 @@ def test_struct_meta_inheritance():
     # Test that kw_only_default values are correctly passed
     assert "KwOnlyBase" in CustomMeta._kw_only_default_settings
     assert CustomMeta._kw_only_default_settings["KwOnlyBase"] is True
+
 
 def test_struct_meta_subclass_functions():
     """Test if structs created by StructMeta subclasses support various function operations."""
@@ -801,13 +811,10 @@ def test_struct_config_view_exposes_rename():
     assert cfg["rename"] == "camel"
 
 
-
-
 def test_many_literal_types_collect_cleanly():
     """Hammering distinct Literal[...] annotations forces type-node cache
     churn; creation and collection must not leak or crash the GC."""
     import gc
-
     from typing import Literal as Lit  # noqa: F401  (used via generated source)
 
     for i in range(300):
@@ -842,6 +849,126 @@ def test_float_valued_enum_rejected_at_decode():
     class FloatEnum(_enum.Enum):
         X = 1.5
 
-    cls = type("UsesFloatEnum", (structtype.Struct,), {"__annotations__": {"v": FloatEnum}})
+    cls = type(
+        "UsesFloatEnum", (structtype.Struct,), {"__annotations__": {"v": FloatEnum}}
+    )
     with pytest.raises(TypeError, match="all str or all int values"):
         cls.struct_validate_json(b'{"v": 1.5}')
+
+
+# --- Field shadowing warnings -----------------------------------------------
+# A field may shadow an inherited attribute (struct_* methods, mixin dunders,
+# parent methods); it warns at class creation but remains fully allowed.
+
+
+@pytest.mark.parametrize(
+    "field_name", ["struct_dump", "struct_validate", "struct_config"]
+)
+def test_shadow_known_struct_member_warns(field_name):
+    """Shadowing a known struct member warns but still creates the class."""
+    # Bare annotations: a class-body *value* named `struct_config` would be
+    # consumed as the config spec by the metaclass instead of as a default.
+    with pytest.warns(UserWarning, match="shadows"):
+        cls = type("Shadowed", (Struct,), {"__annotations__": {field_name: int}})
+    # The class exists and the shadowing field was registered.
+    assert field_name in cls.__struct_fields__
+
+
+def test_shadow_struct_method_still_allows_overwrite():
+    """Warning only: the field wins over the method, so calls raise TypeError."""
+    with pytest.warns(UserWarning, match="struct_dump"):
+
+        class S(Struct):
+            struct_dump: int = 0
+
+    s = S()
+    assert s.struct_dump == 0
+    with pytest.raises(TypeError, match="not callable"):
+        s.struct_dump()
+
+
+def test_no_shadow_warning_struct_prefix_field():
+    """A struct_ prefix without a known member behind it is silent."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        class S(Struct):
+            struct_custom: int = 0
+            struct_type: int = 1
+
+    assert S(struct_custom=1, struct_type=2).struct_custom == 1
+
+
+def test_no_shadow_warning_parent_method():
+    """Overwriting a parent method with a field is normal Python: silent."""
+
+    class Parent(Struct):
+        def helper(self):
+            return "method"
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        class Child(Parent):
+            helper: int = 5
+
+    assert Child().helper == 5
+
+
+def test_no_shadow_warning_replace_dunder():
+    """Only known struct_* member names warn; mixin dunders stay silent."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        class S(Struct):
+            __replace__: int = 0
+
+    assert S().__replace__ == 0
+
+
+def test_no_shadow_warning_object_dunder():
+    """object-level dunders like __str__ are ordinary Python attributes."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        class S(Struct):
+            __str__: int = 0
+
+    assert S().__str__ == 0
+
+
+def test_no_shadow_warning_child_redeclares_parent_field():
+    """Re-declaring an inherited struct field is normal overriding, not shadowing."""
+
+    class Parent(Struct):
+        x: int = 1
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        class Child(Parent):
+            x: int = 2
+
+    assert Child().x == 2
+
+
+def test_no_shadow_warning_clean_struct():
+    """A struct with no shadowing fields creates without any warnings."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        class S(Struct):
+            x: int = 0
+            name: str = "a"
+
+    assert S(name="b").name == "b"
+
+
+def test_shadow_warning_escalates_via_filter():
+    """A warnings filter set to 'error' turns the warning into a hard failure."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        with pytest.raises(UserWarning, match="shadows"):
+
+            class S(Struct):
+                struct_dump: int = 0

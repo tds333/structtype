@@ -8,6 +8,15 @@
   declaring it). Matches pydantic's `model_config` behavior.
 - Fix the type stub: remove the phantom `StructMeta.struct_config` property
   that never existed at runtime.
+- Struct creation now emits a `UserWarning` when a new field's name
+  starts with `struct_` and matches a known struct member — one of the
+  `struct_*` methods or `struct_config`. Shadowing remains allowed (the
+  field still wins); the warning reports it at class creation instead of
+  a later `TypeError: 'int' object is not callable`. Shadowing anything
+  else (parent methods, dunders), `struct_`-prefixed names that match no
+  known member, and re-declaring an inherited field stay silent, as in
+  plain Python. Use `warnings.filterwarnings("error", ...)` to escalate
+  the warning to a hard error.
 
 ## 0.14.0 (2026-09-19)
 

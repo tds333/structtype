@@ -95,6 +95,21 @@ Structs
         Return a list of ``(name, value)`` pairs used by IPython and Jupyter
         for a structured display of the struct.
 
+    .. note::
+
+        A field name may shadow any of these methods or attributes (for
+        example a field called ``struct_dump``). Shadowing is allowed, but
+        the field's slot then takes precedence, so the member is no longer
+        reachable on instances. Struct creation emits a ``UserWarning``
+        when a new field's name starts with ``struct_`` and matches a
+        known struct member (the ``struct_*`` methods above or
+        ``struct_config``). A ``struct_``-prefixed name that matches no
+        known member, and shadowing of anything else (parent methods,
+        dunders), is silent — as in plain Python. Re-declaring a parent's
+        *field* is normal overriding and stays silent too. Use
+        ``warnings.filterwarnings("error", ...)`` to turn the warning into
+        a hard error.
+
 .. autoclass:: StructMeta(name, bases, namespace, /)
 
 .. autofunction:: structtype.fields
