@@ -40,6 +40,16 @@ Structs
         The :class:`StructConfig` for this struct type. Available on both the
         struct type and on instances.
 
+    .. attribute:: struct_config
+
+        :type: StructConfig
+
+        The ``StructConfig`` dict as declared in the class body (sparse —
+        only the keys the user explicitly set). Always present: defaults to
+        ``{}`` when no class in the hierarchy declares one. Available on both
+        the struct type and on instances. Use ``__struct_config__`` for the
+        fully-resolved configuration.
+
     .. attribute:: __match_args__
 
         :type: tuple[str, ...]

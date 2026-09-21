@@ -10791,7 +10791,8 @@ PyDoc_STRVAR(Struct__doc__,
 "Additional class options can be set via a ``struct_config`` class attribute\n"
 "using a `StructConfig` dict (see example below). These configuration\n"
 "options may also be inspected at runtime through the ``__struct_config__``\n"
-"attribute.\n"
+"attribute. The sparse ``struct_config`` attribute itself is always present\n"
+"and defaults to ``{}`` when never declared.\n"
 "\n"
 "Configuration\n"
 "-------------\n"
@@ -22396,10 +22397,19 @@ PyInit__core(void)
 
     /* Initialize the Struct Type */
     PyState_AddModule(m, &structtypemodule);
+    /* Give the base Struct class `struct_config = {}` so the attribute is
+     * always present on every struct type and instance (matching pydantic's
+     * `model_config`); subclasses that declare their own shadow it. The empty
+     * spec is a no-op in StructMeta_new. */
+    PyObject *empty_struct_config = PyDict_New();
+    if (empty_struct_config == NULL) return NULL;
     st->StructType = PyObject_CallFunction(
-        (PyObject *)&StructMetaType, "s(O){ssss}", "Struct", &StructMixinType,
-        "__module__", "structtype", "__doc__", Struct__doc__
+        (PyObject *)&StructMetaType, "s(O){sssssO}", "Struct", &StructMixinType,
+        "__module__", "structtype", "__doc__", Struct__doc__,
+        "struct_config", empty_struct_config
     );
+    Py_DECREF(empty_struct_config);
+    if (st->StructType == NULL) return NULL;
     if (PyModule_AddObjectRef(m, "Struct", st->StructType) < 0) return NULL;
 #ifdef Py_GIL_DISABLED
     PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);

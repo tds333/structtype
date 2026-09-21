@@ -27,6 +27,42 @@ def test_class_body_struct_config():
         s.x = 2
 
 
+def test_struct_config_present_on_class_without_declaration():
+    """struct_config is always present; defaults to {} when never declared."""
+    class Plain(Struct):
+        x: int
+
+    assert hasattr(Plain, "struct_config")
+    assert isinstance(Plain.struct_config, dict)
+    assert Plain.struct_config == {}
+    # Instance access resolves through the type
+    assert Plain(1).struct_config == {}
+    # The base Struct class itself
+    assert Struct.struct_config == {}
+
+
+def test_struct_config_present_on_instance_without_declaration():
+    class Plain(Struct):
+        x: int
+
+    s = Plain(1)
+    assert isinstance(s.struct_config, dict)
+    assert s.struct_config == {}
+
+
+def test_struct_config_undeclared_subclass_inherits_parent_view():
+    """An undeclared subclass still sees the nearest declared parent dict."""
+    class Base(Struct):
+        struct_config = StructConfig(frozen=True, tag="base")
+        x: int
+
+    class Child(Base):
+        y: int = 0
+
+    # No own declaration: the inherited view is Base's declared dict
+    assert Child.struct_config == {"frozen": True, "tag": "base"}
+
+
 def test_struct_config_merge_inheritance():
     """Test that child inherits parent config and can override specific options."""
     class Base(Struct):

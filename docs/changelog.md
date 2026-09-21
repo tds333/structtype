@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `struct_config` is now always present on every struct type and instance,
+  defaulting to `{}` when no class in the hierarchy declares one (it previously
+  raised `AttributeError` on classes that never set it, despite the type stub
+  declaring it). Matches pydantic's `model_config` behavior.
+- Fix the type stub: remove the phantom `StructMeta.struct_config` property
+  that never existed at runtime.
+
 ## 0.14.0 (2026-09-19)
 
 - `Field(json_schema_extra=...)` is now applied after the type's generated JSON

@@ -85,7 +85,8 @@ Every struct type and instance exposes its configuration through two
 attributes:
 
 - ``struct_config``: the original ``StructConfig`` dict as specified in the
-  class body (sparse — only the keys the user explicitly set).
+  class body (sparse — only the keys the user explicitly set). Always
+  present: when no class in the hierarchy declares one, it is ``{}``.
 - ``__struct_config__``: the fully-resolved dict with all 15 keys, including
   inherited values and defaults.
 
@@ -110,6 +111,13 @@ attributes:
     'base'
     >>> Child.__struct_config__['eq']
     False
+
+    >>> class NoConfig(Struct):
+    ...     name: str
+    ...
+
+    >>> NoConfig.struct_config
+    {}
 
 The exposed keys mirror the struct configuration parameters of the same
 name described in the :class:`structtype.Struct` docstring, including ``kw_only``

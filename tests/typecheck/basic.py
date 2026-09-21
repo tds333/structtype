@@ -68,3 +68,7 @@ cfg: StructConfig = Point.__struct_config__
 sc: StructConfig = Point.struct_config
 sc2: StructConfig = Point.__struct_config__
 frozen: bool = cfg["frozen"]
+
+# struct_config is present even on classes that never declare it
+sc_base: StructConfig = Struct.struct_config
+sc_inst: StructConfig = p.struct_config
