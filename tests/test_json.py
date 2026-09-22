@@ -565,6 +565,34 @@ class TestWideStructAliasLookup:
             cls.struct_validate_json(json.dumps(data).encode("utf-8"))
 
 
+def test_non_ascii_tag_validation():
+    tag = "caf" + "\u00e9"
+
+    class Msg(Struct):
+        struct_config = StructConfig(tag=tag)
+        x: int
+
+    assert Msg.struct_validate_json(
+        json.dumps({"type": tag, "x": 5}, ensure_ascii=False).encode("utf-8")
+    ) == Msg(5)
+    with pytest.raises(structtype.ValidationError):
+        Msg.struct_validate_json(json.dumps({"type": "", "x": 5}).encode("utf-8"))
+
+
+def test_non_ascii_tag_validation_array_like():
+    tag = "caf" + "\u00e9"
+
+    class Arr(Struct):
+        struct_config = StructConfig(tag=tag, array_like=True)
+        x: int
+
+    assert Arr.struct_validate_json(
+        json.dumps([tag, 5], ensure_ascii=False).encode("utf-8")
+    ) == Arr(5)
+    with pytest.raises(structtype.ValidationError):
+        Arr.struct_validate_json(json.dumps(["", 5]).encode("utf-8"))
+
+
 class TestBinary:
     @pytest.mark.parametrize(
         "x", [b"", b"a", b"ab", b"abc", b"abcd", b"abcde", b"abcdef", b"\x00\xff"]
@@ -620,6 +648,21 @@ class TestDatetime:
         x = datetime.datetime(1234, 12, 31, 14, 56, 27, 0, UTC)
         s = _json_encode(x)
         assert s == b'"1234-12-31T14:56:27Z"'
+
+    def test_decode_datetime_max_epoch(self):
+        class M(Struct):
+            v: datetime.datetime
+
+        out = M.struct_validate_json(b'{"v":253402300799}', strict=False)
+        assert out.v == datetime.datetime(9999, 12, 31, 23, 59, 59, tzinfo=UTC)
+
+    @pytest.mark.parametrize("value", [253402300800, 253402300800.0])
+    def test_decode_datetime_above_max_epoch(self, value):
+        class M(Struct):
+            v: datetime.datetime
+
+        with pytest.raises(structtype.ValidationError, match="out of range"):
+            M.struct_validate_json(json.dumps({"v": value}).encode(), strict=False)
 
     @pytest.mark.parametrize(
         "dt, sol",
@@ -1504,6 +1547,14 @@ class TestDecimal:
         enc = JSONEncoder(decimal_as_number=True)
         msg = enc.encode(Decimal("1.3000"))
         assert msg == b"1.3000"
+
+    @pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
+    def test_decimal_non_finite_as_number_is_null(self, value):
+        enc = JSONEncoder(decimal_as_number=True)
+        assert enc.encode(Decimal(value)) == b"null"
+
+    def test_decimal_non_finite_as_string_unchanged(self):
+        assert JSONEncoder().encode(Decimal("NaN")) == b'"NaN"'
 
     @pytest.mark.parametrize(
         "msg",
@@ -4083,6 +4134,20 @@ class TestTimedeltaEdgeCases:
             Msg(datetime.timedelta(seconds=-5)).struct_dump_json()
             == b'{"t":"-PT5S"}'
         )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "P110000000000000D",
+            "-P110000000000000D",
+            "P106751991167301D",
+            "P140737488355328D",
+        ],
+    )
+    def test_decode_out_of_range_days(self, text):
+        Msg = self._msg()
+        with pytest.raises(structtype.ValidationError, match="out of range"):
+            Msg.struct_validate_json(json.dumps({"t": text}).encode())
 
     @pytest.mark.parametrize(
         "text,expected",

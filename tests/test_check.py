@@ -51,6 +51,10 @@ class TupleNested(Struct):
     items: tuple[Point, ...]
 
 
+class FixTupleNested(Struct):
+    pair: tuple[int, Point]
+
+
 class SetNested(Struct):
     items: set[Point]
 
@@ -190,6 +194,23 @@ def test_invalid_nested_in_tuple():
     p = TupleNested(items=(Point("bad", 2),))
     with pytest.raises(ValidationError, match=r"\$\.items\[0\]\.x"):
         p.struct_check_types()
+
+
+def test_valid_nested_in_fixtuple():
+    p = FixTupleNested(pair=(1, Point(2, 3)))
+    assert p.struct_check_types() is None
+
+
+def test_invalid_nested_in_fixtuple():
+    p = FixTupleNested(pair=(1, Point("bad", 3)))
+    with pytest.raises(ValidationError, match=r"\$\.pair\[1\]\.x"):
+        p.struct_check_types()
+
+
+def test_unset_field_check_types_no_pending_error():
+    p = Point(1, 2)
+    del p.x
+    assert p.struct_check_types() is None
 
 
 def test_invalid_nested_in_set():

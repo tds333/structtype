@@ -395,6 +395,16 @@ def test_csv_array_like_tag_mismatch():
         _one(Get, "Put,my key\n")
 
 
+def test_csv_array_like_tag_mismatch_non_str_cell():
+    class Get(st.Struct):
+        struct_config = st.StructConfig(tag=True, array_like=True)
+        key: str
+
+    for cell in (b"Put", 1, None, 1.5, (1,)):
+        with pytest.raises(st.ValidationError, match=r"\$\[0\]"):
+            Get.struct_validate_csv([cell, "my key"])
+
+
 def test_csv_array_like_missing_tag():
     class Get(st.Struct):
         struct_config = st.StructConfig(tag=True, array_like=True)

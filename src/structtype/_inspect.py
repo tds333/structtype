@@ -642,6 +642,9 @@ class StructType(Type):
     forbid_unknown_fields: bool = False
 
 
+_FIELD_UNSET = object()
+
+
 class FieldInfo(structtype.Struct):
     """An introspection record for a single struct field.
 
@@ -663,13 +666,13 @@ class FieldInfo(structtype.Struct):
     name: str
     alias: str
     type: Any
-    default: Any = UNSET
-    default_factory: Any = UNSET
+    default: Any = _FIELD_UNSET
+    default_factory: Any = _FIELD_UNSET
 
     def __post_init__(self):
-        if self.default is UNSET:
+        if self.default is _FIELD_UNSET:
             self.default = NODEFAULT
-        if self.default_factory is UNSET:
+        if self.default_factory is _FIELD_UNSET:
             self.default_factory = NODEFAULT
 
     @property

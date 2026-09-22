@@ -2393,6 +2393,25 @@ class TestReplace:
         assert x1 == x2
 
 
+def test_bool_argument_errors_propagate():
+    class A(Struct):
+        x: int
+
+    a = A(1)
+
+    class Boom:
+        def __bool__(self):
+            raise RuntimeError("boom")
+
+    for call in (
+        lambda: A.struct_validate({"x": 1}, strict=Boom()),
+        lambda: A.struct_validate({"x": 1}, from_attributes=Boom()),
+        lambda: a.struct_dump(str_keys=Boom()),
+    ):
+        with pytest.raises(RuntimeError, match="boom"):
+            call()
+
+
 class TestInspectFields:
     def test_fields_bad_arg(self):
         T = TypeVar("T")
@@ -2456,6 +2475,15 @@ class TestInspectFields:
         assert not z_field.required
         assert z_field.default is NODEFAULT
         assert z_field.default_factory is factory
+
+    def test_fields_unset_default_not_required(self):
+        class Example(structtype.Struct):
+            x: int | structtype.UnsetType = UNSET
+
+        field = structtype.fields(Example)[0]
+        assert field.default is UNSET
+        assert not field.required
+        assert not structtype._inspect.type_info(Example).fields[0].required
 
     def test_fields_keyword_only(self):
         class Example(structtype.Struct):

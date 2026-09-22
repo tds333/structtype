@@ -11825,7 +11825,9 @@ encoder_encode_common(
     state.output_buffer_raw = PyBytes_AS_STRING(state.output_buffer);
 
     if (encode(&state, args[0]) < 0) {
-        Py_DECREF(state.output_buffer);
+        /* `_PyBytes_Resize` (via ms_resize_bytes) frees and NULLs the buffer on
+         * failure, so the pointer may already be NULL here. */
+        Py_XDECREF(state.output_buffer);
         return NULL;
     }
     FAST_BYTES_SHRINK(state.output_buffer, state.output_len);
@@ -11885,7 +11887,9 @@ encode_common(
     state.output_buffer_raw = PyBytes_AS_STRING(state.output_buffer);
 
     if (encode(&state, args[0]) < 0) {
-        Py_DECREF(state.output_buffer);
+        /* `_PyBytes_Resize` (via ms_resize_bytes) frees and NULLs the buffer on
+         * failure, so the pointer may already be NULL here. */
+        Py_XDECREF(state.output_buffer);
         return NULL;
     }
     FAST_BYTES_SHRINK(state.output_buffer, state.output_len);
@@ -12895,7 +12899,7 @@ time_round_up_micros(
 
 /* Python datetimes bounded between (inclusive)
  * [0001-01-01T00:00:00.000000, 9999-12-31T23:59:59.999999] UTC */
-#define MS_EPOCH_SECS_MAX 253402300800
+#define MS_EPOCH_SECS_MAX 253402300799
 #define MS_EPOCH_SECS_MIN -62135596800
 #define MS_DAYS_PER_400Y (365*400 + 97)
 #define MS_DAYS_PER_100Y (365*100 + 24)
@@ -12925,6 +12929,10 @@ datetime_from_epoch(
     if (micros == 1000000) {
         micros = 0;
         epoch_secs++;
+        /* Rounding up can push the maximum second out of range. */
+        if (epoch_secs > MS_EPOCH_SECS_MAX) {
+            return ms_error_with_path("Timestamp is out of range %U", path);
+        }
     }
 
     /* Start in Mar not Jan, so leap day is on end */
@@ -13732,7 +13740,10 @@ ms_decode_timedelta(
                 goto invalid;
         }
 
-        /* Apply integral part */
+        /* Apply integral part. Guard the multiply: `scale * x` is computed in
+         * uint64 and would wrap for very large day counts, silently producing a
+         * wrong (even negative) duration. */
+        if (x > (uint64_t)MS_TIMEDELTA_MAX_SECONDS / scale) goto out_of_range;
         seconds += scale * x;
 
         if (has_frac) {
@@ -15021,12 +15032,24 @@ json_encode_path(EncoderState *self, PyObject *obj)
 static int
 json_encode_decimal(EncoderState *self, PyObject *obj)
 {
+    bool decimal_as_string = !self->decimal_as_number;
+
+    /* Non-finite Decimals (NaN/Infinity) have no valid JSON number spelling;
+     * match the float codec and emit `null` instead of invalid JSON. */
+    if (!decimal_as_string) {
+        PyObject *finite = PyObject_CallMethod(obj, "is_finite", NULL);
+        if (finite == NULL) return -1;
+        int is_finite = PyObject_IsTrue(finite);
+        Py_DECREF(finite);
+        if (is_finite < 0) return -1;
+        if (!is_finite) return ms_write(self, "null", 4);
+    }
+
     PyObject *temp = PyObject_Str(obj);
     if (temp == NULL) return -1;
 
     Py_ssize_t size;
     const char* buf = unicode_str_and_size_nocheck(temp, &size);
-    bool decimal_as_string = !self->decimal_as_number;
 
     Py_ssize_t required = size + (2 * decimal_as_string);
     if (ms_ensure_space(self, size + 2) < 0) {
@@ -17366,9 +17389,10 @@ json_ensure_tag_matches(
 
         /* Check that tag matches expected tag value */
         Py_ssize_t expected_size;
-        const char *expected_str = unicode_str_and_size_nocheck(
+        const char *expected_str = unicode_str_and_size(
             expected_tag, &expected_size
         );
+        if (expected_str == NULL) return -1;
         if (tag_size != expected_size || memcmp(tag, expected_str, expected_size) != 0) {
             /* Tag doesn't match the expected value, error nicely */
             ms_invalid_cstr_value(tag, tag_size, path);
@@ -17925,9 +17949,10 @@ json_decode_struct_union(
     Lookup *lookup = TypeNode_get_struct_union(type);
     PathNode tag_path = {path, PATH_STR, Lookup_tag_field(lookup)};
     Py_ssize_t tag_field_size;
-    const char *tag_field = unicode_str_and_size_nocheck(
+    const char *tag_field = unicode_str_and_size(
         Lookup_tag_field(lookup), &tag_field_size
     );
+    if (tag_field == NULL) return NULL;
 
     self->input_pos++; /* Skip '{' */
 
@@ -21407,7 +21432,7 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
     }
     if (mod == NULL) return NULL;
     PyObject *sort_keys = NULL, *builtin_types = NULL;
-    int str_keys = 0;
+    bool str_keys = false;
     if (kwnames != NULL) {
         Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
         for (Py_ssize_t i = 0; i < nkwargs; i++) {
@@ -21416,7 +21441,7 @@ Struct_dump(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *k
             if (PyUnicode_CompareWithASCIIString(name, "sort_keys") == 0) {
                 sort_keys = val;
             } else if (PyUnicode_CompareWithASCIIString(name, "str_keys") == 0) {
-                str_keys = PyObject_IsTrue(val);
+                if (parse_bool_arg(val, &str_keys) < 0) return NULL;
             } else if (PyUnicode_CompareWithASCIIString(name, "builtin_types") == 0) {
                 builtin_types = val;
             } else {
@@ -21459,9 +21484,13 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
             PyObject *name = PyTuple_GET_ITEM(kwnames, i);
             PyObject *val = args[nargs + i];
             if (PyUnicode_CompareWithASCIIString(name, "strict") == 0) {
-                strict = PyObject_IsTrue(val);
+                bool b;
+                if (parse_bool_arg(val, &b) < 0) return NULL;
+                strict = b;
             } else if (PyUnicode_CompareWithASCIIString(name, "from_attributes") == 0) {
-                from_attributes = PyObject_IsTrue(val);
+                bool b;
+                if (parse_bool_arg(val, &b) < 0) return NULL;
+                from_attributes = b;
             } else {
                 return PyErr_Format(PyExc_TypeError,
                     "struct_validate() got an unexpected keyword argument '%U'", name);
@@ -21549,11 +21578,15 @@ csv_decode_info(
                  PyUnicode_Compare(cellv[0], expected) == 0;
         if (owned) Py_DECREF(expected);
         if (!ok) {
-            Py_ssize_t size;
-            const char *view = unicode_str_and_size(cellv[0], &size);
             PathNode tag_path = {NULL, 0, NULL};
-            if (view != NULL) {
+            if (PyUnicode_Check(cellv[0])) {
+                Py_ssize_t size;
+                const char *view = unicode_str_and_size(cellv[0], &size);
+                if (view == NULL) goto error;
                 ms_invalid_cstr_value(view, size, &tag_path);
+            }
+            else {
+                ms_raise_validation_error(&tag_path, "Invalid value %R%U", cellv[0]);
             }
             goto error;
         }
@@ -21736,6 +21769,37 @@ struct_check_recurse_seq_items(
     return any;
 }
 
+/* Recurse into struct instances nested inside a fixed tuple. Unlike variable
+ * tuples, each position has its own element `TypeNode` (stored after the size
+ * in `TypeNode_get_fixtuple`'s range). Items that aren't matching structs are
+ * left to the normal validate_obj path. Returns 1 if any item was recursed,
+ * 0 if none were, -1 on error. */
+static int
+struct_check_recurse_fixtuple(
+    PyObject *container, TypeNode *field_type,
+    StructspecState *mod, PathNode *field_path
+) {
+    PyObject *seq = PySequence_Fast(container, "expected a sequence");
+    if (seq == NULL) return -1;
+    Py_ssize_t size = PySequence_Fast_GET_SIZE(seq);
+    PyObject **items = PySequence_Fast_ITEMS(seq);
+    Py_ssize_t offset, ntypes;
+    TypeNode_get_fixtuple(field_type, &offset, &ntypes);
+    int any = 0;
+    Py_ssize_t n = size < ntypes ? size : ntypes;
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *item = items[i];
+        if (!ms_is_struct_inst(item)) continue;
+        TypeNode *item_type = field_type->details[offset + i].pointer;
+        PathNode item_path = {field_path, i, NULL};
+        int r = struct_check_maybe_recurse(item, item_type, mod, &item_path, false);
+        if (r < 0) { Py_DECREF(seq); return -1; }
+        if (r) any = 1;
+    }
+    Py_DECREF(seq);
+    return any;
+}
+
 static int
 struct_check_recurse_seq(
     PyObject *container, TypeNode *item_type,
@@ -21790,7 +21854,7 @@ struct_check_recursive(
 
     int ret = 0;
     for (Py_ssize_t i = 0; i < nfields && ret == 0; i++) {
-        PyObject *val = Struct_get_index(self, i);
+        PyObject *val = Struct_get_index_noerror(self, i);
         if (val == NULL) continue;
 
         TypeNode *field_type = info->types[i];
@@ -21818,9 +21882,13 @@ struct_check_recursive(
                 if (r < 0) { ret = -1; break; }
             }
         }
+        else if (field_type->types & MS_TYPE_FIXTUPLE) {
+            r = struct_check_recurse_fixtuple(val, field_type, mod, &field_path);
+            if (r < 0) { ret = -1; break; }
+        }
         else if (field_type->types &
             (MS_TYPE_LIST | MS_TYPE_SET | MS_TYPE_FROZENSET |
-             MS_TYPE_VARTUPLE | MS_TYPE_FIXTUPLE))
+             MS_TYPE_VARTUPLE))
         {
             TypeNode *item_type = TypeNode_get_array(field_type);
             if (item_type->types &
