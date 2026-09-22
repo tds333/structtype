@@ -51,6 +51,19 @@ def test_dump_csv_cells_in_declaration_order():
     ]
 
 
+def test_dump_csv_rejects_container_enum_value():
+    from enum import Enum
+
+    class E(Enum):
+        X = [1, 2]
+
+    class T(st.Struct):
+        v: E
+
+    with pytest.raises(TypeError, match="flat scalar"):
+        T(E.X).struct_dump_csv()
+
+
 def _reader(text, **fmt):
     import csv
 

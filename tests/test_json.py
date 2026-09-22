@@ -593,6 +593,28 @@ def test_non_ascii_tag_validation_array_like():
         Arr.struct_validate_json(json.dumps(["", 5]).encode("utf-8"))
 
 
+def test_decode_int64_min():
+    assert _json_decode(b"-9223372036854775808", type=int) == -(2**63)
+
+
+def test_lax_decode_int64_min_from_string():
+    class M(Struct):
+        v: int
+
+    assert M.struct_validate({"v": "-9223372036854775808"}, strict=False).v == -(2**63)
+
+
+def test_str_subclass_accepted_as_json_input():
+    class S(str):
+        pass
+
+    class A(Struct):
+        x: int
+
+    assert A.struct_validate_json(S('{"x": 1}')) == A(1)
+    assert _json_decode(S("[1, 2]")) == [1, 2]
+
+
 class TestBinary:
     @pytest.mark.parametrize(
         "x", [b"", b"a", b"ab", b"abc", b"abcd", b"abcde", b"abcdef", b"\x00\xff"]
@@ -658,6 +680,14 @@ class TestDatetime:
 
     @pytest.mark.parametrize("value", [253402300800, 253402300800.0])
     def test_decode_datetime_above_max_epoch(self, value):
+        class M(Struct):
+            v: datetime.datetime
+
+        with pytest.raises(structtype.ValidationError, match="out of range"):
+            M.struct_validate_json(json.dumps({"v": value}).encode(), strict=False)
+
+    @pytest.mark.parametrize("value", [1e300, -1e300])
+    def test_decode_datetime_huge_float(self, value):
         class M(Struct):
             v: datetime.datetime
 

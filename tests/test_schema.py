@@ -958,6 +958,45 @@ def test_union(use_union_operator):
     }
 
 
+def test_field_examples_not_aliased():
+    ann = Annotated[int, Field(examples=[1, 2])]
+    schema = make_schema(ann)
+    schema["examples"].append(3)
+    assert make_schema(ann)["examples"] == [1, 2]
+
+
+def test_tagged_union_member_field_metadata_preserved():
+    class Point(structtype.Struct):
+        struct_config = StructConfig(tag=True)
+        x: int
+
+    class Point3D(Point):
+        y: int
+
+    schema = make_schema(Annotated[Point, Field(description="the point")] | Point3D)
+    assert schema["anyOf"][0] == {
+        "$ref": "#/$defs/Point",
+        "description": "the point",
+    }
+
+
+def test_tagged_union_int_tag_mapping_keys_are_strings():
+    class A(structtype.Struct):
+        struct_config = StructConfig(tag=1)
+        x: int
+
+    class B(structtype.Struct):
+        struct_config = StructConfig(tag=2)
+        x: int
+        y: int
+
+    schema = make_schema(A | B)
+    assert schema["discriminator"]["mapping"] == {
+        "1": "#/$defs/A",
+        "2": "#/$defs/B",
+    }
+
+
 def test_struct_tagged_union():
     class Point(structtype.Struct):
         struct_config = StructConfig(tag=True)

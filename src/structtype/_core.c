@@ -264,7 +264,7 @@ ms_unicode_from_view(const char *view, Py_ssize_t size, bool is_ascii) {
  * object. */
 static int
 ms_get_buffer(PyObject *obj, Py_buffer *view) {
-    if (MS_UNLIKELY(PyUnicode_CheckExact(obj))) {
+    if (MS_UNLIKELY(PyUnicode_Check(obj))) {
         view->buf = (void *)unicode_str_and_size(obj, &(view->len));
         if (view->buf == NULL) return -1;
         Py_INCREF(obj);
@@ -276,7 +276,7 @@ ms_get_buffer(PyObject *obj, Py_buffer *view) {
 
 static void
 ms_release_buffer(Py_buffer *view) {
-    if (MS_LIKELY(!PyUnicode_CheckExact(view->obj))) {
+    if (MS_LIKELY(!PyUnicode_Check(view->obj))) {
         PyBuffer_Release(view);
     }
     else {
@@ -12097,15 +12097,25 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
     {
         PyObject *fn;
         int found = PyObject_GetOptionalAttr(custom_cls, st->str_struct_validate, &fn);
-        if (found < 0) { Py_DECREF(out); return NULL; }
+        if (found < 0) {
+            if (generic) Py_DECREF(custom_cls);
+            Py_DECREF(out);
+            return NULL;
+        }
         if (found) {
             if (out != Py_None) {
                 int is_inst = PyObject_IsInstance(out, custom_cls);
-                if (is_inst < 0) { Py_DECREF(fn); Py_DECREF(out); return NULL; }
+                if (is_inst < 0) {
+                    Py_DECREF(fn);
+                    if (generic) Py_DECREF(custom_cls);
+                    Py_DECREF(out);
+                    return NULL;
+                }
                 if (!is_inst) {
                     PyObject *temp = PyObject_CallOneArg(fn, out);
                     Py_DECREF(fn);
                     if (temp == NULL) {
+                        if (generic) Py_DECREF(custom_cls);
                         Py_DECREF(out);
                         ms_maybe_wrap_validation_error(path);
                         return NULL;
@@ -12127,15 +12137,25 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
     {
         PyObject *fn;
         int found = PyObject_GetOptionalAttr(custom_cls, st->str_model_validate, &fn);
-        if (found < 0) { Py_DECREF(out); return NULL; }
+        if (found < 0) {
+            if (generic) Py_DECREF(custom_cls);
+            Py_DECREF(out);
+            return NULL;
+        }
         if (found) {
             if (out != Py_None) {
                 int is_inst = PyObject_IsInstance(out, custom_cls);
-                if (is_inst < 0) { Py_DECREF(fn); Py_DECREF(out); return NULL; }
+                if (is_inst < 0) {
+                    Py_DECREF(fn);
+                    if (generic) Py_DECREF(custom_cls);
+                    Py_DECREF(out);
+                    return NULL;
+                }
                 if (!is_inst) {
                     PyObject *temp = PyObject_CallOneArg(fn, out);
                     Py_DECREF(fn);
                     if (temp == NULL) {
+                        if (generic) Py_DECREF(custom_cls);
                         Py_DECREF(out);
                         ms_maybe_wrap_validation_error(path);
                         return NULL;
@@ -12157,11 +12177,19 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
     {
         PyObject *fields;
         int found = PyObject_GetOptionalAttr(custom_cls, st->str___struct_fields__, &fields);
-        if (found < 0) { Py_DECREF(out); return NULL; }
+        if (found < 0) {
+            if (generic) Py_DECREF(custom_cls);
+            Py_DECREF(out);
+            return NULL;
+        }
         if (found && PyDict_CheckExact(out)) {
             PyObject *temp = ms_decode_custom_struct(custom_cls, out, path);
             Py_DECREF(fields);
-            if (temp == NULL) { Py_DECREF(out); return NULL; }
+            if (temp == NULL) {
+                if (generic) Py_DECREF(custom_cls);
+                Py_DECREF(out);
+                return NULL;
+            }
             Py_DECREF(out);
             out = temp;
         }
@@ -12342,12 +12370,19 @@ ms_decode_uint(uint64_t x, TypeNode *type, PathNode *path) {
     return PyLong_FromUnsignedLongLong(x);
 }
 
+/* Negate an unsigned magnitude without signed overflow. `ux` may be 2**63,
+ * which is INT64_MIN when negated and would overflow in int64 arithmetic. */
+static MS_INLINE int64_t
+ms_negate_magnitude(uint64_t ux) {
+    return ux == ((uint64_t)INT64_MAX + 1) ? INT64_MIN : -(int64_t)ux;
+}
+
 static MS_NOINLINE bool
 ms_passes_int_constraints(uint64_t ux, bool neg, ConstraintNode *cn, PathNode *path) {
     if (cn->mask & MS_CN_INT_MIN) {
         int64_t c = ConstraintNode_get_int_min(cn);
         bool ok = (
-            neg ? ((-(int64_t)ux) >= c) :
+            neg ? (ms_negate_magnitude(ux) >= c) :
             ((c < 0) || (ux >= (uint64_t)c))
         );
         if (MS_UNLIKELY(!ok)) {
@@ -12358,7 +12393,7 @@ ms_passes_int_constraints(uint64_t ux, bool neg, ConstraintNode *cn, PathNode *p
     if (cn->mask & MS_CN_INT_MAX) {
         int64_t c = ConstraintNode_get_int_max(cn);
         bool ok = (
-            neg ? ((-(int64_t)ux) <= c) :
+            neg ? (ms_negate_magnitude(ux) <= c) :
             ((c >= 0) && (ux <= (uint64_t)c))
         );
         if (MS_UNLIKELY(!ok)) {
@@ -13310,6 +13345,13 @@ ms_decode_datetime_from_float(
 ) {
     if (MS_UNLIKELY(!isfinite(timestamp))) {
         return ms_error_with_path("Invalid epoch timestamp%U", path);
+    }
+    /* Bound before casting to int64: converting an out-of-range double is UB. */
+    if (MS_UNLIKELY(
+        timestamp < (double)MS_EPOCH_SECS_MIN - 1.0 ||
+        timestamp > (double)MS_EPOCH_SECS_MAX + 1.0
+    )) {
+        return ms_error_with_path("Timestamp is out of range %U", path);
     }
     int64_t secs = (int64_t)trunc(timestamp);
     int32_t nanos = (int32_t)(1000000000 * (timestamp - secs));
@@ -14568,7 +14610,7 @@ end_parsing:
         else {
             if (is_negative) {
                 return ms_post_decode_int64(
-                    -1 * (int64_t)(mantissa), type, path, strict, from_str
+                    ms_negate_magnitude(mantissa), type, path, strict, from_str
                 );
             }
             else {
@@ -15034,22 +15076,26 @@ json_encode_decimal(EncoderState *self, PyObject *obj)
 {
     bool decimal_as_string = !self->decimal_as_number;
 
-    /* Non-finite Decimals (NaN/Infinity) have no valid JSON number spelling;
-     * match the float codec and emit `null` instead of invalid JSON. */
-    if (!decimal_as_string) {
-        PyObject *finite = PyObject_CallMethod(obj, "is_finite", NULL);
-        if (finite == NULL) return -1;
-        int is_finite = PyObject_IsTrue(finite);
-        Py_DECREF(finite);
-        if (is_finite < 0) return -1;
-        if (!is_finite) return ms_write(self, "null", 4);
-    }
-
     PyObject *temp = PyObject_Str(obj);
     if (temp == NULL) return -1;
 
     Py_ssize_t size;
     const char* buf = unicode_str_and_size_nocheck(temp, &size);
+
+    /* Non-finite Decimals (NaN/Infinity) have no valid JSON number spelling;
+     * match the float codec and emit `null` instead of invalid JSON. A finite
+     * Decimal always stringifies starting with a digit, or '-' followed by one,
+     * so this needs no `is_finite()` call on the encode hot path. */
+    if (!decimal_as_string) {
+        bool is_number = size > 0 && (
+            (buf[0] >= '0' && buf[0] <= '9') ||
+            (buf[0] == '-' && size > 1 && buf[1] >= '0' && buf[1] <= '9')
+        );
+        if (!is_number) {
+            Py_DECREF(temp);
+            return ms_write(self, "null", 4);
+        }
+    }
 
     Py_ssize_t required = size + (2 * decimal_as_string);
     if (ms_ensure_space(self, size + 2) < 0) {
@@ -17311,7 +17357,7 @@ end_integer:
 
     if (is_negative) {
         if (mantissa > 1ull << 63) goto error_not_int;
-        *out = -1 * (int64_t)mantissa;
+        *out = ms_negate_magnitude(mantissa);
     }
     else {
         if (mantissa > LLONG_MAX) {
@@ -19442,6 +19488,14 @@ csv_render_cell(StructspecState *mod, PyObject *value) {
     if (PyType_IsSubtype(Py_TYPE(value), (PyTypeObject *)mod->EnumType)) {
         PyObject *inner = dump_enum_value(mod, value);
         if (inner == NULL) return NULL;
+        if (
+            PyList_Check(inner) || PyTuple_Check(inner) ||
+            PyDict_Check(inner) || PyAnySet_Check(inner)
+        ) {
+            Py_DECREF(inner);
+            PyErr_SetString(PyExc_TypeError, "CSV supports flat scalar fields only");
+            return NULL;
+        }
         PyObject *out = PyObject_Str(inner);
         Py_DECREF(inner);
         return out;
@@ -22315,7 +22369,7 @@ PyInit__core(void)
 #define SET_REF(attr, name) \
     do { \
     st->attr = PyObject_GetAttrString(temp_module, name); \
-    if (st->attr == NULL) return NULL; \
+    if (st->attr == NULL) { Py_DECREF(temp_module); return NULL; } \
     } while (0)
 
     /* Get all imports from the typing module */
@@ -22411,11 +22465,18 @@ PyInit__core(void)
     temp_module = PyImport_ImportModule("uuid");
     if (temp_module == NULL) return NULL;
     st->UUIDType = PyObject_GetAttrString(temp_module, "UUID");
-    if (st->UUIDType == NULL) return NULL;
+    if (st->UUIDType == NULL) {
+        Py_DECREF(temp_module);
+        return NULL;
+    }
     temp_obj = PyObject_GetAttrString(temp_module, "SafeUUID");
-    if (temp_obj == NULL) return NULL;
+    if (temp_obj == NULL) {
+        Py_DECREF(temp_module);
+        return NULL;
+    }
     st->uuid_safeuuid_unknown = PyObject_GetAttrString(temp_obj, "unknown");
     Py_DECREF(temp_obj);
+    Py_DECREF(temp_module);
     if (st->uuid_safeuuid_unknown == NULL) return NULL;
 
     /* decimal module imports */

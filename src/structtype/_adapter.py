@@ -62,6 +62,22 @@ def _has_constraint_on_union(ann):
     return any(_has_constraint_on_union(arg) for arg in get_args(ann))
 
 
+def _has_constraint(ann):
+    """True if the annotation carries a ``Constraint`` anywhere."""
+    metadata = getattr(ann, "__metadata__", None)
+    if metadata is not None:
+        for meta in metadata:
+            if isinstance(meta, _Constraint):
+                return True
+    supertype = getattr(ann, "__supertype__", None)  # NewType
+    if supertype is not None and _has_constraint(supertype):
+        return True
+    value = getattr(ann, "__value__", None)  # PEP 695 type alias
+    if value is not None and _has_constraint(value):
+        return True
+    return any(_has_constraint(arg) for arg in get_args(ann))
+
+
 class StructAdapter:
     """Adapter for validating and serializing types without subclassing ``Struct``.
 
@@ -101,6 +117,10 @@ class StructAdapter:
                 "for optional fields"
             )
         self._type = type
+        # Validate constraint/type compatibility eagerly, matching `Struct`
+        # class creation, without disturbing the lazy decoder cache below.
+        if _has_constraint(type):
+            _JSONDecoder(type, strict=True)
         self._decoder_loose = None
         self._decoder_strict = None
 

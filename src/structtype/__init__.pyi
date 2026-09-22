@@ -1,5 +1,4 @@
 # ruff: noqa: PYI041, PYI015
-import enum
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from inspect import Signature
 from typing import (
@@ -16,17 +15,15 @@ from typing import (
 from typing_extensions import Buffer, Self, dataclass_transform
 
 @final
-class UnsetType(enum.Enum):
-    UNSET = "UNSET"
+class UnsetType:
     def __bool__(self) -> Literal[False]: ...
 
-UNSET: Final = UnsetType.UNSET
+UNSET: Final[UnsetType]
 
 @final
-class _NoDefault(enum.Enum):
-    NODEFAULT = "NODEFAULT"
+class _NoDefaultType: ...
 
-NODEFAULT: Final = _NoDefault.NODEFAULT
+NODEFAULT: Final[_NoDefaultType]
 
 class StructConfig(TypedDict, total=False):
     frozen: bool

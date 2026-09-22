@@ -23,6 +23,11 @@ from structtype import (
 )
 
 
+def test_adapter_rejects_constraint_for_wrong_type():
+    with pytest.raises(TypeError):
+        StructAdapter(Annotated[list[int], structtype.StrConstraint(min_length=1)])
+
+
 def test_validate_json_simple():
     ta = StructAdapter(int)
     assert ta.struct_validate_json(b"42") == 42
@@ -67,6 +72,18 @@ def test_adapter_rejects_constraint_on_optional_through_type_alias():
     T = TypeAliasType("T", Annotated[int | None, NumericConstraint(ge=0)])
     with pytest.raises(TypeError, match="concrete type"):
         StructAdapter(T)
+
+
+def test_adapter_validates_constraint_through_type_alias():
+    if sys.version_info < (3, 12):
+        return
+    from typing import TypeAliasType
+
+    T = TypeAliasType("T", Annotated[int, NumericConstraint(ge=0)])
+    ta = StructAdapter(T)
+    assert ta.struct_validate(5) == 5
+    with pytest.raises(ValidationError):
+        ta.struct_validate(-1)
 
 
 def test_adapter_allows_constraint_on_member_optional():

@@ -427,6 +427,7 @@ class _SchemaGenerator:
                 schema["minProperties"] = t.min_length
         elif isinstance(t, UnionType):
             structs = {}
+            struct_schemas = {}
             other = []
             none_member = None
             tag_field = None
@@ -437,6 +438,9 @@ class _SchemaGenerator:
                 if isinstance(real_type, StructType) and not real_type.array_like:
                     tag_field = real_type.tag_field
                     structs[real_type.tag] = real_type
+                    # Keep the (possibly Metadata-wrapped) member so Field
+                    # metadata survives into the member's `$ref` schema.
+                    struct_schemas[real_type.tag] = subtype
                 elif isinstance(real_type, NoneType):
                     none_member = subtype
                 else:
@@ -446,11 +450,11 @@ class _SchemaGenerator:
 
             if len(structs) >= 2:
                 mapping = {
-                    k: self.ref_template.format(name=self.name_map[v.cls])
+                    str(k): self.ref_template.format(name=self.name_map[v.cls])
                     for k, v in structs.items()
                 }
                 struct_schema = {
-                    "anyOf": [self.to_schema(v) for v in structs.values()],
+                    "anyOf": [self.to_schema(struct_schemas[k]) for k in structs],
                     "discriminator": {"propertyName": tag_field, "mapping": mapping},
                 }
                 if options:
@@ -463,8 +467,8 @@ class _SchemaGenerator:
                 else:
                     schema.update(struct_schema)
             elif len(structs) == 1:
-                _, subtype = structs.popitem()
-                options.append(self.to_schema(subtype))
+                tag = next(iter(structs))
+                options.append(self.to_schema(struct_schemas[tag]))
                 if none_member is not None:
                     options.append(self.to_schema(none_member))
                 schema["anyOf"] = options

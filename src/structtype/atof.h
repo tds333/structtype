@@ -111,6 +111,11 @@ ms_clzll(uint64_t x) {
 
 static inline int64_t
 eisel_lemire(uint64_t man, int32_t exp) {
+    /* Returns -1 when the caller should fall back to the HPD parser; that
+     * sentinel is distinct from every valid ryu codec. Requires `man != 0` and
+     * `exp` in [-307, 288]: callers route a zero mantissa to the exact-zero
+     * fast path instead (ms_clzll(0) would be undefined here). */
+
     /* The short comment headers below correspond to section titles in Nigel
      * Tao's blogpost. See
      * https://nigeltao.github.io/blog/2020/eisel-lemire.html for a more

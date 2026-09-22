@@ -1,3 +1,4 @@
+import copy
 import datetime
 import decimal
 import enum
@@ -989,6 +990,10 @@ class _Translator:
             if type(meta) is structtype.Field:
                 for attr in ("title", "description", "examples", "deprecated"):
                     if (val := getattr(meta, attr)) is not None:
+                        # `examples` is a mutable user-provided list; copy it so a
+                        # caller mutating a returned schema can't alter the Field.
+                        if attr == "examples":
+                            val = copy.deepcopy(val)
                         extra_json_schema[attr] = val
                 if meta.json_schema_extra is not None:
                     extra_json_schema = _merge_json(
