@@ -15,6 +15,8 @@ from structtype import (
     TimezoneConstraint,
 )
 
+from .utils import requires_subprocess
+
 
 class Point(Struct):
     x: int
@@ -147,6 +149,7 @@ def test_valid_length():
     assert p.struct_check_types() is None
 
 
+@requires_subprocess
 def test_cyclic_struct_check_types_raises_recursion_error():
     source = "\n".join(
         [

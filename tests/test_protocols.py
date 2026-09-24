@@ -3,6 +3,8 @@ import sys
 
 import structtype
 
+from .utils import requires_subprocess
+
 
 def run_isolated_type_error(setup, call, match):
     source = "\n".join(
@@ -54,6 +56,7 @@ def run_isolated(setup, expression):
     )
 
 
+@requires_subprocess
 def test_set_subclass_iterator_does_not_overflow():
     result = run_isolated(
         """
@@ -68,6 +71,7 @@ class BadSet(set):
     assert result.stdout.startswith("[")
 
 
+@requires_subprocess
 def test_external_fields_must_be_iterable():
     for call in (
         "struct_dump(External())",
@@ -100,12 +104,14 @@ def external_attributes(setup):
     )
 
 
+@requires_subprocess
 def test_external_metadata_may_be_a_list():
     result = external_attributes(external_source("['x', 'y']", "[0]"))
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "1 0"
 
 
+@requires_subprocess
 def test_external_metadata_may_be_a_generator():
     result = external_attributes(
         external_source(
@@ -117,6 +123,7 @@ def test_external_metadata_may_be_a_generator():
     assert result.stdout.strip() == "1 0"
 
 
+@requires_subprocess
 def test_external_field_names_must_be_strings():
     for method in ("struct_dump", "struct_dump_json"):
         result = run_isolated_type_error(
@@ -127,6 +134,7 @@ def test_external_field_names_must_be_strings():
         assert result.returncode == 0, result.stderr
 
 
+@requires_subprocess
 def test_external_defaults_must_be_iterable():
     for method, payload in (
         ("struct_validate", "{}"),
@@ -140,6 +148,7 @@ def test_external_defaults_must_be_iterable():
         assert result.returncode == 0, result.stderr
 
 
+@requires_subprocess
 def test_external_defaults_cannot_exceed_fields():
     for method, payload in (
         ("struct_validate", "{}"),

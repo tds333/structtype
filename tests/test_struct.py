@@ -17,7 +17,7 @@ import pytest
 import structtype
 from structtype import NODEFAULT, UNSET, Factory, Field, Struct, StructConfig
 
-from .utils import temp_module
+from .utils import requires_subprocess, temp_module
 
 if hasattr(copy, "replace"):
     # Added in Python 3.13
@@ -1591,6 +1591,7 @@ class TestHash:
         assert hash(Ex3()) == hash(Ex3())
         assert hash(Ex3()) != hash(Ex4())
 
+    @requires_subprocess
     def test_cyclic_frozen_struct_hash_raises_recursion_error(self):
         # A frozen struct can't be mutated to point at itself, so build the
         # cycle through a mutable holder whose hash recurses back into the
