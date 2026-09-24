@@ -10238,11 +10238,54 @@ error:
 }
 
 static Py_hash_t
-Struct_hash(PyObject *self) {
+Struct_hash_fields(PyObject *self, StructMetaObject *st_type) {
     PyObject *val;
     Py_ssize_t i, nfields;
     Py_uhash_t acc = MS_HASH_XXPRIME_5;
 
+    /* First hash the type by its pointer */
+    size_t type_id = (size_t)((void *)st_type);
+    /* The lower bits are likely to be 0; rotate by 4 */
+    type_id = (type_id >> 4) | (type_id << (8 * sizeof(void *) - 4));
+    acc += type_id * MS_HASH_XXPRIME_2;
+    acc = MS_HASH_XXROTATE(acc);
+    acc *= MS_HASH_XXPRIME_1;
+
+    /* Then hash all the fields */
+    nfields = StructMeta_GET_NFIELDS(Py_TYPE(self));
+    for (i = 0; i < nfields; i++) {
+        val = Struct_get_index(self, i);
+        if (val == NULL) return -1;
+        Py_uhash_t item_hash = PyObject_Hash(val);
+        if (item_hash == (Py_uhash_t)-1) return -1;
+        acc += item_hash * MS_HASH_XXPRIME_2;
+        acc = MS_HASH_XXROTATE(acc);
+        acc *= MS_HASH_XXPRIME_1;
+    }
+    acc += (1 + nfields) ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
+
+    Py_uhash_t hash = (acc == (Py_uhash_t)-1) ? 1546275796 : acc;
+
+    if (MS_UNLIKELY(st_type->hash_offset != 0)) {
+        /* Cache the hash. Use a compare-exchange so that two threads racing
+         * to hash the same instance don't leak the loser's `PyLong`. */
+        _Atomic(PyObject *) *slot = (_Atomic(PyObject *) *)(
+            (char *)self + st_type->hash_offset
+        );
+        PyObject *cached_hash = PyLong_FromSsize_t(hash);
+        if (cached_hash == NULL) return -1;
+        PyObject *expected = NULL;
+        if (!atomic_compare_exchange_strong(slot, &expected, cached_hash)) {
+            /* Another thread won the race; drop our now-unused value. */
+            Py_DECREF(cached_hash);
+        }
+    }
+
+    return hash;
+}
+
+static Py_hash_t
+Struct_hash(PyObject *self) {
     StructMetaObject *st_type = (StructMetaObject *)Py_TYPE(self);
 
     if (MS_UNLIKELY(st_type->eq == OPT_FALSE)) {
@@ -10266,44 +10309,9 @@ Struct_hash(PyObject *self) {
         }
     }
 
-    /* First hash the type by its pointer */
-    size_t type_id = (size_t)((void *)st_type);
-    /* The lower bits are likely to be 0; rotate by 4 */
-    type_id = (type_id >> 4) | (type_id << (8 * sizeof(void *) - 4));
-    acc += type_id * MS_HASH_XXPRIME_2;
-    acc = MS_HASH_XXROTATE(acc);
-    acc *= MS_HASH_XXPRIME_1;
-
-    /* Then hash all the fields */
-    nfields = StructMeta_GET_NFIELDS(Py_TYPE(self));
-    for (i = 0; i < nfields; i++) {
-        val = Struct_get_index(self, i);
-        if (val == NULL) return -1;
-        Py_uhash_t item_hash = PyObject_Hash(val);
-        if (item_hash == (Py_uhash_t)-1) return -1;
-        acc += item_hash * MS_HASH_XXPRIME_2;
-        acc = MS_HASH_XXROTATE(acc);
-        acc *= MS_HASH_XXPRIME_1;
-    }
-    acc += (1 + nfields) ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
-
-    Py_uhash_t hash = (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
-
-    if (MS_UNLIKELY(st_type->hash_offset != 0)) {
-        /* Cache the hash. Use a compare-exchange so that two threads racing
-         * to hash the same instance don't leak the loser's `PyLong`. */
-        _Atomic(PyObject *) *slot = (_Atomic(PyObject *) *)(
-            (char *)self + st_type->hash_offset
-        );
-        PyObject *cached_hash = PyLong_FromSsize_t(hash);
-        if (cached_hash == NULL) return -1;
-        PyObject *expected = NULL;
-        if (!atomic_compare_exchange_strong(slot, &expected, cached_hash)) {
-            /* Another thread won the race; drop our now-unused value. */
-            Py_DECREF(cached_hash);
-        }
-    }
-
+    if (Py_EnterRecursiveCall(" while hashing a Struct")) return -1;
+    Py_hash_t hash = Struct_hash_fields(self, st_type);
+    Py_LeaveRecursiveCall();
     return hash;
 }
 
@@ -11987,54 +11995,178 @@ ms_decode_int_enum_or_literal_pyint(PyObject *val, TypeNode *type, PathNode *pat
     return IntLookup_GetPyIntOrError(lookup, val, path);
 }
 
+/* External struct protocols (e.g. msgspec.Struct) may expose
+ * `__struct_fields__` / `__struct_defaults__` as any iterable, not necessarily
+ * a tuple. Materialize with a NUL sentinel to distinguish a genuine loopback
+ * `None` from an error, then hand owned tuples back to the caller. Returns 0 on
+ * success (with *fields_out/*defaults_out set to owned tuples, defaults_out
+ * possibly NULL) and -1 on error. */
+static int
+ms_materialize_external_struct_metadata(
+    PyObject *fields, PyObject *defaults,
+    PyObject **fields_out, PyObject **defaults_out
+) {
+    *fields_out = NULL;
+    *defaults_out = NULL;
+
+    PyObject *fields_tuple = NULL;
+    if (PyTuple_CheckExact(fields)) {
+        fields_tuple = Py_NewRef(fields);
+    }
+    else if (PyUnicode_Check(fields) || PyBytes_Check(fields)) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "__struct_fields__ must be an iterable of str, got %.200s",
+            Py_TYPE(fields)->tp_name
+        );
+        return -1;
+    }
+    else {
+        fields_tuple = PySequence_Tuple(fields);
+        if (fields_tuple == NULL) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "__struct_fields__ must be an iterable of str, got %.200s",
+                Py_TYPE(fields)->tp_name
+            );
+            return -1;
+        }
+    }
+
+    Py_ssize_t nfields = PyTuple_GET_SIZE(fields_tuple);
+    for (Py_ssize_t i = 0; i < nfields; i++) {
+        PyObject *field = PyTuple_GET_ITEM(fields_tuple, i);
+        if (!PyUnicode_Check(field)) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "__struct_fields__[%zd] must be a str, got %.200s",
+                i,
+                Py_TYPE(field)->tp_name
+            );
+            Py_DECREF(fields_tuple);
+            return -1;
+        }
+    }
+
+    if (defaults == NULL) {
+        *fields_out = fields_tuple;
+        return 0;
+    }
+
+    PyObject *defaults_tuple = NULL;
+    if (PyTuple_CheckExact(defaults)) {
+        defaults_tuple = Py_NewRef(defaults);
+    }
+    else if (PyUnicode_Check(defaults) || PyBytes_Check(defaults)) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "__struct_defaults__ must be an iterable, got %.200s",
+            Py_TYPE(defaults)->tp_name
+        );
+        Py_DECREF(fields_tuple);
+        return -1;
+    }
+    else {
+        defaults_tuple = PySequence_Tuple(defaults);
+        if (defaults_tuple == NULL) {
+            PyErr_Format(
+                PyExc_TypeError,
+                "__struct_defaults__ must be an iterable, got %.200s",
+                Py_TYPE(defaults)->tp_name
+            );
+            Py_DECREF(fields_tuple);
+            return -1;
+        }
+    }
+
+    Py_ssize_t ndefaults = PyTuple_GET_SIZE(defaults_tuple);
+    if (ndefaults > nfields) {
+        PyErr_Format(
+            PyExc_TypeError,
+            "__struct_defaults__ has %zd entries but __struct_fields__ has %zd",
+            ndefaults,
+            nfields
+        );
+        Py_DECREF(fields_tuple);
+        Py_DECREF(defaults_tuple);
+        return -1;
+    }
+
+    *fields_out = fields_tuple;
+    *defaults_out = defaults_tuple;
+    return 0;
+}
+
+/* Validate only `fields` (used by the dump paths, which read defaults from the
+ * instance rather than the class). */
+static int
+ms_validate_external_struct_metadata(PyObject *fields) {
+    PyObject *fields_tuple = NULL, *defaults_tuple = NULL;
+    int status = ms_materialize_external_struct_metadata(
+        fields, NULL, &fields_tuple, &defaults_tuple
+    );
+    Py_XDECREF(defaults_tuple);
+    Py_XDECREF(fields_tuple);
+    return status;
+}
+
 static PyObject *
-ms_decode_custom_struct(PyObject *cls, PyObject *dict, PathNode *path) {
+ms_decode_custom_struct(
+    PyObject *cls, PyObject *dict, PyObject *fields, PathNode *path
+) {
     /* Construct an external struct (e.g. msgspec.Struct) from a Python dict.
      * Uses keyword construction cls(**kwargs) which works for both
      * kw_only and non-kw_only structs. */
     StructspecState *st = structtype_get_global_state();
-    PyObject *fields = PyObject_GetAttr(cls, st->str___struct_fields__);
-    if (fields == NULL) return NULL;
-
     PyObject *defaults = PyObject_GetAttr(cls, st->str___struct_defaults__);
-    if (defaults == NULL) { Py_DECREF(fields); return NULL; }
+    if (defaults == NULL) return NULL;
 
-    Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
-    Py_ssize_t ndefaults = PyTuple_GET_SIZE(defaults);
+    PyObject *fields_tuple = NULL, *defaults_tuple = NULL;
+    if (ms_materialize_external_struct_metadata(
+            fields, defaults, &fields_tuple, &defaults_tuple) < 0) {
+        Py_DECREF(defaults);
+        return NULL;
+    }
+    Py_DECREF(defaults);
+
+    Py_ssize_t nfields = PyTuple_GET_SIZE(fields_tuple);
+    Py_ssize_t ndefaults = defaults_tuple == NULL ? 0 : PyTuple_GET_SIZE(defaults_tuple);
     Py_ssize_t npos = nfields - ndefaults;
 
     PyObject *kwargs = PyDict_New();
-    if (kwargs == NULL) { Py_DECREF(fields); Py_DECREF(defaults); return NULL; }
+    if (kwargs == NULL) { goto error; }
 
     for (Py_ssize_t i = 0; i < nfields; i++) {
-        PyObject *key = PyTuple_GET_ITEM(fields, i);
+        PyObject *key = PyTuple_GET_ITEM(fields_tuple, i);
         PyObject *val = PyDict_GetItemWithError(dict, key);
         if (val == NULL) {
-            if (PyErr_Occurred()) { Py_DECREF(kwargs); Py_DECREF(fields); Py_DECREF(defaults); return NULL; }
+            if (PyErr_Occurred()) goto error;
             if (i >= npos) {
-                val = PyTuple_GET_ITEM(defaults, i - npos);
+                val = PyTuple_GET_ITEM(defaults_tuple, i - npos);
             }
             else {
                 ms_raise_validation_error(path, "Field `%U` is required%U", key);
-                Py_DECREF(kwargs); Py_DECREF(fields); Py_DECREF(defaults);
-                return NULL;
+                goto error;
             }
         }
-        if (PyDict_SetItem(kwargs, key, val) < 0) {
-            Py_DECREF(kwargs); Py_DECREF(fields); Py_DECREF(defaults);
-            return NULL;
-        }
+        if (PyDict_SetItem(kwargs, key, val) < 0) goto error;
     }
 
     PyObject *empty = PyTuple_New(0);
-    if (empty == NULL) { Py_DECREF(kwargs); Py_DECREF(fields); Py_DECREF(defaults); return NULL; }
+    if (empty == NULL) goto error;
 
     PyObject *result = PyObject_Call(cls, empty, kwargs);
     Py_DECREF(empty);
     Py_DECREF(kwargs);
-    Py_DECREF(fields);
-    Py_DECREF(defaults);
+    Py_DECREF(fields_tuple);
+    Py_XDECREF(defaults_tuple);
     return result;
+
+error:
+    Py_XDECREF(kwargs);
+    Py_DECREF(fields_tuple);
+    Py_XDECREF(defaults_tuple);
+    return NULL;
 }
 
 static MS_NOINLINE PyObject *
@@ -12183,7 +12315,7 @@ ms_decode_custom(PyObject *obj, TypeNode* type, PathNode *path) {
             return NULL;
         }
         if (found && PyDict_CheckExact(out)) {
-            PyObject *temp = ms_decode_custom_struct(custom_cls, out, path);
+            PyObject *temp = ms_decode_custom_struct(custom_cls, out, fields, path);
             Py_DECREF(fields);
             if (temp == NULL) {
                 if (generic) Py_DECREF(custom_cls);
@@ -15789,16 +15921,23 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
         found = PyObject_GetOptionalAttr(obj, self->mod->str___struct_fields__, &attr);
         if (found < 0) return -1;
         if (found) {
-            if (!PyTuple_CheckExact(attr)) { Py_DECREF(attr); return -1; }
+            PyObject *fields_tuple = NULL, *defaults_tuple = NULL;
+            if (ms_materialize_external_struct_metadata(
+                    attr, NULL, &fields_tuple, &defaults_tuple) < 0) {
+                Py_DECREF(attr);
+                return -1;
+            }
+            Py_XDECREF(defaults_tuple);
+            Py_DECREF(attr);
 
-            Py_ssize_t nfields = PyTuple_GET_SIZE(attr);
-            if (ms_write(self, "{", 1) < 0) { Py_DECREF(attr); return -1; }
+            Py_ssize_t nfields = PyTuple_GET_SIZE(fields_tuple);
+            if (ms_write(self, "{", 1) < 0) { Py_DECREF(fields_tuple); return -1; }
             int status = -1;
             Py_ssize_t start_offset = self->output_len;
-            if (Py_EnterRecursiveCall(" while serializing an object")) { Py_DECREF(attr); return -1; }
+            if (Py_EnterRecursiveCall(" while serializing an object")) { Py_DECREF(fields_tuple); return -1; }
 
             for (Py_ssize_t i = 0; i < nfields; i++) {
-                PyObject *key = PyTuple_GET_ITEM(attr, i);
+                PyObject *key = PyTuple_GET_ITEM(fields_tuple, i);
                 PyObject *val = PyObject_GetAttr(obj, key);
                 if (val == NULL) { PyErr_Clear(); continue; }
                 if (json_encode_str_noescape(self, key) < 0 || ms_write(self, ":", 1) < 0) {
@@ -15818,7 +15957,7 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
             }
     cleanup:
             Py_LeaveRecursiveCall();
-            Py_DECREF(attr);
+            Py_DECREF(fields_tuple);
             return status;
         }
     }
@@ -18758,39 +18897,25 @@ cleanup:
 
 static PyObject *
 dump_set(DumpState *self, PyObject *obj, bool is_key) {
-    PyObject *out = NULL, *list = NULL, *iter = NULL, *item;
+    PyObject *out = NULL, *list = NULL, *item;
     if (Py_EnterRecursiveCall(" while serializing an object")) return NULL;
 
-    list = PyList_New(PySet_GET_SIZE(obj));
+    /* PySequence_List uses a length hint for exact sets and grows safely for
+     * subclasses whose iterator yields more items than PySet_GET_SIZE. */
+    list = PySequence_List(obj);
     if (list == NULL) goto cleanup;
-
-    iter = PyObject_GetIter(obj);
-    if (iter == NULL) goto cleanup;
-
-    Py_ssize_t i = 0;
-    while ((item = PyIter_Next(iter)) != NULL) {
-        if (self->sort_keys) {
-            PyList_SET_ITEM(list, i++, item);
-        }
-        else {
-            PyObject *new_item = dump_obj(self, item, is_key);
-            Py_DECREF(item);
-            if (new_item == NULL) goto cleanup;
-            PyList_SET_ITEM(list, i++, new_item);
-        }
-    }
-    if (PyErr_Occurred()) goto cleanup;
 
     if (self->sort_keys) {
         if (PyList_Sort(list) < 0) goto cleanup;
-        Py_ssize_t size = PyList_GET_SIZE(list);
-        for (i = 0; i < size; i++) {
-            item = PyList_GET_ITEM(list, i);
-            PyObject *new_item = dump_obj(self, item, is_key);
-            if (new_item == NULL) goto cleanup;
-            PyList_SET_ITEM(list, i, new_item);
-            Py_DECREF(item);
-        }
+    }
+
+    Py_ssize_t size = PyList_GET_SIZE(list);
+    for (Py_ssize_t i = 0; i < size; i++) {
+        item = PyList_GET_ITEM(list, i);
+        PyObject *new_item = dump_obj(self, item, is_key);
+        if (new_item == NULL) goto cleanup;
+        PyList_SET_ITEM(list, i, new_item);
+        Py_DECREF(item);
     }
 
     if (is_key) {
@@ -18803,7 +18928,6 @@ dump_set(DumpState *self, PyObject *obj, bool is_key) {
 
 cleanup:
     Py_LeaveRecursiveCall();
-    Py_XDECREF(iter);
     Py_XDECREF(list);
     return out;
 }
@@ -18991,16 +19115,26 @@ static PyObject *
 dump_external_struct(DumpState *self, PyObject *obj, PyObject *fields) {
     /* External struct type (e.g. msgspec.Struct) — convert fields to dict
      * using Python-level attribute access (no C offset assumptions). */
+    PyObject *fields_tuple = NULL, *defaults_tuple = NULL;
+    if (ms_materialize_external_struct_metadata(
+            fields, NULL, &fields_tuple, &defaults_tuple) < 0) {
+        return NULL;
+    }
+    Py_XDECREF(defaults_tuple);
 
-    Py_ssize_t nfields = PyTuple_GET_SIZE(fields);
+    Py_ssize_t nfields = PyTuple_GET_SIZE(fields_tuple);
     PyObject *out = PyDict_New();
-    if (out == NULL) { return NULL; }
+    if (out == NULL) { Py_DECREF(fields_tuple); return NULL; }
 
     bool ok = false;
-    if (Py_EnterRecursiveCall(" while serializing an object")) { Py_DECREF(out); return NULL; }
+    if (Py_EnterRecursiveCall(" while serializing an object")) {
+        Py_DECREF(fields_tuple);
+        Py_DECREF(out);
+        return NULL; /* cpylint-ignore */
+    }
 
     for (Py_ssize_t i = 0; i < nfields; i++) {
-        PyObject *key = PyTuple_GET_ITEM(fields, i);
+        PyObject *key = PyTuple_GET_ITEM(fields_tuple, i);
         PyObject *val = PyObject_GetAttr(obj, key);
         if (val == NULL) { PyErr_Clear(); continue; }
         PyObject *val2 = dump_obj(self, val, false);
@@ -19014,6 +19148,7 @@ dump_external_struct(DumpState *self, PyObject *obj, PyObject *fields) {
     ok = true;
 cleanup:
     Py_LeaveRecursiveCall();
+    Py_DECREF(fields_tuple);
     if (!ok) { Py_CLEAR(out); }
     return out;
 }
@@ -21893,7 +22028,7 @@ struct_check_recurse_dict(
  * annotation, recursing into nested struct fields without creating intermediate
  * objects (no dump roundtrip). */
 static int
-struct_check_recursive(
+struct_check_recursive_impl(
     PyObject *self,
     StructspecState *mod,
     PathNode *path
@@ -21971,6 +22106,18 @@ struct_check_recursive(
     }
 
     Py_DECREF(info_obj);
+    return ret;
+}
+
+static int
+struct_check_recursive(
+    PyObject *self,
+    StructspecState *mod,
+    PathNode *path
+) {
+    if (Py_EnterRecursiveCall(" while checking a Struct")) return -1;
+    int ret = struct_check_recursive_impl(self, mod, path);
+    Py_LeaveRecursiveCall();
     return ret;
 }
 

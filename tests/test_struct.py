@@ -4,6 +4,7 @@ import enum
 import gc
 import operator
 import pickle
+import subprocess
 import sys
 import textwrap
 import weakref
@@ -1577,6 +1578,34 @@ class TestHash:
         assert hash(Ex1(1)) != hash(Ex2(1))
         assert hash(Ex3()) == hash(Ex3())
         assert hash(Ex3()) != hash(Ex4())
+
+    def test_cyclic_frozen_struct_hash_raises_recursion_error(self):
+        source = "\n".join(
+            [
+                "from structtype import Struct, StructConfig",
+                "",
+                "class Node(Struct):",
+                "    struct_config = StructConfig(frozen=True)",
+                "    next: object = None",
+                "",
+                "node = Node()",
+                "object.__setattr__(node, 'next', node)",
+                "try:",
+                "    hash(node)",
+                "except RecursionError:",
+                "    print('ok')",
+                "else:",
+                "    raise AssertionError('expected RecursionError')",
+            ]
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", source],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "ok"
 
     def test_cache_hash(self):
         class Inner:

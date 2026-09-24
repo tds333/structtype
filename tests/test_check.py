@@ -1,4 +1,6 @@
 import datetime
+import subprocess
+import sys
 from typing import Annotated, TypedDict
 
 import pytest
@@ -143,6 +145,48 @@ def test_max_length_violation():
 def test_valid_length():
     p = Named("hello")
     assert p.struct_check_types() is None
+
+
+def test_cyclic_struct_check_types_raises_recursion_error():
+    source = "\n".join(
+        [
+            "from structtype import Struct",
+            "",
+            "class Node(Struct):",
+            "    next: 'Node | None' = None",
+            "",
+            "a = Node()",
+            "b = Node()",
+            "a.next = b",
+            "b.next = a",
+            "try:",
+            "    a.struct_check_types()",
+            "except RecursionError:",
+            "    print('ok')",
+            "else:",
+            "    raise AssertionError('expected RecursionError')",
+        ]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", source],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+def test_shared_non_cyclic_reference_still_passes():
+    class Leaf(Struct):
+        value: int
+
+    class Holder(Struct):
+        left: Leaf | None = None
+        right: Leaf | None = None
+
+    shared = Leaf(1)
+    Holder(left=shared, right=shared).struct_check_types()
 
 
 # ── nested structs ──
