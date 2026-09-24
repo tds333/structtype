@@ -366,7 +366,7 @@ class TestConstraintBaseMetaObject:
         assert Constraint().__rich_repr__() == []
 
     def test_default_fn_is_none(self):
-        assert Constraint().fn is None
+        assert Constraint()._fn is None
 
     def test_equality(self):
         assert_eq(Constraint(), Constraint())

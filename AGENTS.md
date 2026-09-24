@@ -59,7 +59,7 @@ with `make bench BENCH_PYTHON=3.15`); see `docs/benchmarks.rst`.
 
 - `structtype.Struct` — base class with config options (frozen, tag, rename, etc.)
 - `structtype.Field` — field metadata (alias, title, description, examples, deprecated, json_schema_extra)
-- `structtype.Constraint` — base constraint (callable `fn`); subclasses: `NumericConstraint`, `StrConstraint`, `BytesConstraint`, `CollectionConstraint`, `TimezoneConstraint`
+- `structtype.Constraint` — base constraint (callable `_fn`, positional-only in the constructor); subclasses: `NumericConstraint`, `StrConstraint`, `BytesConstraint`, `CollectionConstraint`, `TimezoneConstraint`
 - `structtype.Serializer` — load/dump codecs for supported custom and native types
 - `structtype.fields(type_or_instance)` — get FieldInfo tuple for a struct type/instance
 - `structtype._inspect.type_info()` / `multi_type_info()` — type introspection

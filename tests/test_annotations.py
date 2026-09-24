@@ -79,24 +79,26 @@ class TestSerializer:
 class TestConstraint:
     def test_construction(self):
         v = Constraint(f)
-        assert v.fn is f
+        assert v._fn is f
 
-    def test_keyword_construction(self):
-        v = Constraint(fn=g)
-        assert v.fn is g
+    def test_keyword_construction_rejected(self):
+        # `_fn` is positional-only: it is an internal detail, not part of the
+        # public constructor interface
+        with pytest.raises(TypeError, match="takes no keyword arguments"):
+            Constraint(fn=g)
 
     def test_fn_optional(self):
         v = Constraint()
-        assert v.fn is None
+        assert v._fn is None
         assert repr(v) == "structtype.Constraint()"
 
     def test_explicit_none_fn(self):
         v = Constraint(None)
-        assert v.fn is None
+        assert v._fn is None
 
     @pytest.mark.parametrize("fn", [1, "x", [f]])
     def test_not_callable(self, fn):
-        with pytest.raises(TypeError, match="fn must be callable"):
+        with pytest.raises(TypeError, match="_fn must be callable"):
             Constraint(fn)
 
 
@@ -138,7 +140,7 @@ class TestConstraintCall:
 
         e = Even()
         assert isinstance(e, Constraint)
-        assert e.fn is None
+        assert e._fn is None
         assert e(4) is None
         with pytest.raises(ValueError, match="not even"):
             e(3)
@@ -254,7 +256,7 @@ class TestNumericConstraint:
 
     def test_base_fn_slot_not_aliased(self):
         v = NumericConstraint(gt=5)
-        assert v.fn is None
+        assert v._fn is None
 
 
 class TestNumericConstraintCall:
@@ -582,8 +584,8 @@ class TestEqHashRepr:
         assert Constraint(f) == Constraint(f)
         assert Constraint(f) != Constraint(g)
         assert hash(Constraint(f)) == hash(Constraint(f))
-        assert repr(Constraint(f)) == f"structtype.Constraint(fn={f!r})"
-        assert Constraint(f).__rich_repr__() == [("fn", f)]
+        assert repr(Constraint(f)) == f"structtype.Constraint(_fn={f!r})"
+        assert Constraint(f).__rich_repr__() == [("_fn", f)]
 
     def test_numeric_eq_hash(self):
         assert NumericConstraint(gt=1) == NumericConstraint(gt=1)

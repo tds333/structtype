@@ -54,6 +54,17 @@ class Ordered(Struct):
 
 o = Ordered(1)
 
+# `order=True` generates the ordering dunders (docs/usage.rst)
+lt: bool = o < Ordered(2)
+le: bool = o <= Ordered(2)
+gt: bool = o > Ordered(0)
+ge: bool = o >= Ordered(0)
+
+# Documented struct members
+slots: tuple[str, ...] = Point.__slots__
+inst_slots: tuple[str, ...] = p.__slots__
+match_args: tuple[str, ...] = Point.__match_args__
+
 # Struct methods
 j: bytes = p.struct_dump_json()
 d = p.struct_dump()

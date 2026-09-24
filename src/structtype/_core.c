@@ -2555,8 +2555,10 @@ static PyTypeObject Constraint_Type;
 
 typedef struct {
     PyObject_HEAD
-    /* User-provided validation callable */
-    PyObject *fn;  /* value -> None, signals failure by raising */
+    /* User-provided validation callable. Prefixed with an underscore: the
+     * callable is supplied positionally and stored privately, it is not part
+     * of the public interface. */
+    PyObject *_fn;  /* value -> None, signals failure by raising */
 } Constraint;
 
 PyDoc_STRVAR(Constraint__doc__,
@@ -2564,7 +2566,7 @@ PyDoc_STRVAR(Constraint__doc__,
 "\n"
 "Parameters\n"
 "----------\n"
-"fn : callable, optional\n"
+"_fn : callable, optional\n"
 "    A callable invoked with the annotated value after decoding/coercion.\n"
 "    The return value is ignored; the callable must signal failure by\n"
 "    raising an exception. When omitted, calling the constraint is a no-op,\n"
@@ -2572,20 +2574,22 @@ PyDoc_STRVAR(Constraint__doc__,
 );
 static PyObject *
 Constraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
-    char *kwlist[] = {"fn", NULL};
     PyObject *fn = Py_None;
 
-    if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|O:Constraint.__new__", kwlist,
-            &fn
-        )
-    )
+    /* `_fn` is positional-only (mirrors `Factory`): it is an internal detail,
+     * not part of the public constructor interface. */
+    if (kwargs != NULL && PyDict_GET_SIZE(kwargs) != 0) {
+        PyErr_SetString(PyExc_TypeError,
+            "Constraint takes no keyword arguments");
+        return NULL;
+    }
+    if (!PyArg_ParseTuple(args, "|O:Constraint.__new__", &fn))
         return NULL;
 
     MS_META_NONE_TO_NULL(fn);
 
     if (fn != NULL && !PyCallable_Check(fn)) {
-        PyErr_SetString(PyExc_TypeError, "fn must be callable");
+        PyErr_SetString(PyExc_TypeError, "_fn must be callable");
         return NULL;
     }
 
@@ -2595,7 +2599,7 @@ Constraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     if (self == NULL) return NULL;
 
     Py_XINCREF(fn);
-    self->fn = fn;
+    self->_fn = fn;
 
     return (PyObject *)self;
 }
@@ -2611,8 +2615,8 @@ Constraint_tp_call(PyObject *py_self, PyObject *args, PyObject *kwargs) {
         return NULL;
     }
 
-    if (self->fn != NULL) {
-        PyObject *res = PyObject_CallOneArg(self->fn, value);
+    if (self->_fn != NULL) {
+        PyObject *res = PyObject_CallOneArg(self->_fn, value);
         if (res == NULL) return NULL;
         Py_DECREF(res);
     }
@@ -2624,7 +2628,7 @@ Constraint_repr(Constraint *self) {
     strbuilder builder = {0};
     bool first = true;
     if (!strbuilder_extend_literal(&builder, "structtype.Constraint(")) return NULL;
-    MS_META_DO_REPR(&builder, self, fn, &first);
+    MS_META_DO_REPR(&builder, self, _fn, &first);
     if (!strbuilder_extend_literal(&builder, ")")) goto error;
     return strbuilder_build(&builder);
 error:
@@ -2645,7 +2649,7 @@ Constraint_rich_repr(PyObject *py_self, PyObject *args) {
         Py_DECREF(part);\
         if (ret < 0) goto error;\
     } } while(0)
-    DO_REPR(fn);
+    DO_REPR(_fn);
 #undef DO_REPR
     return out;
 error:
@@ -2670,7 +2674,7 @@ Constraint_richcompare(Constraint *self, PyObject *py_other, int op) {
 
     /* Only need to loop if self is not other */
     if (MS_LIKELY(self != other)) {
-        MS_META_DO_COMPARE(self, other, fn, equal);
+        MS_META_DO_COMPARE(self, other, _fn, equal);
     }
 done:
     if (op == Py_EQ) {
@@ -2696,7 +2700,7 @@ Constraint_hash(Constraint *self) {
     acc = MS_HASH_XXROTATE(acc);
     acc *= MS_HASH_XXPRIME_1;
 
-    MS_META_DO_HASH(self, fn);
+    MS_META_DO_HASH(self, _fn);
     acc += nfields ^ (MS_HASH_XXPRIME_5 ^ 3527539UL);
     return (acc == (Py_uhash_t)-1) ?  1546275796 : acc;
 }
@@ -2709,14 +2713,14 @@ static PyMethodDef Constraint_methods[] = {
 static int
 Constraint_traverse(Constraint *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->fn);
+    Py_VISIT(self->_fn);
     return 0;
 }
 
 static int
 Constraint_clear(Constraint *self)
 {
-    Py_CLEAR(self->fn);
+    Py_CLEAR(self->_fn);
     return 0;
 }
 
@@ -2729,7 +2733,7 @@ Constraint_dealloc(Constraint *self)
 }
 
 static PyMemberDef Constraint_members[] = {
-    {"fn", T_OBJECT, offsetof(Constraint, fn), READONLY,
+    {"_fn", T_OBJECT, offsetof(Constraint, _fn), READONLY,
      "A callable validating the annotated value"},
     {NULL},
 };
@@ -3145,7 +3149,7 @@ static PyMethodDef NumericConstraint_methods[] = {
 static int
 NumericConstraint_traverse(NumericConstraint *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->base.fn);
+    Py_VISIT(self->base._fn);
     Py_VISIT(self->gt);
     Py_VISIT(self->ge);
     Py_VISIT(self->lt);
@@ -3157,7 +3161,7 @@ NumericConstraint_traverse(NumericConstraint *self, visitproc visit, void *arg)
 static int
 NumericConstraint_clear(NumericConstraint *self)
 {
-    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->base._fn);
     Py_CLEAR(self->gt);
     Py_CLEAR(self->ge);
     Py_CLEAR(self->lt);
@@ -3428,7 +3432,7 @@ static PyMethodDef StrConstraint_methods[] = {
 static int
 StrConstraint_traverse(StrConstraint *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->base.fn);
+    Py_VISIT(self->base._fn);
     Py_VISIT(self->pattern);
     Py_VISIT(self->regex);
     Py_VISIT(self->min_length);
@@ -3439,7 +3443,7 @@ StrConstraint_traverse(StrConstraint *self, visitproc visit, void *arg)
 static int
 StrConstraint_clear(StrConstraint *self)
 {
-    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->base._fn);
     Py_CLEAR(self->pattern);
     Py_CLEAR(self->regex);
     Py_CLEAR(self->min_length);
@@ -3688,7 +3692,7 @@ static PyMethodDef BytesConstraint_methods[] = {
 static int
 BytesConstraint_traverse(BytesConstraint *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->base.fn);
+    Py_VISIT(self->base._fn);
     Py_VISIT(self->min_length);
     Py_VISIT(self->max_length);
     return 0;
@@ -3697,7 +3701,7 @@ BytesConstraint_traverse(BytesConstraint *self, visitproc visit, void *arg)
 static int
 BytesConstraint_clear(BytesConstraint *self)
 {
-    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->base._fn);
     Py_CLEAR(self->min_length);
     Py_CLEAR(self->max_length);
     return 0;
@@ -3916,7 +3920,7 @@ static PyMethodDef CollectionConstraint_methods[] = {
 static int
 CollectionConstraint_traverse(CollectionConstraint *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->base.fn);
+    Py_VISIT(self->base._fn);
     Py_VISIT(self->min_length);
     Py_VISIT(self->max_length);
     return 0;
@@ -3925,7 +3929,7 @@ CollectionConstraint_traverse(CollectionConstraint *self, visitproc visit, void 
 static int
 CollectionConstraint_clear(CollectionConstraint *self)
 {
-    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->base._fn);
     Py_CLEAR(self->min_length);
     Py_CLEAR(self->max_length);
     return 0;
@@ -4142,7 +4146,7 @@ static PyMethodDef TimezoneConstraint_methods[] = {
 static int
 TimezoneConstraint_traverse(TimezoneConstraint *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->base.fn);
+    Py_VISIT(self->base._fn);
     Py_VISIT(self->tz);
     return 0;
 }
@@ -4150,7 +4154,7 @@ TimezoneConstraint_traverse(TimezoneConstraint *self, visitproc visit, void *arg
 static int
 TimezoneConstraint_clear(TimezoneConstraint *self)
 {
-    Py_CLEAR(self->base.fn);
+    Py_CLEAR(self->base._fn);
     Py_CLEAR(self->tz);
     return 0;
 }
@@ -5371,7 +5375,7 @@ typenode_simple_repr(TypeNode *self) {
 
 typedef struct {
     PyObject *serializer;  /* the Serializer carrying load/dump, or NULL */
-    PyObject *user_constraint;  /* the Constraint instance (never .fn), or NULL */
+    PyObject *user_constraint;  /* the Constraint instance (never ._fn), or NULL */
 } Constraints;
 
 typedef struct {
@@ -5411,7 +5415,7 @@ typedef struct {
     double c_float_multiple_of;
     PyObject *c_str_regex;
     PyObject *serializer_obj;  /* Serializer* with load/dump, or NULL */
-    PyObject *user_constr_obj;   /* owned Constraint instance (never .fn), or NULL */
+    PyObject *user_constr_obj;   /* owned Constraint instance (never ._fn), or NULL */
     Py_ssize_t c_str_min_length;
     Py_ssize_t c_str_max_length;
     Py_ssize_t c_bytes_min_length;

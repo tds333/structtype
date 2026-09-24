@@ -9,12 +9,14 @@ from typing import Annotated, Any
 
 from structtype import (
     UNSET,
+    Constraint,
     Factory,
     Field,
     NumericConstraint,
     Serializer,
     StrConstraint,
     Struct,
+    TimezoneConstraint,
     UnsetType,
 )
 
@@ -38,6 +40,25 @@ nc4 = NumericConstraint(ge=1, le=5)
 nc5 = NumericConstraint(multiple_of=0.5)
 nc6 = NumericConstraint(gt=1, le=5, multiple_of=0.5)
 nc7 = NumericConstraint(ge=1.5, le=10.5)
+
+# `tz` is positional-or-keyword at runtime
+tz1 = TimezoneConstraint(True)
+tz2 = TimezoneConstraint(tz=True)
+
+
+# `_fn` is a read-only attribute, also on the subclasses. It is positional-only
+# on the constructor and the callable follows the `Constraint.__call__`
+# protocol: it receives the value and signals failure by raising, so it
+# returns `None`.
+def check(value: Any) -> None:
+    if value is None:
+        raise ValueError("none")
+
+
+constraint = Constraint(check)
+cfn: Callable[[Any], None] | None = constraint._fn
+nc_fn: Callable[[Any], None] | None = nc1._fn
+tz_fn: Callable[[Any], None] | None = tz1._fn
 
 
 class Opt(Struct):
