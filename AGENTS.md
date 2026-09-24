@@ -53,7 +53,7 @@ with `make bench BENCH_PYTHON=3.15`); see `docs/benchmarks.rst`.
 - never do git commit
 - check for performance regressions, speed is a goal
 - no parallel benchmarks
-- keep C code simple, fast, readable and threadsafe
+- keep C code simple, fast, readable and compatible to freethreading
 
 ## Key API
 

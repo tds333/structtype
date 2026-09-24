@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Free-threaded builds: dropped the container critical sections taken while
+  encoding, dumping, or validating user dicts. structtype's own mutable state
+  (lazily-built `*Info` objects, caches, the hash cache) stays thread-safe, but
+  mutating a container from one thread while another thread is processing it is
+  no longer guarded. Removing the locks avoids serialising independent
+  operations and any lock-order hazards.
 - `struct_config` is now always present on every struct type and instance,
   defaulting to `{}` when no class in the hierarchy declares one (it previously
   raised `AttributeError` on classes that never set it, despite the type stub

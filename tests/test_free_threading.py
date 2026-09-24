@@ -1,3 +1,12 @@
+"""Free-threaded (no-GIL) tests.
+
+Scope: structtype's *internals* are thread-safe - lazily-built ``*Info``
+objects, caches, and the hash cache. Concurrent use of separate objects, and
+concurrent read-only use of shared objects, must work. Mutating a container
+from one thread while another thread is dumping/encoding/validating it is
+*not* supported; user containers are the caller's responsibility.
+"""
+
 import sys
 import threading
 
@@ -140,78 +149,6 @@ def test_concurrent_dict_decode():
         t.start()
     for t in threads:
         t.join()
-
-
-def test_concurrent_sorted_encode_dict_mutation():
-    """Stress the sorted-encode AssocList path while another thread mutates
-    the dict. Captured keys/values must stay alive for the whole encode, so a
-    concurrent mutation can't free them out from under the encoder."""
-    import random
-
-    from structtype import StructAdapter
-
-    shared = {f"key{i:03d}": i for i in range(100)}
-    adapter = StructAdapter(dict)
-    stop = threading.Event()
-
-    def encoder():
-        while not stop.is_set():
-            adapter.struct_dump_json(shared, sort_keys=True)
-
-    def mutator():
-        while not stop.is_set():
-            key = f"key{random.randrange(100):03d}"
-            shared[key] = random.randrange(1000)
-            shared.pop(f"key{random.randrange(100):03d}", None)
-
-    threads = [threading.Thread(target=encoder) for _ in range(4)] + [
-        threading.Thread(target=mutator) for _ in range(4)
-    ]
-    for t in threads:
-        t.start()
-    for _ in range(20000):
-        adapter.struct_dump_json(shared, sort_keys=True)
-    stop.set()
-    for t in threads:
-        t.join()
-
-
-def test_concurrent_encode_dict_clear_and_repopulate():
-    """Unsorted encoding remains valid while a dict becomes empty and grows."""
-    import json
-
-    from structtype import StructAdapter
-
-    shared = {"value": 1}
-    adapter = StructAdapter(dict)
-    stop = threading.Event()
-    errors = []
-
-    def encoder():
-        try:
-            while not stop.is_set():
-                result = adapter.struct_dump_json(shared)
-                assert isinstance(json.loads(result), dict)
-        except BaseException as e:
-            errors.append(e)
-
-    def mutator():
-        try:
-            for _ in range(20000):
-                shared.clear()
-                shared["value"] = 1
-        except BaseException as e:
-            errors.append(e)
-        finally:
-            stop.set()
-
-    threads = [threading.Thread(target=encoder) for _ in range(4)]
-    threads.append(threading.Thread(target=mutator))
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert errors == []
 
 
 def test_concurrent_self_referential_info_build():
