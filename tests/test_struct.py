@@ -1340,13 +1340,21 @@ def test_struct_option_precedence(option, default):
     assert get(Default) is default
 
     ns = {}
-    exec(f"class Enabled(Struct):\n    struct_config = StructConfig({option}=True)", {"Struct": Struct, "StructConfig": StructConfig}, ns)
+    exec(
+        f"class Enabled(Struct):\n    struct_config = StructConfig({option}=True)",
+        {"Struct": Struct, "StructConfig": StructConfig},
+        ns,
+    )
     Enabled = ns["Enabled"]
 
     assert get(Enabled) is True
 
     ns = {}
-    exec(f"class Disabled(Struct):\n    struct_config = StructConfig({option}=False)", {"Struct": Struct, "StructConfig": StructConfig}, ns)
+    exec(
+        f"class Disabled(Struct):\n    struct_config = StructConfig({option}=False)",
+        {"Struct": Struct, "StructConfig": StructConfig},
+        ns,
+    )
     Disabled = ns["Disabled"]
 
     assert get(Disabled) is False
@@ -1357,7 +1365,11 @@ def test_struct_option_precedence(option, default):
     assert get(T) is True
 
     ns = {}
-    exec(f"class T(Enabled):\n    struct_config = StructConfig({option}=False)", {"Enabled": Enabled, "StructConfig": StructConfig}, ns)
+    exec(
+        f"class T(Enabled):\n    struct_config = StructConfig({option}=False)",
+        {"Enabled": Enabled, "StructConfig": StructConfig},
+        ns,
+    )
     T = ns["T"]
 
     assert get(T) is False
@@ -1580,16 +1592,28 @@ class TestHash:
         assert hash(Ex3()) != hash(Ex4())
 
     def test_cyclic_frozen_struct_hash_raises_recursion_error(self):
+        # A frozen struct can't be mutated to point at itself, so build the
+        # cycle through a mutable holder whose hash recurses back into the
+        # struct. This works on every supported Python, unlike
+        # ``object.__setattr__`` on a frozen struct (which needs a managed
+        # dict, i.e. 3.13+).
         source = "\n".join(
             [
                 "from structtype import Struct, StructConfig",
+                "",
+                "class Holder:",
+                "    def __init__(self):",
+                "        self.node = None",
+                "    def __hash__(self):",
+                "        return hash(self.node)",
                 "",
                 "class Node(Struct):",
                 "    struct_config = StructConfig(frozen=True)",
                 "    next: object = None",
                 "",
-                "node = Node()",
-                "object.__setattr__(node, 'next', node)",
+                "holder = Holder()",
+                "node = Node(next=holder)",
+                "holder.node = node",
                 "try:",
                 "    hash(node)",
                 "except RecursionError:",
@@ -1958,6 +1982,7 @@ class TestTagAndTagField:
     def test_tag_uses_simple_qualname(self):
         class S1(Struct):
             struct_config = StructConfig(tag=True)
+
             class S2(Struct):
                 struct_config = StructConfig(tag=True)
                 pass
@@ -1967,6 +1992,7 @@ class TestTagAndTagField:
 
         class S1(Struct):
             struct_config = StructConfig(tag=str.lower)
+
             class S2(Struct):
                 struct_config = StructConfig(tag=str.lower)
                 pass
@@ -2683,9 +2709,7 @@ class TestForwardReferences:
         with temp_module(source) as mod:
             assert mod.Outer.__struct_fields__ == ("inner",)
             msg = mod.Outer(mod.Inner(1))
-            assert (
-                mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
-            )
+            assert mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
 
     def test_future_annotations_forward_reference(self):
         source = """
@@ -2701,9 +2725,7 @@ class TestForwardReferences:
         with temp_module(source) as mod:
             assert mod.Outer.__struct_fields__ == ("inner",)
             msg = mod.Outer(mod.Inner(1))
-            assert (
-                mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
-            )
+            assert mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
 
     @pytest.mark.skipif(
         sys.version_info < (3, 14),
@@ -2722,9 +2744,7 @@ class TestForwardReferences:
         with temp_module(source) as mod:
             assert mod.Outer.__struct_fields__ == ("inner",)
             msg = mod.Outer(mod.Inner(1))
-            assert (
-                mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
-            )
+            assert mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
 
     @pytest.mark.skipif(
         sys.version_info < (3, 14),
@@ -2743,9 +2763,7 @@ class TestForwardReferences:
         with temp_module(source) as mod:
             assert mod.Outer.__struct_fields__ == ("items",)
             msg = mod.Outer([mod.Inner(1), mod.Inner(2)])
-            assert (
-                mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
-            )
+            assert mod.Outer.struct_validate_json(msg.struct_dump_json()) == msg
 
     @pytest.mark.skipif(
         sys.version_info < (3, 14),
@@ -2762,9 +2780,7 @@ class TestForwardReferences:
         with temp_module(source) as mod:
             assert mod.Node.__struct_fields__ == ("value", "child")
             msg = mod.Node(1, mod.Node(2))
-            assert (
-                mod.Node.struct_validate_json(msg.struct_dump_json()) == msg
-            )
+            assert mod.Node.struct_validate_json(msg.struct_dump_json()) == msg
 
 
 class TestPostInit:
