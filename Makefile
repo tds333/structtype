@@ -131,25 +131,34 @@ format: ## Format files using ruff format
 	uvx ruff format ${SOURCE_DIR}
 
 ##@ Benchmark
+# Published comparisons use free-threaded CPython (see docs/benchmarks.rst).
+# Benchmark scripts are PEP 723 scripts, so this builds an isolated per-script
+# environment and does not touch the project `.venv`.
+BENCH_PYTHON ?= 3.15t
+
 .PHONY: bench
 bench: ## run benchmarks
-	uv run -p 3.15 benchmarks/bench_libs.py
+	uv run -p $(BENCH_PYTHON) benchmarks/bench_libs.py
 
 .PHONY: bench-validators
 bench-validators: ## run Serializer/Validator benchmarks
-	uv run -p 3.15 benchmarks/bench_validators.py
+	uv run -p $(BENCH_PYTHON) benchmarks/bench_validators.py
 
 .PHONY: bench-codecs
 bench-codecs: ## run Constraint + Serializer heavy benchmarks
-	uv run -p 3.15 benchmarks/bench_codecs.py
+	uv run -p $(BENCH_PYTHON) benchmarks/bench_codecs.py
+
+.PHONY: bench-field-types
+bench-field-types: ## run per-field-type benchmarks
+	uv run -p $(BENCH_PYTHON) benchmarks/bench_field_types.py
 
 .PHONY: bench-csv-1m
 bench-csv-1m: ## run 1M-row on-disk CSV benchmark
-	uv run -p 3.15 benchmarks/bench_csv_1m.py
+	uv run -p $(BENCH_PYTHON) benchmarks/bench_csv_1m.py
 
 .PHONY: bench-strings
 bench-strings: ## run long-string JSON codec benchmark
-	uv run -p 3.15 benchmarks/bench_strings.py
+	uv run -p $(BENCH_PYTHON) benchmarks/bench_strings.py
 
 ##@ Utility
 .PHONY: clean
@@ -192,4 +201,4 @@ update-python: ## Reinstall managed Python versions to latest release
 
 .PHONY: help
 help:  ## Display this help
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\033[36m\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\033[36m\033[0m\n"} /^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)

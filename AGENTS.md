@@ -34,7 +34,11 @@ Use `make` targets where available. Targeted tests can be run directly with
 | Static checks | `make check` |
 
 Benchmark targets: `make bench`, `make bench-validators`, `make bench-codecs`,
-`make bench-csv-1m`, `make bench-strings` (run sequentially; CPU-bound).
+`make bench-field-types`, `make bench-csv-1m`, `make bench-strings`
+(run sequentially; CPU-bound; never in parallel).
+
+Benchmarks run on free-threaded CPython (3.15t) via `BENCH_PYTHON` (override
+with `make bench BENCH_PYTHON=3.15`); see `docs/benchmarks.rst`.
 
 ## Conventions
 
@@ -48,6 +52,8 @@ Benchmark targets: `make bench`, `make bench-validators`, `make bench-codecs`,
 - Sentinel values: `NODEFAULT`, `UNSET`, `_NoDefault`, `UnsetType`
 - never do git commit
 - check for performance regressions, speed is a goal
+- no parallel benchmarks
+- keep C code simple, fast, readable and threadsafe
 
 ## Key API
 
