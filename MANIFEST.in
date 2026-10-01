@@ -1,4 +1,3 @@
-prune .devcontainer
 prune .github
 prune benchmarks
 prune docs

@@ -6,7 +6,8 @@ export UV_MANAGED_PYTHON ?= 1
 ##@ Build
 .PHONY: build
 build: ## Build
-	uv build
+	uv build --sdist
+	uv build --wheel
 
 .PHONY: docs
 docs: ## build docs
