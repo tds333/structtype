@@ -2566,11 +2566,13 @@ PyDoc_STRVAR(Constraint__doc__,
 "\n"
 "Parameters\n"
 "----------\n"
-"_fn : callable, optional\n"
-"    A callable invoked with the annotated value after decoding/coercion.\n"
-"    The return value is ignored; the callable must signal failure by\n"
-"    raising an exception. When omitted, calling the constraint is a no-op,\n"
-"    making bare ``Constraint()`` an inert base meant for subclassing.\n"
+"*args\n"
+"    An optional callable invoked with the annotated value after\n"
+"    decoding/coercion. It is positional-only and stored privately as\n"
+"    ``_fn``; it is not part of the public constructor interface. The\n"
+"    return value is ignored; the callable must signal failure by raising\n"
+"    an exception. When omitted, calling the constraint is a no-op, making\n"
+"    bare ``Constraint()`` an inert base meant for subclassing.\n"
 );
 static PyObject *
 Constraint_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
@@ -11999,7 +12001,7 @@ ms_decode_int_enum_or_literal_pyint(PyObject *val, TypeNode *type, PathNode *pat
  * `__struct_fields__` / `__struct_defaults__` as any iterable, not necessarily
  * a tuple. Materialize with a NUL sentinel to distinguish a genuine loopback
  * `None` from an error, then hand owned tuples back to the caller. Returns 0 on
- * success (with *fields_out/*defaults_out set to owned tuples, defaults_out
+ * success (with *fields_out and *defaults_out set to owned tuples, defaults_out
  * possibly NULL) and -1 on error. */
 static int
 ms_materialize_external_struct_metadata(
@@ -12095,19 +12097,6 @@ ms_materialize_external_struct_metadata(
     *fields_out = fields_tuple;
     *defaults_out = defaults_tuple;
     return 0;
-}
-
-/* Validate only `fields` (used by the dump paths, which read defaults from the
- * instance rather than the class). */
-static int
-ms_validate_external_struct_metadata(PyObject *fields) {
-    PyObject *fields_tuple = NULL, *defaults_tuple = NULL;
-    int status = ms_materialize_external_struct_metadata(
-        fields, NULL, &fields_tuple, &defaults_tuple
-    );
-    Py_XDECREF(defaults_tuple);
-    Py_XDECREF(fields_tuple);
-    return status;
 }
 
 static PyObject *

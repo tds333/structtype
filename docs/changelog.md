@@ -1,7 +1,62 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 (Unreleased)
 
+- **Breaking:** the validation callable of `Constraint` is now positional-only
+  and stored privately as `_fn`. `Constraint(fn=...)` raises `TypeError:
+  Constraint takes no keyword arguments` (it used to be accepted), the
+  non-callable message is now `_fn must be callable`, the callable is read
+  as `constraint._fn` rather than `constraint.fn`, and `repr()` /
+  `__rich_repr__()` report `_fn=`. `Factory(factory=...)` is rejected the same
+  way. Subclass constructors (`NumericConstraint(gt=0)`, `StrConstraint(...)`,
+  `TimezoneConstraint(tz=True)`, ...) are unaffected.
+- Hashing a self-referential frozen `Struct`, and `struct_check_types()` on a
+  struct that contains itself, now raise `RecursionError` instead of
+  overflowing the C stack. A shared but acyclic reference still passes.
+- Fix undefined behavior when decoding `timedelta`: the integral part was
+  applied with a `uint64` multiply that wrapped for very large day counts,
+  silently producing a wrong (sometimes negative) duration. Out-of-range input
+  now raises `ValidationError`.
+- `datetime` decoding no longer relies on undefined `double` to `int64`
+  conversion: out-of-range float timestamps raise `ValidationError: Timestamp
+  is out of range`, and a `9999-12-31T23:59:59.999999` timestamp whose
+  microsecond rounding pushes past the maximum epoch is rejected instead of
+  wrapping.
+- Fix signed overflow when negating `-2**63`: parsing
+  `-9223372036854775808` from JSON, and checking `min` / `max` constraints
+  against it, now behave correctly.
+- Non-finite `Decimal` values (`NaN`, `Infinity`) now encode as `null` under
+  `struct_dump_json(decimal_as_number=True)`, matching the float codec, instead
+  of emitting invalid JSON. The default `decimal_as_number=False` is unchanged.
+- `struct_dump_csv()` now raises `TypeError: CSV supports flat scalar fields
+  only` for an `Enum` member whose value is a list, tuple, dict, or set,
+  instead of writing a bogus cell. A tag mismatch on a non-`str` cell now
+  reports a proper `ValidationError`.
+- `struct_dump()` and `struct_validate()` handle their boolean keyword
+  arguments through the same path as the JSON codec. An object whose
+  `__bool__` raises now propagates that exception instead of being treated as
+  `True` with an exception left set.
+- `StructAdapter` now validates constraint / type compatibility eagerly at
+  construction, matching `Struct` class creation, including through `NewType`
+  and PEP 695 type aliases.
+- External struct types — anything exposing `__struct_fields__` /
+  `__struct_defaults__` — may expose those as any iterable of `str`, not only
+  a tuple. A non-iterable, or a non-`str` field name, raises `TypeError`.
+- `str` subclasses are now accepted as JSON input.
+- Dumping a `set` subclass whose iterator yields more items than
+  `PySet_GET_SIZE` reported no longer reads past the end of the list.
+- Fix generated JSON schemas dropping `Field` metadata (`title`,
+  `description`, `examples`, `deprecated`) on tagged-union member `$ref`s.
+- Fix integer tags in a tagged union's `discriminator.mapping` being emitted as
+  numbers instead of strings.
+- `Field(examples=...)` is deep-copied into the generated schema, so mutating
+  a returned schema no longer mutates the `Field`.
+- Fix the type stub: `UnsetType` and the internal `NODEFAULT` sentinel type are
+  no longer declared as `enum.Enum` subclasses (they are singletons at
+  runtime), and `Factory` / `Constraint` are declared positional-only to match
+  the runtime.
+- Add `Struct.__slots__` and the `order=True` comparison dunders
+  (`__lt__`, `__le__`, `__gt__`, `__ge__`) to the type stub.
 - Free-threaded builds: dropped the container critical sections taken while
   encoding, dumping, or validating user dicts. structtype's own mutable state
   (lazily-built `*Info` objects, caches, the hash cache) stays thread-safe, but

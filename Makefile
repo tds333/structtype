@@ -107,9 +107,7 @@ test-debug: ## Build core with Py_DEBUG + ASan/UBSan + debug allocator and run a
 		$(DEBUG_VENV)/bin/python -m pytest
 
 .PHONY: check
-check: ## Run all checks
-	-uvx ty check ${SOURCE_DIR}
-	uvx ruff check ${SOURCE_DIR}
+check: ruff-check type-check ## Run all checks
 
 .PHONY: ruff-check
 ruff-check: ## Lint using ruff
@@ -117,8 +115,7 @@ ruff-check: ## Lint using ruff
 
 .PHONY: type-check
 type-check: ## Type check with
-	-uvx ty check ${SOURCE_DIR}
-	uvx pyrefly check ${SOURCE_DIR}
+	uvx ty check ${SOURCE_DIR}
 
 .PHONY: typecheck-tests
 typecheck-tests: ## Type check tests/typecheck fixtures (skipped when tools unavailable)
