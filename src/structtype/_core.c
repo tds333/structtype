@@ -1,3 +1,8 @@
+#define PY_SSIZE_T_CLEAN
+#include "Python.h"
+#include "datetime.h"
+#include "structmember.h"
+
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -5,11 +10,6 @@
 #include <limits.h>
 #include <float.h>
 #include <stdatomic.h>
-
-#define PY_SSIZE_T_CLEAN
-#include "Python.h"
-#include "datetime.h"
-#include "structmember.h"
 
 #include "common.h"
 #include "itoa.h"
