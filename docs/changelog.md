@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.15.0 (Unreleased)
+## 0.15.0 (2026-10-02)
 
 - **Breaking:** the validation callable of `Constraint` is now positional-only
   and stored privately as `_fn`. `Constraint(fn=...)` raises `TypeError:
