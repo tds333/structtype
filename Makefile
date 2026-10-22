@@ -20,6 +20,7 @@ docs-serve: ## Open built docs in browser
 
 .PHONY: wheels
 wheels: ## build wheels (musllinux skipped; unset CIBW_SKIP or run cibuildwheel directly to include it)
+	rm -f src/structtype/*.so src/structtype/*.o
 	CIBW_SKIP='*-musllinux_*' uvx --from cibuildwheel==4.3.4 cibuildwheel
 
 ##@ Quality
@@ -169,6 +170,7 @@ clean: ## Delete all temporary files
 	rm -rf **/__pycache__
 	rm -rf build
 	rm -rf dist
+	rm -f src/structtype/*.so src/structtype/*.o
 	rm -rf htmlcov-c
 	rm -f .coverage
 	rm -f coverage-c.info coverage-c.info.*
