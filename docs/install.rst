@@ -1,7 +1,7 @@
 Installation
 ============
 
-``structtype`` may be installed via ``pip`` or ``uv``. Note that Python >= 3.10
+``structtype`` may be installed via ``pip`` or ``uv``. Note that Python >= 3.11
 is required. The basic install has no required dependencies. Pre-built wheels are
 available.
 

@@ -6,13 +6,15 @@ from typing import (
     ClassVar,
     Final,
     Literal,
+    Self,
     TypeAlias,
     TypedDict,
+    dataclass_transform,
     final,
     overload,
 )
 
-from typing_extensions import Buffer, Self, dataclass_transform
+from typing_extensions import Buffer
 
 @final
 class UnsetType:

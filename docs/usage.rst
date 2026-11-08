@@ -199,7 +199,7 @@ still be overwritten with `object.__setattr__`.
 .. note::
 
     Calling `object.__setattr__` on a ``Struct`` instance requires Python 3.13+;
-    on Python 3.10-3.12 it raises a `TypeError`. If you need to derive
+    on Python 3.11-3.12 it raises a `TypeError`. If you need to derive
     frozen-struct fields from constructor arguments on those versions, compute
     the values in a helper function and pass them to the constructor instead.
 
@@ -418,12 +418,11 @@ You can also validate an existing struct instance at any time using
 Pattern Matching
 ----------------
 
-If using Python 3.10+, `structtype.Struct` types can be used in `pattern matching`_
+`structtype.Struct` types can be used in `pattern matching`_
 blocks. Replicating an example from `PEP 636`_:
 
 .. code-block:: python
 
-    # NOTE: this example requires Python 3.10+
     >>> from structtype import Struct, Field
 
     >>> class Point(Struct):

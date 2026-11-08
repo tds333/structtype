@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** drop support for Python 3.10. Python 3.11 or newer is required.
+
 ## 0.15.0 (2026-10-02)
 
 - **Breaking:** the validation callable of `Constraint` is now positional-only

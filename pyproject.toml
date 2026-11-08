@@ -2,7 +2,7 @@
 name = "structtype"
 description = "Fast Struct type with validation and JSON serialization for Python."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 maintainers = [{ name = "Wolfgang Langner", email = "tds333@mailbox.org" }]
@@ -10,7 +10,6 @@ keywords = ["JSON", "schema", "serialization", "struct", "validation"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: WebAssembly :: Emscripten",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -22,11 +21,11 @@ dependencies = []
 dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://tds333.github.io/structtype/"
-Documentation = "https://tds333.github.io/structtype/"
-Repository = "https://github.com/tds333/structtype"
 Changelog = "https://tds333.github.io/structtype/changelog.html"
+Documentation = "https://tds333.github.io/structtype/"
+Homepage = "https://tds333.github.io/structtype/"
 "Issue Tracker" = "https://github.com/tds333/structtype/issues"
+Repository = "https://github.com/tds333/structtype"
 
 [dependency-groups]
 dev = [
@@ -51,6 +50,26 @@ docs = [
 requires = ["setuptools>=80", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
+[tool.cibuildwheel]
+build = "cp3*"
+skip = ["pp*", "*-manylinux_i686", "*-win32"]
+test-command = "pip install pytest>=9 && pytest {project}/tests"
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  'if (typing\.)?TYPE_CHECKING:',
+  'if sys\.version_info',
+  "except ImportError:",
+  "# noqa: F821",
+]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
 [tool.setuptools]
 packages = ["structtype"]
 
@@ -66,23 +85,3 @@ parentdir_prefix_version = "structtype-"
 
 [tool.uv.config-settings]
 editable_mode = "compat"
-
-[tool.cibuildwheel]
-build = "cp3*"
-skip = ["pp*", "*-manylinux_i686", "*-win32"]
-test-command = "pip install pytest>=9 && pytest {project}/tests"
-
-[tool.ruff]
-target-version = "py310"
-
-[tool.ruff.lint.isort]
-combine-as-imports = true
-
-[tool.coverage.report]
-exclude_lines = [
-  'pragma: no cover',
-  'if (typing\.)?TYPE_CHECKING:',
-  'if sys\.version_info',
-  'except ImportError:',
-  '# noqa: F821',
-]

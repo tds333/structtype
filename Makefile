@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 SOURCE_DIR = ./src
-PY_VERSIONS = 3.10 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t
+PY_VERSIONS = 3.11 3.12 3.13 3.14 3.14t 3.15 3.15t 3.16 3.16t
 export UV_MANAGED_PYTHON ?= 1
 
 ##@ Build
@@ -97,7 +97,7 @@ ASAN_RUNTIME := $(shell gcc --print-file-name=libasan.so)
 SANITIZE_PRELOAD := LD_PRELOAD=$(ASAN_RUNTIME)
 endif
 
-DEBUG_PY ?= 3.14+debug
+DEBUG_PY ?= 3.15+debug
 DEBUG_VENV = .venv-debug
 
 .PHONY: test-debug

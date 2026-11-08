@@ -1040,12 +1040,8 @@ class TestIntegers:
     @pytest.mark.parametrize("max_length", [None, 1000])
     def test_decode_big_int_max_length(self, max_length):
         if max_length is not None:
-            try:
-                orig = sys.get_int_max_str_digits()
-                sys.set_int_max_str_digits(max_length)
-            except AttributeError:
-                # TODO: remove when 3.10 support is dropped:
-                pytest.skip(reason="sys.set_int_max_str_digits is not available")
+            orig = sys.get_int_max_str_digits()
+            sys.set_int_max_str_digits(max_length)
 
             def cleanup():
                 sys.set_int_max_str_digits(orig)

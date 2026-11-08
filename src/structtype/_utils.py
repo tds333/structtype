@@ -3,20 +3,18 @@ import collections
 import sys
 import types
 import typing
-from typing import Any, _AnnotatedAlias, _GenericAlias  # noqa: F401
+from typing import (  # noqa: F401
+    Any,
+    NotRequired,
+    Required,
+    _AnnotatedAlias,
+    _GenericAlias,
+)
 
 try:
     from typing_extensions import get_type_hints as _get_type_hints
 except ImportError:
     from typing import get_type_hints as _get_type_hints
-
-try:
-    from typing_extensions import NotRequired, Required
-except ImportError:
-    try:
-        from typing import NotRequired, Required
-    except ImportError:
-        Required = NotRequired = None
 
 
 def get_type_hints(obj):
@@ -25,21 +23,9 @@ def get_type_hints(obj):
 
 PY_312PLUS = sys.version_info >= (3, 12)
 
-# The `is_class` argument was new in 3.11, but was backported to 3.9 and 3.10.
-# It's _likely_ to be available for 3.9/3.10, but may not be. Easiest way to
-# check is to try it and see. This check can be removed when we drop support
-# for Python 3.10.
-try:
-    typing.ForwardRef("Foo", is_class=True)
-except TypeError:  # pragma: no cover
 
-    def _forward_ref(value):
-        return typing.ForwardRef(value, is_argument=False)
-
-else:
-
-    def _forward_ref(value):
-        return typing.ForwardRef(value, is_argument=False, is_class=True)
+def _forward_ref(value):
+    return typing.ForwardRef(value, is_argument=False, is_class=True)
 
 
 # Python 3.13 adds a new mandatory type_params kwarg to _eval_type
