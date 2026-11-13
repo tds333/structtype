@@ -5,6 +5,7 @@ import re
 import secrets
 import warnings
 from abc import ABCMeta, _abc_init, abstractmethod
+from typing import ClassVar
 
 import pytest
 from structtype._core import _json_decode, _json_encode
@@ -972,3 +973,27 @@ def test_shadow_warning_escalates_via_filter():
 
             class S(Struct):
                 struct_dump: int = 0
+
+
+def test_struct_unhashable_module_raises():
+    with pytest.raises(TypeError):
+
+        class S(Struct):
+            __module__ = []
+            x: int
+
+
+def test_classvar_string_annotation_module_not_loaded():
+    with pytest.raises(KeyError, match="is not loaded"):
+
+        class Ex(Struct):
+            __module__ = "not_a_loaded_module"
+            cv: "ClassVar[int]" = 1
+
+
+def test_classvar_string_annotation_unhashable_module():
+    with pytest.raises(TypeError, match="unhashable"):
+
+        class Ex(Struct):
+            __module__ = []
+            cv: "ClassVar[int]" = 1

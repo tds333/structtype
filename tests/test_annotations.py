@@ -251,7 +251,7 @@ class TestNumericConstraint:
             NumericConstraint(multiple_of=val)
 
     def test_huge_int_bound_rejected_cleanly(self):
-        with pytest.raises(OverflowError):
+        with pytest.raises(ValueError, match="out of range"):
             NumericConstraint(gt=10**400)
 
     def test_base_fn_slot_not_aliased(self):

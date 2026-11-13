@@ -214,6 +214,13 @@ class TestNumericConstraintMetaObject:
         with pytest.raises(ValueError, match=f"`{field}` must be finite"):
             NumericConstraint(**{field: float("inf")})
 
+    @pytest.mark.parametrize("field", ["gt", "ge", "lt", "le", "multiple_of"])
+    def test_numeric_fields_out_of_range(self, field):
+        # Ints too large for a C double should be a range ValueError, not a
+        # leaked OverflowError.
+        with pytest.raises(ValueError, match=f"`{field}` is out of range"):
+            NumericConstraint(**{field: 10**400})
+
     @pytest.mark.parametrize("val", [0, 0.0])
     def test_multiple_of_bounds(self, val):
         with pytest.raises(ValueError, match=r"`multiple_of` must be > 0"):

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import sys
 from typing import Generic, TypeVar
 
 import pytest
 
-from structtype._utils import get_class_annotations, resolve_annotations_dict
+from structtype._utils import _is_typeddict, get_class_annotations, resolve_annotations_dict
 
 from .utils import temp_module
 
@@ -209,6 +210,72 @@ class TestGetClassAnnotations:
 
         assert get_class_annotations(Ex) == {"x": int | None}
 
+    @pytest.mark.skipif(sys.version_info < (3, 12), reason="3.12+ only")
+    def test_pep695_generic_syntax(self):
+        source = """
+        from __future__ import annotations
+        class Ex[T]:
+            x: T
+            y: list[T]
+            z: int
+        """
+        with temp_module(source) as mod:
+            Ex = mod.Ex
+            (tvar,) = Ex.__type_params__
+            assert get_class_annotations(Ex) == {
+                "x": tvar,
+                "y": list[tvar],
+                "z": int,
+            }
+            assert get_class_annotations(Ex[int]) == {
+                "x": int,
+                "y": list[int],
+                "z": int,
+            }
+
+    def test_generic_typeddict_subclass_keeps_type_argument(self):
+        # TypedDict copies base annotations onto the subclass and drops the
+        # base from the MRO, so Base[int] used to leave the field as a TypeVar.
+        source = """
+        from typing import Generic, TypedDict, TypeVar
+        L = TypeVar("L")
+
+        class Base(TypedDict, Generic[L]):
+            b: L
+            items: list[L]
+
+        class Sub(Base[int]):
+            n: str
+
+        class Override(Base[int]):
+            b: str
+        """
+        with temp_module(source) as mod:
+            assert get_class_annotations(mod.Sub) == {
+                "b": int,
+                "items": list[int],
+                "n": str,
+            }
+            assert get_class_annotations(mod.Override) == {
+                "b": str,
+                "items": list[int],
+            }
+
+    @pytest.mark.skipif(sys.version_info < (3, 12), reason="3.12+ only")
+    def test_pep695_typeddict_subclass_resolves_type_argument(self):
+        source = """
+        from __future__ import annotations
+        from typing import TypedDict
+
+        class Base[Q](TypedDict):
+            b: Q
+
+        class Sub(Base[int]):
+            n: str
+        """
+        with temp_module(source) as mod:
+            assert get_class_annotations(mod.Sub) == {"b": int, "n": str}
+
 
 class TestResolveAnnotationsDict:
     @pytest.mark.parametrize("value", [None, "None"])
@@ -221,3 +288,7 @@ class TestResolveAnnotationsDict:
 
     def test_passthrough_and_none_object(self):
         assert resolve_annotations_dict({"x": int}, {}, {}) == {"x": int}
+
+
+def test_is_typeddict_non_type():
+    assert _is_typeddict(1) is False

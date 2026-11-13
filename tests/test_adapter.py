@@ -5,11 +5,20 @@ import ipaddress
 import pathlib
 import sys
 import uuid
-from typing import Annotated, Any, Final, NewType
+from typing import (
+    Annotated,
+    Any,
+    Final,
+    NewType,
+    NotRequired,
+    Required,
+    TypedDict,
+)
 
 import pytest
 
 import structtype
+from structtype._core import _json_decode, _validate
 from structtype import (
     ALL_BUILTIN_TYPES,
     Constraint,
@@ -21,6 +30,8 @@ from structtype import (
     StructConfig,
     ValidationError,
 )
+
+from .utils import temp_module
 
 
 def test_adapter_rejects_constraint_for_wrong_type():
@@ -84,6 +95,65 @@ def test_adapter_validates_constraint_through_type_alias():
     assert ta.struct_validate(5) == 5
     with pytest.raises(ValidationError):
         ta.struct_validate(-1)
+
+
+def test_adapter_typeddict_annotated_required():
+    class Example(TypedDict):
+        x: Annotated[NotRequired[int], Field(title="X")]
+        y: Annotated[Required[int], Field(title="Y")]
+
+    ta = StructAdapter(Example)
+    assert ta.struct_validate_json(b'{"y": 1}') == {"y": 1}
+    with pytest.raises(ValidationError, match="missing required field `y`"):
+        ta.struct_validate_json(b"{}")
+
+
+def test_adapter_typeddict_annotated_required_constraint():
+    class Example(TypedDict):
+        x: Annotated[Required[int], NumericConstraint(ge=0)]
+
+    ta = StructAdapter(Example)
+    assert ta.struct_validate({"x": 0}) == {"x": 0}
+    with pytest.raises(ValidationError, match="Expected `int` >= 0"):
+        ta.struct_validate({"x": -1})
+
+
+def test_adapter_generic_typeddict_subclass_keeps_type_argument():
+    source = """
+    from typing import Generic, TypedDict, TypeVar
+    L = TypeVar("L")
+
+    class Base(TypedDict, Generic[L]):
+        b: L
+
+    class Sub(Base[int]):
+        n: str
+    """
+    with temp_module(source) as mod:
+        ta = StructAdapter(mod.Sub)
+        assert ta.struct_validate({"b": 1, "n": "a"}) == {"b": 1, "n": "a"}
+        with pytest.raises(ValidationError):
+            ta.struct_validate({"b": "not an int", "n": "a"})
+
+
+def test_adapter_pep695_typeddict_subclass_resolves_type_argument():
+    if sys.version_info < (3, 12):
+        return
+    source = """
+    from __future__ import annotations
+    from typing import TypedDict
+
+    class Base[Q](TypedDict):
+        b: Q
+
+    class Sub(Base[int]):
+        n: str
+    """
+    with temp_module(source) as mod:
+        ta = StructAdapter(mod.Sub)
+        assert ta.struct_validate({"b": 1, "n": "a"}) == {"b": 1, "n": "a"}
+        with pytest.raises(ValidationError):
+            ta.struct_validate({"b": "not an int", "n": "a"})
 
 
 def test_adapter_allows_constraint_on_member_optional():
@@ -246,6 +316,78 @@ def test_dump_builtin_types():
     assert isinstance(r["ts"], str)
     assert isinstance(r["b"], str)
     assert isinstance(r["color"], Color)
+
+
+def test_dump_builtin_types_str_keys_convert_dict_keys():
+    # With str_keys, a dict key must become a str even when its type is listed
+    # in builtin_types.
+    class Obj(Struct):
+        x: dict[datetime.datetime, int]
+
+    obj = Obj({datetime.datetime(2024, 1, 1): 1})
+    r = obj.struct_dump(str_keys=True, builtin_types=[datetime.datetime])
+    assert r == {"x": {"2024-01-01T00:00:00": 1}}
+
+
+def test_validate_unhashable_set_item():
+    ta = StructAdapter(set[list[int]])
+    with pytest.raises(ValidationError, match="hashable"):
+        ta.struct_validate([[1]])
+
+
+def test_validate_unhashable_converted_dict_key():
+    class Custom:
+        pass
+
+    Key = Annotated[Custom, Serializer(load=lambda value: [value])]
+    with pytest.raises(ValidationError, match="hashable"):
+        _validate({1: 1}, dict[Key, int])
+
+
+def test_decode_json_unhashable_converted_dict_key():
+    class Custom:
+        pass
+
+    Key = Annotated[Custom, Serializer(load=lambda value: [value])]
+    with pytest.raises(ValidationError, match="hashable"):
+        _json_decode(b'{"a": 1}', type=dict[Key, int])
+
+
+@pytest.mark.parametrize(
+    "key_type, text, expected",
+    [
+        (datetime.date, "2024-01-15", datetime.date(2024, 1, 15)),
+        (
+            datetime.datetime,
+            "2024-01-15T10:30:00",
+            datetime.datetime(2024, 1, 15, 10, 30),
+        ),
+        (datetime.time, "10:30:00", datetime.time(10, 30)),
+        (datetime.timedelta, "P1D", datetime.timedelta(days=1)),
+        (
+            uuid.UUID,
+            "12345678-1234-5678-1234-567812345678",
+            uuid.UUID("12345678-1234-5678-1234-567812345678"),
+        ),
+        (pathlib.Path, "/tmp/a", pathlib.Path("/tmp/a")),
+        (
+            ipaddress.IPv4Address,
+            "1.2.3.4",
+            ipaddress.IPv4Address("1.2.3.4"),
+        ),
+        (bytes, "YWJj", b"abc"),
+    ],
+)
+def test_validate_builtin_types_str_keys_parse_dict_keys(key_type, text, expected):
+    # With str_keys, a key encoded as a str must still be parsed even when its
+    # type is listed in builtin_types.
+    out = _validate(
+        {text: 1},
+        dict[key_type, int],
+        str_keys=True,
+        builtin_types=[key_type],
+    )
+    assert out == {expected: 1}
 
 
 def test_json_schema():

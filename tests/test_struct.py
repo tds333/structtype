@@ -807,6 +807,18 @@ class TestRepr:
         assert repr(Test()) == "Test()"
         assert repr(Test((1,), frozenset({2}))) == "Test(a=(1,), b=frozenset({2}))"
 
+    def test_repr_omit_defaults_unset_factory_field(self):
+        # `is_default` dereferences the value for factory defaults, so a
+        # deleted field used to crash before the NULL check.
+        class Test(Struct):
+            struct_config = StructConfig(repr_omit_defaults=True)
+            a: list = Factory(list)
+
+        x = Test()
+        del x.a
+        with pytest.raises(AttributeError, match="'a' is unset"):
+            x.__rich_repr__()
+
     def test_repr_recursive(self):
         class Test(Struct):
             a: int

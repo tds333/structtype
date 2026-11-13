@@ -1,10 +1,13 @@
 import gc
 import sys
+import weakref
 
 import pytest
 
 import structtype
 from structtype import StructConfig
+
+from .utils import temp_module
 
 
 def test_array_like_dump_doesnt_leak_field_refs():
@@ -32,6 +35,46 @@ def test_struct_class_annotations_not_leaked():
         del ns
     gc.collect()
     assert sys.getrefcount(shared) == base
+
+
+def test_non_struct_base_type_dict_not_leaked():
+    class Base:
+        pass
+
+    type_dict = next(x for x in gc.get_referents(Base.__dict__) if isinstance(x, dict))
+    gc.collect()
+    base = sys.getrefcount(type_dict)
+    for _ in range(50):
+        A = type(
+            "S",
+            (Base, structtype.Struct),
+            {"__annotations__": {"x": int}, "__module__": __name__},
+        )
+        del A
+    gc.collect()
+    assert sys.getrefcount(type_dict) == base
+
+
+class _UnionLeakCustom:
+    pass
+
+
+class _UnionLeakPoint(structtype.Struct):
+    x: int
+
+
+@pytest.mark.parametrize(
+    "member, other", [(_UnionLeakCustom, type(None)), (_UnionLeakPoint, int)]
+)
+def test_resolving_a_union_does_not_leak_its_args(member, other):
+    from structtype._core import JSONDecoder
+
+    union = member | other
+    JSONDecoder(union)
+    before = sys.getrefcount(member)
+    for _ in range(10):
+        JSONDecoder(member | other)
+    assert sys.getrefcount(member) == before
 
 
 def test_encode_set_iterator_exception_propagates():
@@ -149,3 +192,29 @@ def test_codec_encode_does_not_leak_values():
         buf = msg.struct_dump_json()
         assert Msg.struct_validate_json(buf) == msg
     gc.collect()
+
+
+def test_failed_recursive_typeddict_releases_field_types():
+    source = """
+    from typing import TypedDict
+
+    class Custom:
+        pass
+
+    class A(TypedDict, total=False):
+        first: Custom
+        child: "B"
+        bad: list | tuple
+
+    class B(TypedDict):
+        parent: A
+    """
+    with temp_module(source) as mod:
+        ref = weakref.ref(mod.Custom)
+        ta = structtype.StructAdapter(mod.A)
+        with pytest.raises(TypeError, match="more than one array-like"):
+            ta.struct_validate({})
+        del ta
+        del mod
+    gc.collect()
+    assert ref() is None

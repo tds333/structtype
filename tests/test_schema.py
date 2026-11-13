@@ -9,7 +9,7 @@ import typing
 import uuid
 from base64 import b64encode
 from collections import namedtuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Annotated,
     Any,
@@ -20,7 +20,9 @@ from typing import (
     Literal,
     NamedTuple,
     NewType,
+    NotRequired,
     Optional,
+    Required,
     Set,
     Tuple,
     TypedDict,
@@ -38,6 +40,7 @@ from structtype import (
     Field,
     NumericConstraint,
     StrConstraint,
+    Struct,
     StructConfig,
     TimezoneConstraint,
 )
@@ -726,6 +729,150 @@ def test_typeddict(use_typing_extensions):
     }
 
 
+def test_component_names_collide_in_same_module():
+    def make(value_type):
+        class Response(Struct):
+            value: value_type
+
+        return Response
+
+    first = make(int)
+    second = make(str)
+    third = make(bool)
+    assert first.__qualname__ == second.__qualname__ == third.__qualname__
+
+    schemas, components = structtype.json_schema_components((first, second, third))
+    assert len(components) == 3
+    assert len({schema["$ref"] for schema in schemas}) == 3
+    for schema, expected in zip(schemas, ["integer", "string", "boolean"]):
+        name = schema["$ref"].rsplit("/", 1)[1]
+        assert components[name]["properties"]["value"] == {"type": expected}
+
+
+def test_component_name_references_empty_name():
+    Empty = type("", (Struct,), {"__annotations__": {"value": int}})
+    Empty.__qualname__ = ""
+
+    schemas, components = structtype.json_schema_components((Empty,))
+    assert schemas == ({"$ref": "#/$defs/"},)
+    assert components == {
+        "": {
+            "title": "",
+            "type": "object",
+            "properties": {"value": {"type": "integer"}},
+            "required": ["value"],
+        }
+    }
+
+
+@pytest.mark.parametrize("annotated", [False, True])
+def test_dict_string_literal_key_schema(annotated):
+    key_type = Literal["apple", "banana"]
+    if annotated:
+        key_type = Annotated[key_type, Field(title="fruit")]
+
+    typ = dict[key_type, int]
+    schema = structtype.json_schema(typ)
+    expected = {"enum": ["apple", "banana"]}
+    if annotated:
+        expected["title"] = "fruit"
+    assert schema["propertyNames"] == expected
+    assert schema["additionalProperties"] == {"type": "integer"}
+
+
+@pytest.mark.parametrize("base", [enum.Enum, str])
+@pytest.mark.parametrize("annotated", [False, True])
+def test_dict_string_enum_key_schema(base, annotated):
+    if base is str:
+
+        class Fruit(str, enum.Enum):
+            APPLE = "apple"
+            BANANA = "banana"
+
+    else:
+
+        class Fruit(enum.Enum):
+            APPLE = "apple"
+            BANANA = "banana"
+
+    key_type = Fruit
+    if annotated:
+        key_type = Annotated[key_type, Field(title="fruit")]
+
+    typ = dict[key_type, int]
+    schema = structtype.json_schema(typ)
+    expected = {"$ref": "#/$defs/Fruit"}
+    if annotated:
+        expected["title"] = "fruit"
+    assert schema["propertyNames"] == expected
+    assert schema["$defs"]["Fruit"]["enum"] == ["apple", "banana"]
+
+
+def test_dict_integer_keys_do_not_use_string_property_names():
+    class Number(enum.IntEnum):
+        ONE = 1
+        TWO = 2
+
+    for key_type in (int, Literal[1, 2], Number):
+        schema = structtype.json_schema(dict[key_type, int])
+        assert "propertyNames" not in schema
+
+
+def test_dataclass_default_factory_schema():
+    @dataclass
+    class Example:
+        x: list[int] = field(default_factory=list)
+        y: dict[str, str] = field(default_factory=dict)
+
+    schema = structtype.json_schema(Example)["$defs"]["Example"]
+    assert schema["properties"]["x"] == {
+        "type": "array",
+        "items": {"type": "integer"},
+        "default": [],
+    }
+    assert schema["properties"]["y"] == {
+        "type": "object",
+        "additionalProperties": {"type": "string"},
+        "default": {},
+    }
+
+
+def test_flag_schema_includes_declared_members():
+    class Permissions(enum.Flag):
+        NONE = 0
+        READ = 1
+        WRITE = 2
+        BOTH = 3
+        BOTH_ALIAS = 3
+
+    schema = structtype.json_schema(Permissions)
+    assert schema["$defs"]["Permissions"]["enum"] == [0, 1, 2, 3]
+
+
+def test_typeddict_annotated_required_metadata():
+    class Example(TypedDict):
+        x: Annotated[NotRequired[int], Field(title="X")]
+        y: Annotated[Required[int], Field(title="Y")]
+        z: int
+
+    schema = make_schema(Example)["$defs"]["Example"]
+    assert schema["properties"] == {
+        "x": {"title": "X", "type": "integer"},
+        "y": {"title": "Y", "type": "integer"},
+        "z": {"type": "integer"},
+    }
+    assert schema["required"] == ["y", "z"]
+
+
+def test_typeddict_annotated_required_constraint():
+    class Example(TypedDict):
+        x: Annotated[Required[int], NumericConstraint(ge=0)]
+
+    schema = make_schema(Example)["$defs"]["Example"]
+    assert schema["properties"] == {"x": {"type": "integer", "minimum": 0}}
+    assert schema["required"] == ["x"]
+
+
 @pytest.mark.parametrize("use_typing_extensions", [False, True])
 def test_typeddict_optional(use_typing_extensions):
     if use_typing_extensions:
@@ -845,6 +992,7 @@ def test_dataclass_or_attrs(module):
                     "metadata": {
                         "type": "object",
                         "additionalProperties": {"type": "string"},
+                        "default": {},
                     },
                 },
                 "required": ["vertices"],
@@ -1675,6 +1823,7 @@ def test_pydantic_with_defaults():
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"},
+                        "default": [],
                     },
                 },
                 "required": ["name"],

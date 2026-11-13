@@ -3,7 +3,7 @@ import collections
 import sys
 import types
 import typing
-from typing import (  # noqa: F401
+from typing import (
     Any,
     NotRequired,
     Required,
@@ -21,21 +21,33 @@ def get_type_hints(obj):
     return _get_type_hints(obj, include_extras=True)
 
 
-PY_312PLUS = sys.version_info >= (3, 12)
-
-
 def _forward_ref(value):
     return typing.ForwardRef(value, is_argument=False, is_class=True)
 
 
-# Python 3.13 adds a new mandatory type_params kwarg to _eval_type
-if sys.version_info >= (3, 13):
+# The type_params kwarg was added in 3.12.4 and made mandatory in 3.13.
+# Threading it lets module-bound ForwardRefs (built eagerly by TypedDict)
+# resolve PEP 695 type params, whose evaluation would otherwise ignore the
+# locals we stash them in. Copying them into localns also prevents same-named
+# module globals from shadowing the type parameter on Python versions where
+# ForwardRef replaces globalns.
+if sys.version_info >= (3, 12, 4):
 
-    def _eval_type(t, globalns, localns):
-        return typing._eval_type(t, globalns, localns, ())
+    def _eval_type(t, globalns, localns, type_params=()):
+        if type_params:
+            localns = dict(localns)
+            localns.update((param.__name__, param) for param in type_params)
+        return typing._eval_type(t, globalns, localns, type_params=type_params)
 
 else:  # pragma: no cover
-    _eval_type = typing._eval_type
+
+    def _eval_type(t, globalns, localns, type_params=()):
+        # On Python 3.12.0-3.12.3 the fourth positional argument is
+        # recursive_guard.
+        if type_params:
+            localns = dict(localns)
+            localns.update((param.__name__, param) for param in type_params)
+        return typing._eval_type(t, globalns, localns)
 
 
 if sys.version_info >= (3, 14):
@@ -157,6 +169,12 @@ def get_class_annotations(obj):
     """
     hints = {}
     mro, typevar_mappings = _get_class_mro_and_typevar_mappings(obj)
+    mro_set = set(mro)
+
+    if isinstance(obj, type) and not isinstance(obj, types.GenericAlias):
+        origin = obj
+    else:
+        origin = getattr(obj, "__origin__", None)
 
     for cls in mro:
         if cls in (typing.Generic, object):
@@ -165,9 +183,10 @@ def get_class_annotations(obj):
         mapping = typevar_mappings.get(cls)
         cls_locals = dict(vars(cls))
 
-        if PY_312PLUS:
-            # resolve type parameters (e.g. class Foo[T]: pass)
-            cls_locals.update({p.__name__: p for p in cls.__type_params__})
+        # Resolve type parameters (e.g. class Foo[T]: pass)
+        type_params = getattr(cls, "__type_params__", ())
+        if type_params:
+            cls_locals.update({p.__name__: p for p in type_params})
 
         try:
             cls_module = cls.__module__
@@ -176,19 +195,69 @@ def get_class_annotations(obj):
         else:
             cls_globals = getattr(sys.modules.get(cls_module, None), "__dict__", {})
 
+        # TypedDict copies postponed annotations from a parametrized base, and
+        # ForwardRef evaluation looks those names up as type parameters. The
+        # base is not in the MRO, so add its parameters here. Skip names this
+        # class already defines so a subclass type parameter is not replaced.
+        all_type_params = tuple(type_params)
+        seen_names = {getattr(param, "__name__", None) for param in all_type_params}
+        for parent, scope in typevar_mappings.items():
+            if parent in mro_set:
+                continue
+            for tvar in scope:
+                name = getattr(tvar, "__name__", None)
+                if name and name not in seen_names:
+                    seen_names.add(name)
+                    all_type_params = all_type_params + (tvar,)
+
         ann = _get_class_annotations(cls)
         for name, value in ann.items():
             if name in hints:
                 continue
             if isinstance(value, str):
                 value = _forward_ref(value)
-            value = _eval_type(value, cls_locals, cls_globals)
+            value = _eval_type(value, cls_locals, cls_globals, all_type_params)
             if mapping is not None:
                 value = _apply_params(value, mapping)
             if value is None:
                 value = type(None)
             hints[name] = value
+
+    return _substitute_copied_typeddict_params(origin, hints, typevar_mappings, mro)
+
+
+def _substitute_copied_typeddict_params(origin, hints, typevar_mappings, mro):
+    """Apply type-parameter bindings TypedDict inheritance leaves unresolved.
+
+    ``TypedDict`` copies base annotations onto the subclass and omits the base
+    from the MRO, so the mapping built for ``Base[int]`` is never applied to
+    the copied ``TypeVar``. Substitute only fields still identical to the
+    base annotation; an override on the subclass is left alone.
+    """
+    if origin is None or not _is_typeddict(origin):
+        return hints
+
+    mro_set = set(mro)
+    child_raw = _get_class_annotations(origin)
+    for parent, scope in typevar_mappings.items():
+        if parent in mro_set or not scope:
+            continue
+        parent_raw = _get_class_annotations(parent)
+        for key, parent_value in parent_raw.items():
+            # TypedDict copies the base annotation object onto the subclass.
+            # An override is a different object and must be left alone.
+            if key in hints and child_raw.get(key) == parent_value:
+                hints[key] = _apply_params(hints[key], scope)
     return hints
+
+
+def _is_typeddict(t):
+    # Not `typing.is_typeddict`: it returns False for `typing_extensions.TypedDict`
+    # classes, which structtype supports. This matches the check in `_core.c`.
+    try:
+        return issubclass(t, dict) and hasattr(t, "__total__")
+    except TypeError:
+        return False
 
 
 def resolve_annotations_dict(raw_annotations, locals_ns, globals_ns):
@@ -274,15 +343,24 @@ def get_typeddict_info(obj):
     # `Required`/`NotRequired` wrappers.
     hints = {}
     for k, v in raw_hints.items():
+        annotation = v
+        if isinstance(v, _AnnotatedAlias):
+            v = v.__origin__
         origin = getattr(v, "__origin__", False)
         if origin is Required:
             required.add(k)
-            hints[k] = v.__args__[0]
+            v = v.__args__[0]
         elif origin is NotRequired:
             required.discard(k)
-            hints[k] = v.__args__[0]
+            v = v.__args__[0]
         else:
-            hints[k] = v
+            hints[k] = annotation
+            continue
+        # PEP 655 allows Annotated outside Required/NotRequired. Preserve its
+        # metadata, including any Annotated nested inside the qualifier.
+        if isinstance(annotation, _AnnotatedAlias):
+            v = typing.Annotated[(v, *annotation.__metadata__)]
+        hints[k] = v
 
     # This can happen if there is a bug in the TypedDict implementation;
     # such a bug was present in Python 3.14.

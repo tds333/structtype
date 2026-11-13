@@ -3,6 +3,40 @@
 ## Unreleased
 
 - **Breaking:** drop support for Python 3.10. Python 3.11 or newer is required.
+- Reject embedded NUL bytes in RFC3339 `datetime`/`time` strings; they were
+  treated as end-of-input and silently truncated the value.
+- Raise `ValidationError` instead of crashing when a tuple subclass with
+  malformed named-tuple metadata (`_fields` not a tuple, or a missing/non-dict
+  `_field_defaults`) is used as a type. `inspect.type_info` now agrees with the
+  decoder about what counts as a namedtuple.
+- Fix a crash in `Struct.__rich_repr__()` for an unset field with a factory
+  default when `repr_omit_defaults=True`.
+- Encode `decimal.Decimal` dictionary keys as JSON strings even with
+  `decimal_as_number=True`, producing valid JSON.
+- Raise `ValidationError` (with a path) instead of a bare `TypeError` when a
+  decoded set item or converted dictionary key is unhashable.
+- Preserve `Annotated` metadata around `Required`/`NotRequired` in `TypedDict`
+  fields; inherited type arguments on generic `TypedDict` subclasses are now
+  applied, and PEP 695 annotations resolve without `NameError`.
+- Raise `ValueError` instead of leaking `OverflowError` for constraint bounds
+  too large to represent as a float.
+- `struct_dump(..., str_keys=True, builtin_types=...)` and the internal
+  validation path now still stringify/parse dictionary keys whose type is listed
+  in `builtin_types`.
+- JSON Schema fixes: distinct dynamically generated types with the same module
+  and qualified name no longer overwrite each other; empty component names
+  produce valid `$ref`s; string `Literal`/`Enum` dictionary keys emit
+  `propertyNames`; dataclass/attrs `default_factory` fields emit defaults; and
+  declared zero/composite `Flag` members appear in `enum`.
+- Fix reference leaks when defining a `Struct` with a non-`Struct` base on
+  Python 3.12+ and when resolving `X | Y` unions on Python 3.14+.
+- Fix error handling in several C paths that could swallow the original
+  exception and raise `SystemError` instead: annotation lookups, sorted-dict
+  re-hashing, dataclass `__dict__` iteration, tagged-union tag lookup, and
+  `ClassVar`/module-namespace resolution. Objects are no longer classified as
+  dataclasses through an instance `__getattr__`.
+- Initialize the portable `ms_clzll` fallback and mark positional-only methods
+  as such in the type stub.
 
 ## 0.15.0 (2026-10-02)
 

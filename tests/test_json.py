@@ -915,6 +915,10 @@ class TestDatetime:
             b'"0001-02-03T04:05:06.000007Z0"',
             b'"0001-02-03T04:05:06a"',
             b'"0001-02-03T04:05:06.000007a"',
+            # NUL byte
+            b'"0001-02-03T04:05:06\\u0000"',
+            b'"0001-02-03T04:05:06\\u0000Z"',
+            b'"0001-02-03T04:05:06.000007\\u0000+05:00"',
             # Truncated
             b'"0001-02-03T04:05:"',
             # Missing +/-
@@ -961,6 +965,18 @@ class TestDatetime:
     def test_decode_datetime_malformed(self, s):
         with pytest.raises(structtype.ValidationError, match="Invalid RFC3339"):
             _json_decode(s, type=datetime.datetime)
+
+    @pytest.mark.parametrize(
+        "s",
+        [
+            b'"01:02:03\\u0000"',
+            b'"01:02:03\\u0000Z"',
+            b'"01:02:03.004\\u0000+05:06"',
+        ],
+    )
+    def test_decode_time_nul(self, s):
+        with pytest.raises(structtype.ValidationError, match="Invalid RFC3339"):
+            _json_decode(s, type=datetime.time)
 
 
 class TestIntegers:
@@ -1574,6 +1590,15 @@ class TestDecimal:
         msg = enc.encode(Decimal("1.3000"))
         assert msg == b"1.3000"
 
+    @pytest.mark.parametrize("as_number", [False, True])
+    def test_decimal_dict_keys_encoded_as_strings(self, as_number):
+        """JSON object keys must be strings, whatever decimal_as_number says
+        about values."""
+        enc = JSONEncoder(decimal_as_number=as_number)
+        msg = enc.encode({Decimal("1.5"): 1})
+        assert msg == b'{"1.5":1}'
+        assert _json_decode(msg, type=dict[Decimal, int]) == {Decimal("1.5"): 1}
+
     @pytest.mark.parametrize("value", ["NaN", "sNaN", "Infinity", "-Infinity"])
     def test_decimal_non_finite_as_number_is_null(self, value):
         enc = JSONEncoder(decimal_as_number=True)
@@ -1706,6 +1731,26 @@ class TestSequences:
         assert dec.decode(b"[1]") == frozenset({1})
         assert dec.decode(b"[1,2]") == frozenset({1, 2})
 
+    @pytest.mark.parametrize("type", [set, frozenset, set[list[int]]])
+    def test_decode_unhashable_item(self, type):
+        """Arrays decode as lists, which can't be added to a set. This must
+        raise a ValidationError, not a bare TypeError."""
+        with pytest.raises(
+            structtype.ValidationError,
+            match=r"Expected a hashable value, got `list` - at `\$\[0\]`",
+        ):
+            _json_decode(b"[[1, 2]]", type=type)
+
+    def test_decode_unhashable_item_nested_path(self):
+        class Ex(Struct):
+            values: set
+
+        with pytest.raises(
+            structtype.ValidationError,
+            match=r"Expected a hashable value, got `dict` - at `\$\.values\[0\]`",
+        ):
+            Ex.struct_validate_json(b'{"values": [{"a": 1}]}')
+
     def test_decode_typed_vartuple(self):
         dec = JSONDecoder(tuple[int, ...])
         assert dec.decode(b"[]") == ()
@@ -1802,6 +1847,58 @@ class TestNamedTuple:
 
         with pytest.raises(structtype.DecodeError, match=error):
             _json_decode(s, type=Test)
+
+    def test_namedtuple_like(self):
+        # These are not real NamedTuples, but previously passed the structural
+        # check used by the decoder. Invalid metadata must be treated as a
+        # custom type instead of crashing.
+        class FieldsNotTuple(tuple):
+            _fields = ["a", "b"]
+            _field_defaults = {}
+
+        class NotSequenceFields(tuple):
+            _fields = 1
+
+        class MissingFields(tuple):
+            pass
+
+        class MissingDefaults(tuple):
+            _fields = ("a", "b")
+
+        class DefaultsNotDict(tuple):
+            _fields = ("a", "b")
+            _field_defaults = []
+
+        class NotTupleSubclass:
+            _fields = ("a", "b")
+            _field_defaults = {}
+
+        for klass in (
+            FieldsNotTuple,
+            NotSequenceFields,
+            MissingFields,
+            MissingDefaults,
+            DefaultsNotDict,
+            NotTupleSubclass,
+        ):
+            with pytest.raises(structtype.ValidationError, match=klass.__name__):
+                _json_decode(b"[1, 2]", type=klass)
+
+
+def test_dump_does_not_probe_instance_dataclass_fields():
+    calls = []
+
+    class Weird:
+        def __getattr__(self, name):
+            calls.append(name)
+            raise AttributeError(name)
+
+    class Ex(Struct):
+        x: Weird
+
+    with pytest.raises(TypeError, match="unsupported"):
+        Ex(Weird()).struct_dump_json()
+    assert "__dataclass_fields__" not in calls
 
 
 class TestDict:
@@ -2135,8 +2232,81 @@ class TestDataclass:
         with pytest.raises(structtype.DecodeError, match=error):
             _json_decode(s, type=Test)
 
+    def test_encode_non_dict_dataclass_fields(self):
+        class Weird:
+            __dataclass_fields__ = []
+
+        class Ex(Struct):
+            x: Weird
+
+        with pytest.raises(RuntimeError, match="is not a dict"):
+            _json_encode(Ex(Weird()))
+
+    def test_encode_dataclass_dict_key_eq_error(self):
+        class Key:
+            def __hash__(self):
+                return hash("x")  # matches the field name
+
+            def __eq__(self, other):
+                raise RuntimeError("eq failed")
+
+        @dataclass
+        class Ex:
+            x: int
+
+        obj = Ex(1)
+        obj.__dict__ = {Key(): 2}
+
+        with pytest.raises(RuntimeError, match="eq failed"):
+            _json_encode(obj)
+        with pytest.raises(RuntimeError, match="eq failed"):
+            structtype.StructAdapter(Ex).struct_dump(obj)
+
 
 class TestStruct:
+    def test_decode_struct_broken_annotations(self):
+        class BrokenAnnotations(Struct):
+            x: int
+
+        BrokenAnnotations.__annotations__ = {}
+
+        with pytest.raises(TypeError, match="__annotations__"):
+            _json_decode(b'{"x": 1}', type=BrokenAnnotations)
+
+    def test_dump_sorted_dict_key_hash_error(self):
+        class Key(str):
+            def __new__(cls):
+                obj = super().__new__(cls, "k")
+                cls.calls = 0
+                return obj
+
+            def __hash__(self):
+                Key.calls += 1
+                if Key.calls > 2:
+                    raise RuntimeError("hash failed")
+                return super().__hash__()
+
+            def __eq__(self, other):
+                return self is other
+
+        class Ex(Struct):
+            x: dict[Any, int]
+
+        with pytest.raises(RuntimeError, match="hash failed"):
+            Ex({Key(): 1}).struct_dump(sort_keys=True)
+
+    def test_decoder_unhashable_origin(self):
+        class Origin:
+            def __hash__(self):
+                raise RuntimeError("hash failed")
+
+        class Ex:
+            __origin__ = Origin()
+            __args__ = ()
+
+        with pytest.raises(TypeError, match="not supported"):
+            JSONDecoder(Ex())
+
     @pytest.mark.parametrize("tag", [False, "Test", 123])
     def test_encode_empty_struct(self, tag):
         class Test(structtype.Struct):
@@ -2464,6 +2634,25 @@ class TestStruct:
 class TestStructUnion:
     """Most functionality is tested in `test_common.py:TestStructUnion`, this only
     checks for malformed inputs and whitespace handling"""
+
+    def test_validate_tag_lookup_eq_error(self):
+        class A(Struct):
+            struct_config = StructConfig(tag="a")
+            a: int
+
+        class B(Struct):
+            struct_config = StructConfig(tag="b")
+            b: int
+
+        class Key:
+            def __hash__(self):
+                return hash("type")
+
+            def __eq__(self, other):
+                raise RuntimeError("eq failed")
+
+        with pytest.raises(RuntimeError, match="eq failed"):
+            structtype.StructAdapter(A | B).struct_validate({Key(): 1})
 
     @pytest.mark.parametrize(
         "s, error",

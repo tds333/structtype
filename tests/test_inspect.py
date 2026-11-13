@@ -564,6 +564,48 @@ def test_generic_namedtuple():
     assert mi.type_info(Example[int]) == sol
 
 
+def test_namedtuple_like_types():
+    # A namedtuple-like type is a tuple subclass whose `_fields` is a tuple
+    # and whose `_field_defaults` is a dict. Anything else is a custom type.
+    class FieldsNotTuple(tuple):
+        _fields = ["a"]
+        _field_defaults = {}
+
+    class NotSequenceFields(tuple):
+        _fields = 1
+
+    class MissingDefaults(tuple):
+        _fields = ("a",)
+
+    class DefaultsNotDict(tuple):
+        _fields = ("a",)
+        _field_defaults = []
+
+    class NotTupleSubclass:
+        _fields = ("a",)
+        _field_defaults = {}
+
+    for cls in (
+        FieldsNotTuple,
+        NotSequenceFields,
+        MissingDefaults,
+        DefaultsNotDict,
+        NotTupleSubclass,
+    ):
+        assert mi.type_info(cls) == mi.CustomType(cls)
+
+    # Structurally valid namedtuple-likes are still reported as namedtuples
+    class NamedTupleLike(tuple):
+        _fields = ("a",)
+        _field_defaults = {}
+        __annotations__ = {"a": int}
+
+    sol = mi.NamedTupleType(
+        NamedTupleLike, fields=(mi.FieldNode("a", "a", mi.IntType()),)
+    )
+    assert mi.type_info(NamedTupleLike) == sol
+
+
 @pytest.mark.parametrize("use_typing_extensions", [False, True])
 def test_typeddict(use_typing_extensions):
     if use_typing_extensions:
@@ -973,3 +1015,7 @@ def test_tuple_empty_tuple_args():
     ti = mi.type_info(Tuple[()])
     assert isinstance(ti, mi.TupleType)
     assert ti.item_types == ()
+
+
+def test_is_namedtuple_non_type():
+    assert mi._is_namedtuple(1) is False
