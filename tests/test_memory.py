@@ -1,6 +1,8 @@
 import gc
 import sys
 import weakref
+from dataclasses import dataclass
+from typing import NamedTuple
 
 import pytest
 
@@ -218,3 +220,29 @@ def test_failed_recursive_typeddict_releases_field_types():
         del mod
     gc.collect()
     assert ref() is None
+
+
+def test_nested_deep_check_does_not_leak():
+    class Leaf(structtype.Struct):
+        x: int
+
+    @dataclass
+    class Wrapper:
+        leaf: Leaf
+
+    class Pair(NamedTuple):
+        leaf: Leaf
+
+    class Holder(structtype.Struct):
+        wrapper: Wrapper
+        pair: Pair
+
+    leaf = Leaf(1)
+    holder = Holder(Wrapper(leaf), Pair(leaf))
+    before = sys.getrefcount(leaf)
+    assert holder.struct_check_types() is None
+    assert sys.getrefcount(leaf) == before
+    leaf.x = "bad"  # type: ignore[assignment]
+    with pytest.raises(structtype.ValidationError):
+        holder.struct_check_types()
+    assert sys.getrefcount(leaf) == before

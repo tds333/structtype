@@ -1038,6 +1038,94 @@ def test_check_nested_namedtuple():
     assert NestedNamedTuple(PointTuple(Point(1, 2))).struct_check_types() is None
 
 
+def test_check_forged_namedtuple_wrong_length_rejected():
+    class Pair(NamedTuple):
+        a: int
+        b: int = 5
+
+    class Holder(Struct):
+        pair: Pair
+
+    holder = Holder(Pair(1, 2))
+
+    longer = tuple.__new__(Pair, (1, 2, 3))
+    holder.pair = longer
+    with pytest.raises(ValidationError, match=r"Expected `array` of length 2, got 3"):
+        holder.struct_check_types()
+
+    shorter = tuple.__new__(Pair, (1,))
+    holder.pair = shorter
+    with pytest.raises(ValidationError, match=r"Expected `array` of length 2, got 1"):
+        holder.struct_check_types()
+
+
+@requires_subprocess
+def test_cyclic_dataclass_check_types_raises_recursion_error():
+    source = "\n".join(
+        [
+            "from dataclasses import dataclass",
+            "from structtype import Struct",
+            "",
+            "@dataclass",
+            "class Node:",
+            "    next: 'Node | None' = None",
+            "",
+            "class Holder(Struct):",
+            "    inner: Node",
+            "",
+            "a = Node()",
+            "a.next = a",
+            "try:",
+            "    Holder(a).struct_check_types()",
+            "except RecursionError:",
+            "    print('ok')",
+            "else:",
+            "    raise AssertionError('expected RecursionError')",
+        ]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", source],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+@requires_subprocess
+def test_cyclic_namedtuple_check_types_raises_recursion_error():
+    source = "\n".join(
+        [
+            "from typing import NamedTuple",
+            "from structtype import Struct",
+            "",
+            "class Node(NamedTuple):",
+            "    children: list['Node']",
+            "",
+            "class Holder(Struct):",
+            "    inner: Node",
+            "",
+            "a = Node([])",
+            "a.children.append(a)",
+            "try:",
+            "    Holder(a).struct_check_types()",
+            "except RecursionError:",
+            "    print('ok')",
+            "else:",
+            "    raise AssertionError('expected RecursionError')",
+        ]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", source],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
 def test_check_nested_dataclass_constraint():
     @dataclass
     class RangedDataclass:

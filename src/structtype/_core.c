@@ -10231,7 +10231,30 @@ Struct_build_abstract_error(PyTypeObject *cls) {
     Py_DECREF(joined);
 }
 
-static int struct_check_recursive(PyObject *, StructspecState *, PathNode *);
+/* CPython's C recursion guard bounds the recursion count, not the C stack
+ * that the `validate_obj` traversal consumes per deep-check level. On Windows
+ * the main-thread stack is only 2MB, so deeply nested structs/dataclasses/
+ * namedtuples can exhaust it before the platform's C recursion limit fires.
+ * Cap the deep-check nesting well below that. */
+#if defined(_WIN32)
+#  define MS_MAX_DEEP_CHECK_DEPTH 400
+#else
+#  define MS_MAX_DEEP_CHECK_DEPTH 1000
+#endif
+
+typedef struct ValidateState {
+    StructspecState *mod;
+    uint32_t builtin_types;
+    bool str_keys;
+    bool from_attributes;
+    bool strict;
+    bool check_types_only;
+    bool deep_structs;
+    int deep_depth;
+} ValidateState;
+
+static ValidateState ms_deep_check_state(StructspecState *);
+static int struct_check_recursive(PyObject *, ValidateState *, PathNode *);
 
 static PyObject *
 Struct_vectorcall(PyTypeObject *cls, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
@@ -10352,7 +10375,8 @@ kw_found:
     if (st_type->check_types_on_init == OPT_TRUE) {
         StructspecState *mod = structtype_get_global_state();
         if (mod == NULL) goto error;
-        if (struct_check_recursive(self, mod, NULL) < 0) goto error;
+        ValidateState state = ms_deep_check_state(mod);
+        if (struct_check_recursive(self, &state, NULL) < 0) goto error;
     }
 
     if (Struct_post_init(st_type, self) < 0) goto error;
@@ -20167,16 +20191,6 @@ error:
  * validate                                                               *
  *************************************************************************/
 
-typedef struct ValidateState {
-    StructspecState *mod;
-    uint32_t builtin_types;
-    bool str_keys;
-    bool from_attributes;
-    bool strict;
-    bool check_types_only;
-    bool deep_structs;
-} ValidateState;
-
 static PyObject * validate_obj(ValidateState *, PyObject *, TypeNode *, PathNode *);
 
 static PyObject *
@@ -21734,72 +21748,104 @@ static int
 ms_check_nested_instances(
     ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
-    if (
+    bool is_struct =
         ms_is_struct_inst(obj) &&
         (type->types & (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY |
-                        MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION))
-    ) {
-        return struct_check_recursive(obj, self->mod, path);
+                        MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION));
+    if (!is_struct && !(type->types & (MS_TYPE_DATACLASS | MS_TYPE_NAMEDTUPLE)))
+        return 0;
+
+    if (MS_UNLIKELY(self->deep_depth >= MS_MAX_DEEP_CHECK_DEPTH)) {
+        PyErr_SetString(
+            PyExc_RecursionError,
+            "maximum recursion depth exceeded while checking a Struct"
+        );
+        return -1;
     }
-    if (type->types & MS_TYPE_DATACLASS) {
+    self->deep_depth++;
+    int status = 0;
+
+    if (is_struct) {
+        status = struct_check_recursive(obj, self, path);
+    }
+    else if (type->types & MS_TYPE_DATACLASS) {
         DataclassInfo *info = TypeNode_get_dataclass_info(type);
-        if (MS_UNLIKELY(info == NULL)) return -1;
-        if (Py_EnterRecursiveCall(" while checking a Struct")) return -1;
-        int status = 0;
-        for (Py_ssize_t i = 0; i < Py_SIZE(info); i++) {
-            PyObject *key = info->fields[i].key;
-            PyObject *val = PyObject_GetAttr(obj, key);
-            if (val == NULL) {
-                if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
-                    PyErr_Clear();
-                    continue;
+        if (MS_UNLIKELY(info == NULL)) {
+            status = -1;
+        }
+        else if (Py_EnterRecursiveCall(" while checking a Struct")) {
+            status = -1;
+        }
+        else {
+            for (Py_ssize_t i = 0; i < Py_SIZE(info); i++) {
+                PyObject *key = info->fields[i].key;
+                PyObject *val = PyObject_GetAttr(obj, key);
+                if (val == NULL) {
+                    if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
+                        PyErr_Clear();
+                        continue;
+                    }
+                    status = -1;
+                    break;
                 }
-                status = -1;
-                break;
+                PathNode field_path = {path, PATH_STR, key};
+                PyObject *out = validate_obj(
+                    self, val, info->fields[i].type, &field_path
+                );
+                Py_DECREF(val);
+                if (out == NULL) {
+                    status = -1;
+                    break;
+                }
+                Py_DECREF(out);
             }
-            PathNode field_path = {path, PATH_STR, key};
-            PyObject *out = validate_obj(
-                self, val, info->fields[i].type, &field_path
-            );
-            Py_DECREF(val);
-            if (out == NULL) {
-                status = -1;
-                break;
-            }
-            Py_DECREF(out);
+            Py_LeaveRecursiveCall();
         }
-        Py_LeaveRecursiveCall();
-        return status;
     }
-    if (type->types & MS_TYPE_NAMEDTUPLE) {
+    else {
         NamedTupleInfo *info = TypeNode_get_namedtuple_info(type);
-        if (MS_UNLIKELY(info == NULL)) return -1;
-        PyObject *seq = PySequence_Fast(obj, "expected a sequence");
-        if (seq == NULL) return -1;
-        PyObject **items = PySequence_Fast_ITEMS(seq);
-        Py_ssize_t size = PySequence_Fast_GET_SIZE(seq);
-        Py_ssize_t n = size < Py_SIZE(info) ? size : Py_SIZE(info);
-        if (Py_EnterRecursiveCall(" while checking a Struct")) {
-            Py_DECREF(seq);
-            return -1; /* cpylint-ignore */
+        if (MS_UNLIKELY(info == NULL)) {
+            status = -1;
         }
-        int status = 0;
-        for (Py_ssize_t i = 0; i < n; i++) {
-            PathNode item_path = {path, i, NULL};
-            PyObject *out = validate_obj(
-                self, items[i], info->types[i], &item_path
-            );
-            if (out == NULL) {
+        else {
+            /* `ms_typenode_accepts_instance` guarantees this is an instance of
+             * the exact namedtuple class, so tuple access is valid. A real
+             * instance always materializes every field; a forged one may be
+             * short (even with defaults) or long, so require the exact arity. */
+            Py_ssize_t nfields = Py_SIZE(info);
+            Py_ssize_t size = PyTuple_GET_SIZE(obj);
+            if (size != nfields) {
+                ms_raise_validation_error(
+                    path,
+                    "Expected `array` of length %zd, got %zd%U",
+                    nfields,
+                    size
+                );
                 status = -1;
-                break;
             }
-            Py_DECREF(out);
+            else if (Py_EnterRecursiveCall(" while checking a Struct")) {
+                status = -1;
+            }
+            else {
+                PyObject **items = TUPLE_ITEMS(obj);
+                for (Py_ssize_t i = 0; i < size; i++) {
+                    PathNode item_path = {path, i, NULL};
+                    PyObject *out = validate_obj(
+                        self, items[i], info->types[i], &item_path
+                    );
+                    if (out == NULL) {
+                        status = -1;
+                        break;
+                    }
+                    Py_DECREF(out);
+                }
+                Py_LeaveRecursiveCall();
+            }
         }
-        Py_LeaveRecursiveCall();
-        Py_DECREF(seq);
-        return status;
     }
-    return 0;
+
+    self->deep_depth--;
+    return status;
 }
 
 static PyObject *
@@ -22027,6 +22073,7 @@ validate_loaded_json_value(
         .builtin_types = 0,
         .check_types_only = false,
         .deep_structs = false,
+        .deep_depth = 0,
     };
     PyObject *out = validate_obj_dispatch(&state, obj, type, path);
     Py_DECREF(obj);
@@ -22066,6 +22113,7 @@ structtype_validate(PyObject *self, PyObject *args, PyObject *kwargs)
     state.strict = strict;
     state.check_types_only = false;
     state.deep_structs = false;
+    state.deep_depth = 0;
     if (strict) {
         state.str_keys = str_keys;
         if (ms_process_builtin_types(state.mod, builtin_types, &(state.builtin_types), NULL) < 0) {
@@ -22270,6 +22318,7 @@ Struct_validate(PyObject *cls, PyObject *const *args, Py_ssize_t nargs, PyObject
     state.builtin_types = 0;
     state.check_types_only = false;
     state.deep_structs = false;
+    state.deep_depth = 0;
 
     if (ms_is_struct_cls(cls)) {
         PyObject *info = StructInfo_Convert(cls);
@@ -22317,6 +22366,7 @@ csv_decode_info(
     state.strict = false;
     state.check_types_only = false;
     state.deep_structs = false;
+    state.deep_depth = 0;
 
     PyObject *inst = Struct_alloc((PyTypeObject *)st);
     if (inst == NULL) { Py_DECREF(seq); return NULL; }
@@ -22479,10 +22529,23 @@ Struct_dump_csv(
  * type annotation. `deep_structs` makes `validate_obj` recurse into struct
  * instances, dataclass fields and NamedTuple elements it encounters, without
  * creating intermediate objects (no dump roundtrip). */
+static ValidateState
+ms_deep_check_state(StructspecState *mod) {
+    ValidateState state = {0};
+    state.mod = mod;
+    state.strict = 1;
+    state.from_attributes = 0;
+    state.str_keys = 0;
+    state.builtin_types = 0;
+    state.check_types_only = true;
+    state.deep_structs = true;
+    return state;
+}
+
 static int
 struct_check_recursive_impl(
     PyObject *self,
-    StructspecState *mod,
+    ValidateState *state,
     PathNode *path
 ) {
     StructMetaObject *st_type = (StructMetaObject *)Py_TYPE(self);
@@ -22502,16 +22565,7 @@ struct_check_recursive_impl(
         if (field_type == NULL) continue;
 
         PathNode field_path = {path, i, (PyObject *)st_type};
-
-        ValidateState state = {0};
-        state.mod = mod;
-        state.strict = 1;
-        state.from_attributes = 0;
-        state.str_keys = 0;
-        state.builtin_types = 0;
-        state.check_types_only = true;
-        state.deep_structs = true;
-        PyObject *out = validate_obj(&state, val, field_type, &field_path);
+        PyObject *out = validate_obj(state, val, field_type, &field_path);
         if (out == NULL) {
             ret = -1;
         } else {
@@ -22526,11 +22580,11 @@ struct_check_recursive_impl(
 static int
 struct_check_recursive(
     PyObject *self,
-    StructspecState *mod,
+    ValidateState *state,
     PathNode *path
 ) {
     if (Py_EnterRecursiveCall(" while checking a Struct")) return -1;
-    int ret = struct_check_recursive_impl(self, mod, path);
+    int ret = struct_check_recursive_impl(self, state, path);
     Py_LeaveRecursiveCall();
     return ret;
 }
@@ -22559,7 +22613,8 @@ Struct_check(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *
         return NULL;
     }
 
-    if (struct_check_recursive(self, mod, NULL) < 0)
+    ValidateState state = ms_deep_check_state(mod);
+    if (struct_check_recursive(self, &state, NULL) < 0)
         return NULL;
 
     Py_RETURN_NONE;

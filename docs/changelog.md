@@ -23,6 +23,13 @@
 - `struct_dump(..., str_keys=True, builtin_types=...)` and the internal
   validation path now still stringify/parse dictionary keys whose type is listed
   in `builtin_types`.
+- `struct_check_types()` and `check_types_on_init` now recurse into nested
+  structs at any depth and through lists, dicts, `TypedDict`s, dataclasses and
+  `NamedTuple`s, reporting the path of the failing leaf. `UNSET` field values
+  are accepted.
+- `struct_dump()` converts `str`-enum values and `str`-subclass dictionary keys
+  to their string value, fixing spurious `TypeError`s with `str_keys=True`;
+  codecs still take precedence and `builtin_types` values are still preserved.
 - JSON Schema fixes: distinct dynamically generated types with the same module
   and qualified name no longer overwrite each other; empty component names
   produce valid `$ref`s; string `Literal`/`Enum` dictionary keys emit

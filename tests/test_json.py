@@ -4513,7 +4513,9 @@ class TestDumpStrSubclassAndEnum:
         dumped = msg.struct_dump(str_keys=True)
         assert dumped == {"d": {"k": 1}}
         assert type(next(iter(dumped["d"]))) is str
-        assert msg.struct_dump() == {"d": {"k": 1}}
+        plain = msg.struct_dump()
+        assert plain == {"d": {"k": 1}}
+        assert type(next(iter(plain["d"]))) is str
 
     def test_plain_str_subclass_value_still_passes_through(self):
         class SubStr(str):
@@ -4522,4 +4524,23 @@ class TestDumpStrSubclassAndEnum:
         class Msg(Struct):
             v: SubStr
 
-        assert Msg(SubStr("x")).struct_dump() == {"v": "x"}
+        dumped = Msg(SubStr("x")).struct_dump()
+        assert dumped == {"v": "x"}
+        assert type(dumped["v"]) is SubStr
+
+    def test_str_enum_builtin_types_preserved(self):
+        class Color(str, enum.Enum):
+            RED = "red"
+
+        class Msg(Struct):
+            c: Color
+            d: dict[Color, int]
+
+        msg = Msg(Color.RED, {Color.RED: 1})
+        dumped = msg.struct_dump(builtin_types=[Color])
+        assert dumped["c"] is Color.RED
+        assert next(iter(dumped["d"])) is Color.RED
+        with_keys = msg.struct_dump(str_keys=True, builtin_types=[Color])
+        assert with_keys["c"] is Color.RED
+        assert with_keys["d"] == {"red": 1}
+        assert type(next(iter(with_keys["d"]))) is str
