@@ -28,6 +28,15 @@ py315_or_later_only = pytest.mark.skipif(
 )
 
 
+def unmaterialized_str(text):
+    """Return an equal string whose UTF-8 cache has not been populated.
+
+    ``bytes(...).decode()`` creates a new compact non-ASCII string; nothing has
+    called ``PyUnicode_AsUTF8`` on it yet.
+    """
+    return bytes(text, "utf-8").decode("utf-8")
+
+
 @contextmanager
 def temp_module(code):
     """Mutually recursive struct types defined inside functions don't work (and

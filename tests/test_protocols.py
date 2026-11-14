@@ -1,9 +1,11 @@
+import json
 import subprocess
 import sys
 
 import structtype
+from structtype._core import _json_encode
 
-from .utils import requires_subprocess
+from .utils import requires_subprocess, unmaterialized_str
 
 
 def run_isolated_type_error(setup, call, match):
@@ -179,3 +181,33 @@ def test_valid_external_struct_protocol_still_roundtrips():
     assert value == External(1)
     assert adapter.struct_dump(value) == {"x": 1, "y": 0}
     assert adapter.struct_dump_json(value) == b'{"x":1,"y":0}'
+
+
+def test_external_struct_nonascii_field_name_json():
+    key = unmaterialized_str("café")
+
+    class External:
+        __struct_fields__ = (key,)
+        __struct_defaults__ = ()
+
+        def __getattr__(self, name):
+            if name == key:
+                return 1
+            raise AttributeError(name)
+
+    assert _json_encode(External()) == b'{"caf\xc3\xa9":1}'
+
+
+def test_external_struct_json_key_is_escaped():
+    key = 'a"b\\c\nd'
+
+    class External:
+        __struct_fields__ = (key,)
+        __struct_defaults__ = ()
+
+        def __getattr__(self, name):
+            if name == key:
+                return 1
+            raise AttributeError(name)
+
+    assert json.loads(_json_encode(External())) == {key: 1}

@@ -1,4 +1,5 @@
 import base64
+import dataclasses
 import datetime
 import decimal
 import enum
@@ -38,7 +39,7 @@ from structtype._core import (
 import structtype
 from structtype import Serializer, Struct, StructConfig
 
-from .utils import emscripten_stack_limited, requires_subprocess
+from .utils import emscripten_stack_limited, requires_subprocess, unmaterialized_str
 
 UTC = datetime.timezone.utc
 
@@ -2261,6 +2262,50 @@ class TestDataclass:
             _json_encode(obj)
         with pytest.raises(RuntimeError, match="eq failed"):
             structtype.StructAdapter(Ex).struct_dump(obj)
+
+
+class TestNonAsciiFieldNames:
+    """Field names whose UTF-8 cache has not been materialized (audit §2.1)."""
+
+    def test_typeddict_nonascii_field_name_decodes_json(self):
+        key = unmaterialized_str("fïeld")
+        TD = TypedDict("TD", {key: int})
+        assert _json_decode(b'{"f\xc3\xafeld": 1}', type=TD) == {key: 1}
+
+    def test_typeddict_nonascii_field_name_empty_key_does_not_match(self):
+        key = unmaterialized_str("fïeld")
+        TD = TypedDict("TD", {key: int})
+        with pytest.raises(
+            structtype.ValidationError, match="missing required field"
+        ):
+            _json_decode(b'{"": 1}', type=TD)
+
+    def test_typeddict_nonascii_optional_field_empty_key_is_ignored(self):
+        key = unmaterialized_str("fïeld")
+        TD = TypedDict("TD", {key: int}, total=False)
+        assert _json_decode(b'{"": 1}', type=TD) == {}
+
+    def test_typeddict_nonascii_field_name_struct_validate(self):
+        key = unmaterialized_str("fïeld")
+        other = unmaterialized_str("fïeld")  # equal, distinct object
+        TD = TypedDict("TD", {key: int})
+        assert structtype.StructAdapter(TD).struct_validate({other: 1}) == {
+            key: 1
+        }
+
+    def test_dataclass_nonascii_field_name_decodes_json(self):
+        key = unmaterialized_str("wörld")
+        D = dataclasses.make_dataclass("D", [(key, int)])
+        out = _json_decode(b'{"w\xc3\xb6rld": 1}', type=D)
+        assert getattr(out, key) == 1
+
+    def test_dataclass_nonascii_field_name_empty_key_raises(self):
+        key = unmaterialized_str("wörld")
+        D = dataclasses.make_dataclass("D", [(key, int)])
+        with pytest.raises(
+            structtype.ValidationError, match="missing required field"
+        ):
+            _json_decode(b'{"": 1}', type=D)
 
 
 class TestStruct:

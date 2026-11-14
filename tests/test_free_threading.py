@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import NamedTuple, Optional, TypedDict
 
 from structtype import Struct
+from structtype._core import _json_decode, _json_encode
 
 
 class Point(Struct):
@@ -248,6 +249,22 @@ def test_concurrent_class_creation_with_config():
                 assert cls.__struct_config__["frozen"] is False
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+def test_concurrent_nonascii_string_json_roundtrip():
+    """Exercise the UTF-8 cache path from several threads (audit §2.1c/§4.1)."""
+    values = [bytes(f"str-{i}-é", "utf-8").decode("utf-8") for i in range(8)]
+
+    def worker():
+        for _ in range(500):
+            for value in values:
+                assert _json_decode(_json_encode(value), type=str) == value
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
     for t in threads:
         t.start()
     for t in threads:

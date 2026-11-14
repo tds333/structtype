@@ -86,12 +86,95 @@ class ListNestedInit(Struct):
     items: list[Point]
 
 
+class OptContainerNone(Struct):
+    items: list[Point] | None = None
+
+
+class OptTupleNone(Struct):
+    items: tuple[Point, ...] | None = None
+
+
+class OptSetNone(Struct):
+    items: set[FrozenPoint] | None = None
+
+
+class OptFrozenSetNone(Struct):
+    items: frozenset[FrozenPoint] | None = None
+
+
+class OptDictNone(Struct):
+    mapping: dict[str, Point] | None = None
+
+
+class OptContainerInit(Struct):
+    struct_config = StructConfig(check_types_on_init=True)
+    items: tuple[Point, ...] | None = None
+
+
 # ── basic type validation ──
 
 
 def test_valid_struct_passes():
     p = Point(1, 2)
     assert p.struct_check_types() is None
+
+
+def test_check_optional_container_none_passes():
+    assert OptContainerNone().struct_check_types() is None
+    assert OptTupleNone().struct_check_types() is None
+
+
+def test_check_on_init_optional_container_constructs():
+    OptContainerInit()
+    OptContainerInit(items=(Point(1, 2),))
+    with pytest.raises(ValidationError):
+        OptContainerInit(items=5)
+
+
+def test_check_optional_set_like_none_passes():
+    assert OptSetNone().struct_check_types() is None
+    assert OptFrozenSetNone().struct_check_types() is None
+    assert OptDictNone().struct_check_types() is None
+
+
+def test_check_optional_set_like_wrong_type_raises():
+    with pytest.raises(ValidationError):
+        OptSetNone(items=5).struct_check_types()
+    with pytest.raises(ValidationError):
+        OptFrozenSetNone(items=5).struct_check_types()
+    with pytest.raises(ValidationError):
+        OptDictNone(mapping=5).struct_check_types()
+
+
+def test_check_optional_set_like_still_recurses():
+    assert OptSetNone(items={FrozenPoint(1, 2)}).struct_check_types() is None
+    with pytest.raises(ValidationError, match="Expected `int`"):
+        OptSetNone(items={FrozenPoint("bad", 2)}).struct_check_types()
+    with pytest.raises(ValidationError, match="Expected `int`"):
+        OptFrozenSetNone(
+            items=frozenset({FrozenPoint("bad", 2)})
+        ).struct_check_types()
+    with pytest.raises(ValidationError, match="Expected `int`"):
+        OptDictNone(mapping={"a": Point("bad", 2)}).struct_check_types()
+
+
+def test_check_wrong_container_type_raises_validation_error():
+    with pytest.raises(ValidationError, match="Expected `array"):
+        OptContainerNone(items=5).struct_check_types()
+
+
+def test_check_fixtuple_accepts_list_values():
+    """The validator accepts a list for a fixed tuple; deep-check it too."""
+    with pytest.raises(ValidationError, match="Expected `int`"):
+        FixTupleNested(pair=[1, Point("bad", 3)]).struct_check_types()
+    assert FixTupleNested(pair=[1, Point(2, 3)]).struct_check_types() is None
+
+
+def test_check_optional_container_still_recurses():
+    with pytest.raises(ValidationError, match="Expected `int`"):
+        OptContainerNone(items=[Point("bad", 2)]).struct_check_types()
+    with pytest.raises(ValidationError, match="Expected `int`"):
+        OptTupleNone(items=(Point("bad", 2),)).struct_check_types()
 
 
 def test_type_mismatch_raises():

@@ -7,6 +7,9 @@ attr = pytest.importorskip("attr")
 
 import structtype
 from structtype import Struct, StructAdapter
+from structtype._core import _json_decode
+
+from .utils import unmaterialized_str
 
 
 # ------------------------------------------------------------------
@@ -87,3 +90,10 @@ def test_attrs_multi_field_dump():
     assert obj.a == _AMulti(5, "d")
     assert _json.loads(obj.struct_dump_json()) == {"a": {"x": 5, "y": "d"}}
     assert obj.struct_dump() == {"a": {"x": 5, "y": "d"}}
+
+
+def test_attrs_nonascii_field_name_decodes_json():
+    key = unmaterialized_str("fïeld")
+    A = attr.make_class("A", {key: attr.ib(type=int)})
+    out = _json_decode(b'{"f\xc3\xafeld": 1}', type=A)
+    assert getattr(out, key) == 1

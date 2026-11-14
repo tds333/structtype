@@ -227,7 +227,9 @@ _PyFrozenDict_NewSteal(PyObject *dict) {
     } while (0);
 
 /* XXX: Optimized `PyUnicode_AsUTF8AndSize` for strs that we know have
- * a cached unicode representation. */
+ * a cached unicode representation. Callers must guarantee the UTF-8 cache is
+ * already materialized (or the string is compact ASCII); arbitrary strings
+ * must go through `unicode_str_and_size` instead. */
 static inline const char *
 unicode_str_and_size_nocheck(PyObject *str, Py_ssize_t *size) {
     if (MS_LIKELY(PyUnicode_IS_COMPACT_ASCII(str))) {
@@ -241,9 +243,27 @@ unicode_str_and_size_nocheck(PyObject *str, Py_ssize_t *size) {
 /* XXX: Optimized `PyUnicode_AsUTF8AndSize` */
 static inline const char *
 unicode_str_and_size(PyObject *str, Py_ssize_t *size) {
+    /* ASCII data is inline and immutable, so the fast path is race-free on
+     * free-threaded builds. The UTF-8 cache for non-ASCII strings is filled
+     * under the unicode object's critical section; reading it directly is a
+     * data race there, so always go through the public API. */
+    if (MS_LIKELY(PyUnicode_IS_COMPACT_ASCII(str))) {
+        *size = ((PyASCIIObject *)str)->length;
+        return (char *)(((PyASCIIObject *)str) + 1);
+    }
+#ifndef Py_GIL_DISABLED
     const char *out = unicode_str_and_size_nocheck(str, size);
     if (MS_LIKELY(out != NULL)) return out;
+#endif
     return PyUnicode_AsUTF8AndSize(str, size);
+}
+
+/* Ensure the UTF-8 cache is populated (and the text is encodable) so that
+ * field-name lookups can use `unicode_str_and_size_nocheck`. */
+static MS_INLINE int
+ms_materialize_utf8(PyObject *str) {
+    Py_ssize_t size;
+    return unicode_str_and_size(str, &size) == NULL ? -1 : 0;
 }
 
 static MS_INLINE char *
@@ -11196,6 +11216,7 @@ TypedDictInfo_Convert_lock_held(PyObject *obj) {
     Py_ssize_t pos = 0, i = 0;
     PyObject *key, *val;
     while (PyDict_Next(annotations, &pos, &key, &val)) {
+        if (ms_materialize_utf8(key) < 0) goto cleanup;
         TypeNode *type = TypeNode_Convert(val);
         if (type == NULL) goto cleanup;
         Py_INCREF(key);
@@ -11255,6 +11276,7 @@ TypedDictInfo_lookup_key(
     nfields = Py_SIZE(self);
     for (i = offset; i < nfields; i++) {
         field = unicode_str_and_size_nocheck(self->fields[i].key, &field_size);
+        if (MS_UNLIKELY(field == NULL)) continue;
         if (key_size == field_size && memcmp(key, field, key_size) == 0) {
             *pos = i < (nfields - 1) ? (i + 1) : 0;
             *type = self->fields[i].type;
@@ -11263,6 +11285,7 @@ TypedDictInfo_lookup_key(
     }
     for (i = 0; i < offset; i++) {
         field = unicode_str_and_size_nocheck(self->fields[i].key, &field_size);
+        if (MS_UNLIKELY(field == NULL)) continue;
         if (key_size == field_size && memcmp(key, field, key_size) == 0) {
             *pos = i + 1;
             *type = self->fields[i].type;
@@ -11401,6 +11424,7 @@ DataclassInfo_Convert_lock_held(PyObject *obj) {
     /* Traverse fields and initialize DataclassInfo */
     for (Py_ssize_t i = 0; i < nfields; i++) {
         PyObject *field = PyTuple_GET_ITEM(fields, i);
+        if (ms_materialize_utf8(PyTuple_GET_ITEM(field, 0)) < 0) goto cleanup;
         TypeNode *type = TypeNode_Convert(PyTuple_GET_ITEM(field, 1));
         if (type == NULL) goto cleanup;
         /* If field has a default factory, set extra flag bit */
@@ -11464,6 +11488,7 @@ DataclassInfo_lookup_key(
     nfields = Py_SIZE(self);
     for (i = offset; i < nfields; i++) {
         field = unicode_str_and_size_nocheck(self->fields[i].key, &field_size);
+        if (MS_UNLIKELY(field == NULL)) continue;
         if (key_size == field_size && memcmp(key, field, key_size) == 0) {
             *pos = i < (nfields - 1) ? (i + 1) : 0;
             *type = self->fields[i].type;
@@ -11472,6 +11497,7 @@ DataclassInfo_lookup_key(
     }
     for (i = 0; i < offset; i++) {
         field = unicode_str_and_size_nocheck(self->fields[i].key, &field_size);
+        if (MS_UNLIKELY(field == NULL)) continue;
         if (key_size == field_size && memcmp(key, field, key_size) == 0) {
             *pos = i + 1;
             *type = self->fields[i].type;
@@ -15303,13 +15329,6 @@ json_encode_cstr_noescape(EncoderState *self, const char *str, Py_ssize_t size) 
     return 0;
 }
 
-static inline int
-json_encode_str_noescape(EncoderState *self, PyObject *obj) {
-    Py_ssize_t len;
-    const char* buf = unicode_str_and_size_nocheck(obj, &len);
-    return json_encode_cstr_noescape(self, buf, len);
-}
-
 static int
 json_encode_bin(EncoderState *self, const char* buf, Py_ssize_t len) {
     /* Preallocate the buffer (ceil(4/3 * len) + 2) */
@@ -16228,7 +16247,7 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
                 PyObject *key = PyTuple_GET_ITEM(fields_tuple, i);
                 PyObject *val = PyObject_GetAttr(obj, key);
                 if (val == NULL) { PyErr_Clear(); continue; }
-                if (json_encode_str_noescape(self, key) < 0 || ms_write(self, ":", 1) < 0) {
+                if (json_encode_str(self, key) < 0 || ms_write(self, ":", 1) < 0) {
                     Py_DECREF(val); goto cleanup;
                 }
                 if (json_encode(self, val) < 0) { Py_DECREF(val); goto cleanup; }
@@ -22529,27 +22548,35 @@ struct_check_recursive_impl(
         if (field_type->types & MS_ANY_DICT) {
             TypeNode *key_type, *val_type;
             TypeNode_get_dict(field_type, &key_type, &val_type);
-            if (val_type->types &
-                (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY |
-                 MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION))
-            {
+            if (PyDict_Check(val) &&
+                (val_type->types &
+                 (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY |
+                  MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION))
+            ) {
                 r = struct_check_recurse_dict(val, val_type, mod, &field_path);
                 if (r < 0) { ret = -1; break; }
             }
         }
         else if (field_type->types & MS_TYPE_FIXTUPLE) {
-            r = struct_check_recurse_fixtuple(val, field_type, mod, &field_path);
-            if (r < 0) { ret = -1; break; }
+            if (PyTuple_Check(val) || PyList_Check(val)) {
+                r = struct_check_recurse_fixtuple(
+                    val, field_type, mod, &field_path
+                );
+                if (r < 0) { ret = -1; break; }
+            }
         }
         else if (field_type->types &
             (MS_TYPE_LIST | MS_TYPE_SET | MS_TYPE_FROZENSET |
              MS_TYPE_VARTUPLE))
         {
             TypeNode *item_type = TypeNode_get_array(field_type);
-            if (item_type->types &
-                (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY |
-                 MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION))
-            {
+            if (
+                (PyList_Check(val) || PyAnySet_Check(val) ||
+                 PyTuple_Check(val)) &&
+                (item_type->types &
+                 (MS_TYPE_STRUCT | MS_TYPE_STRUCT_ARRAY |
+                  MS_TYPE_STRUCT_UNION | MS_TYPE_STRUCT_ARRAY_UNION))
+            ) {
                 r = struct_check_recurse_seq(val, item_type, mod, &field_path);
                 if (r < 0) { ret = -1; break; }
             }
