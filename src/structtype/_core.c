@@ -4601,6 +4601,7 @@ typedef struct {
     PyObject_VAR_HEAD
     Py_ssize_t nrequired;
     _Atomic(uint8_t) initialized;
+    _Atomic(unsigned long) builder_thread;
     TypedDictField fields[];
 } TypedDictInfo;
 
@@ -4616,6 +4617,7 @@ typedef struct {
     PyObject *post_init;
     PyObject *defaults;
     _Atomic(uint8_t) initialized;
+    _Atomic(unsigned long) builder_thread;
     DataclassField fields[];
 } DataclassInfo;
 
@@ -4624,6 +4626,7 @@ typedef struct {
     PyObject *class;
     PyObject *defaults;
     _Atomic(uint8_t) initialized;
+    _Atomic(unsigned long) builder_thread;
     TypeNode *types[];
 } NamedTupleInfo;
 
@@ -4676,6 +4679,7 @@ typedef struct StructInfo {
     PyObject_VAR_HEAD
     StructMetaObject *class;
     _Atomic(uint8_t) initialized;
+    _Atomic(unsigned long) builder_thread;
     TypeNode *types[];
 } StructInfo;
 
@@ -4775,6 +4779,25 @@ ms_info_init_failed(PyObject *owner) {
     }
 }
 
+/* A same-thread re-entrant use of a type whose info is still being built
+ * (e.g. annotation evaluation decoding the same type). Waiting for
+ * `MS_INFO_READY` would spin forever: the builder is the current thread. */
+static void
+ms_info_still_building_error(PyObject *owner) {
+    if (owner != NULL) {
+        PyErr_Format(
+            PyExc_RuntimeError,
+            "Type information for %R is still being built",
+            owner
+        );
+    }
+    else {
+        PyErr_SetString(
+            PyExc_RuntimeError, "Type information is still being built"
+        );
+    }
+}
+
 static MS_INLINE StructInfo *
 TypeNode_get_struct_info(TypeNode *type) {
     /* Struct types are always first */
@@ -4785,6 +4808,12 @@ TypeNode_get_struct_info(TypeNode *type) {
     }
     if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
         ms_info_init_failed((PyObject *)info->class);
+        return NULL;
+    }
+    if (MS_UNLIKELY(
+            state == MS_INFO_BUILDING &&
+            atomic_load(&info->builder_thread) == PyThread_get_thread_ident())) {
+        ms_info_still_building_error((PyObject *)info->class);
         return NULL;
     }
     Py_BEGIN_ALLOW_THREADS
@@ -4915,6 +4944,12 @@ TypeNode_get_typeddict_info(TypeNode *type) {
         ms_info_init_failed(NULL);
         return NULL;
     }
+    if (MS_UNLIKELY(
+            state == MS_INFO_BUILDING &&
+            atomic_load(&info->builder_thread) == PyThread_get_thread_ident())) {
+        ms_info_still_building_error(NULL);
+        return NULL;
+    }
     Py_BEGIN_ALLOW_THREADS
     /* wait for the TypedDictInfo to be fully initialized by other thread */
     while ((state = atomic_load(&info->initialized)) == MS_INFO_BUILDING) {
@@ -4937,6 +4972,12 @@ TypeNode_get_dataclass_info(TypeNode *type) {
     }
     if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
         ms_info_init_failed(info->class);
+        return NULL;
+    }
+    if (MS_UNLIKELY(
+            state == MS_INFO_BUILDING &&
+            atomic_load(&info->builder_thread) == PyThread_get_thread_ident())) {
+        ms_info_still_building_error(info->class);
         return NULL;
     }
     Py_BEGIN_ALLOW_THREADS
@@ -4965,6 +5006,12 @@ TypeNode_get_namedtuple_info(TypeNode *type) {
     }
     if (MS_UNLIKELY(state == MS_INFO_FAILED)) {
         ms_info_init_failed(info->class);
+        return NULL;
+    }
+    if (MS_UNLIKELY(
+            state == MS_INFO_BUILDING &&
+            atomic_load(&info->builder_thread) == PyThread_get_thread_ident())) {
+        ms_info_still_building_error(info->class);
         return NULL;
     }
     Py_BEGIN_ALLOW_THREADS
@@ -9641,9 +9688,10 @@ StructInfo_Convert_lock_held(PyObject *obj) {
     for (Py_ssize_t i = 0; i < nfields; i++) {
         info->types[i] = NULL;
     }
-    atomic_store(&info->initialized, MS_INFO_BUILDING);
     Py_INCREF(class);
     info->class = class;
+    atomic_store(&info->builder_thread, PyThread_get_thread_ident());
+    atomic_store(&info->initialized, MS_INFO_BUILDING);
 
     /* Cache the new StuctInfo on the original type annotation */
     if (is_struct) {
@@ -11134,6 +11182,7 @@ TypedDictInfo_Convert_lock_held(PyObject *obj) {
     /* Initialize nrequired to -1 as a flag in case of a recursive TypedDict
     * definition. */
     info->nrequired = -1;
+    atomic_store(&info->builder_thread, PyThread_get_thread_ident());
     atomic_store(&info->initialized, MS_INFO_BUILDING);
 
     /* If not already cached, then cache on TypedDict object _before_
@@ -11339,6 +11388,7 @@ DataclassInfo_Convert_lock_held(PyObject *obj) {
         Py_INCREF(post_init);
         info->post_init = post_init;
     }
+    atomic_store(&info->builder_thread, PyThread_get_thread_ident());
     atomic_store(&info->initialized, MS_INFO_BUILDING);
 
     /* If not already cached, then cache on Dataclass object _before_
@@ -11567,6 +11617,7 @@ NamedTupleInfo_Convert_lock_held(PyObject *obj) {
     for (Py_ssize_t i = 0; i < nfields; i++) {
         info->types[i] = NULL;
     }
+    atomic_store(&info->builder_thread, PyThread_get_thread_ident());
     atomic_store(&info->initialized, MS_INFO_BUILDING);
 
     /* If not already cached, then cache on NamedTuple object _before_
@@ -11945,9 +11996,16 @@ Encoder_init(Encoder *self, PyObject *args, PyObject *kwds)
     if (parse_bool_arg(sort_keys, &self->sort_keys) < 0) return -1;
 
     /* All arguments validated, apply the new configuration */
+    StructspecState *mod = structtype_get_global_state();
+    if (MS_UNLIKELY(mod == NULL)) {
+        PyErr_SetString(
+            PyExc_RuntimeError, "structtype module is not initialized"
+        );
+        return -1;
+    }
+    self->mod = mod;
     self->decimal_as_number = dec_as_number;
     self->uuid_as_hex = u_as_hex;
-    self->mod = structtype_get_global_state();
     return 0;
 }
 
@@ -11982,6 +12040,16 @@ encoder_encode_common(
 )
 {
     if (!check_positional_nargs(nargs, 1, 1)) return NULL;
+
+    /* `Encoder` uses `tp_new = PyType_GenericNew`; an instance obtained via
+     * `Encoder.__new__(Encoder)` (without `__init__`) has no module state. */
+    if (MS_UNLIKELY(self->mod == NULL)) {
+        PyErr_SetString(
+            PyExc_RuntimeError,
+            "Encoder is not initialized; call Encoder() to create one"
+        );
+        return NULL;
+    }
 
     EncoderState state = {
         .mod = self->mod,
@@ -15488,9 +15556,34 @@ cleanup:
 static MS_NOINLINE int
 json_encode_list(EncoderState *self, PyObject *obj)
 {
-    return json_encode_sequence(
-        self, PyList_GET_SIZE(obj), ((PyListObject *)obj)->ob_item
-    );
+    Py_ssize_t size = PyList_GET_SIZE(obj);
+    if (size == 0) return ms_write(self, "[]", 2);
+
+    if (ms_write(self, "[", 1) < 0) return -1;
+    if (Py_EnterRecursiveCall(" while serializing an object")) return -1;
+
+    int status = -1;
+    for (Py_ssize_t i = 0; i < size; i++) {
+        /* Encoding an item can run arbitrary user code (struct_dump,
+         * Serializer.dump, model_dump, ...). That code may clear or trim the
+         * list, freeing `ob_item` and dropping the remaining elements. Re-read
+         * both after every element instead of iterating a stale snapshot. */
+        if (MS_UNLIKELY(PyList_GET_SIZE(obj) <= i)) {
+            PyErr_SetString(
+                self->mod->EncodeError, "list changed size during encoding"
+            );
+            goto cleanup;
+        }
+        PyObject **items = ((PyListObject *)obj)->ob_item;
+        if (json_encode_inline(self, items[i]) < 0) goto cleanup;
+        if (ms_write(self, ",", 1) < 0) goto cleanup;
+    }
+    /* Overwrite trailing comma with ] */
+    *(self->output_buffer_raw + self->output_len - 1) = ']';
+    status = 0;
+cleanup:
+    Py_LeaveRecursiveCall();
+    return status;
 }
 
 static MS_NOINLINE int
@@ -15716,7 +15809,17 @@ json_encode_dict(EncoderState *self, PyObject *obj)
     if (ms_write(self, "{", 1) < 0) return -1;
     if (Py_EnterRecursiveCall(" while serializing an object")) return -1;
     Py_ssize_t start_len = self->output_len;
-    while (PyDict_Next(obj, &pos, &key, &val)) {
+    Py_ssize_t ndict = PyDict_GET_SIZE(obj);
+    while (true) {
+        /* A value/dump callback may mutate the dict; `PyDict_Next`'s `pos`
+         * is only valid for the table it started on. */
+        if (MS_UNLIKELY(PyDict_GET_SIZE(obj) != ndict)) {
+            PyErr_SetString(
+                self->mod->EncodeError, "dict changed size during encoding"
+            );
+            goto cleanup;
+        }
+        if (!PyDict_Next(obj, &pos, &key, &val)) break;
         if (json_encode_dict_key(self, key) < 0) goto cleanup;
         if (ms_write(self, ":", 1) < 0) goto cleanup;
         if (json_encode_inline(self, val) < 0) goto cleanup;
@@ -15798,8 +15901,18 @@ json_encode_object(EncoderState *self, PyObject *obj)
     else {
         PyObject *key, *val;
         Py_ssize_t pos = 0;
+        Py_ssize_t ndict = PyDict_GET_SIZE(dict);
         int err = 0;
-        while (PyDict_Next(dict, &pos, &key, &val)) {
+        while (true) {
+            if (MS_UNLIKELY(PyDict_GET_SIZE(dict) != ndict)) {
+                PyErr_SetString(
+                    self->mod->EncodeError,
+                    "dict changed size during encoding"
+                );
+                err = 1;
+                break;
+            }
+            if (!PyDict_Next(dict, &pos, &key, &val)) break;
             if (MS_LIKELY(PyUnicode_CheckExact(key))) {
                 Py_ssize_t key_len;
                 const char* key_buf = unicode_str_and_size(key, &key_len);
@@ -16151,6 +16264,35 @@ json_encode_uncommon(EncoderState *self, PyTypeObject *type, PyObject *obj) {
     return ms_encode_err_type_unsupported(type);
 }
 
+/* Encode a non-scalar value. The caller keeps a strong reference to `obj` for
+ * the duration: these paths can run arbitrary user code (`struct_dump`,
+ * `Serializer.dump`, `model_dump`, ...) which may drop the last reference the
+ * surrounding container held to the value being encoded. */
+static MS_INLINE int
+json_encode_non_scalar(EncoderState *self, PyTypeObject *type, PyObject *obj)
+{
+    if (PyList_Check(obj)) {
+        return json_encode_list(self, obj);
+    }
+    else if (PyDict_Check(obj)) {
+        return json_encode_dict(self, obj);
+    }
+#if PY315_PLUS
+    else if (PyFrozenDict_Check(obj)) {
+        return json_encode_dict(self, obj);
+    }
+#endif
+    else if (ms_is_struct_type(type)) {
+        /* Structs are common in the payload; check before the uncommon
+         * dispatch so they avoid the MS_NOINLINE call and its chain of
+         * type checks. */
+        return json_encode_struct(self, obj);
+    }
+    else {
+        return json_encode_uncommon(self, type, obj);
+    }
+}
+
 static MS_INLINE int
 json_encode_inline(EncoderState *self, PyObject *obj)
 {
@@ -16174,25 +16316,11 @@ json_encode_inline(EncoderState *self, PyObject *obj)
     else if (type == &PyFloat_Type) {
         return json_encode_float(self, obj);
     }
-    else if (PyList_Check(obj)) {
-        return json_encode_list(self, obj);
-    }
-    else if (PyDict_Check(obj)) {
-        return json_encode_dict(self, obj);
-    }
-#if PY315_PLUS
-    else if (PyFrozenDict_Check(obj)) {
-        return json_encode_dict(self, obj);
-    }
-#endif
-    else if (ms_is_struct_type(type)) {
-        /* Structs are common in the payload; check before the uncommon
-         * dispatch so they avoid the MS_NOINLINE call and its chain of
-         * type checks. */
-        return json_encode_struct(self, obj);
-    }
     else {
-        return json_encode_uncommon(self, type, obj);
+        Py_INCREF(obj);
+        int status = json_encode_non_scalar(self, type, obj);
+        Py_DECREF(obj);
+        return status;
     }
 }
 
@@ -16270,7 +16398,35 @@ typedef struct JSONDecoder {
     /* Configuration */
     TypeNode *type;
     char strict;
+
+    /* Number of `decode()` calls currently walking `type`. `__init__` frees
+     * the old TypeNode tree, so it must not run while any decode (on this or
+     * another thread) is still using it. */
+#ifdef Py_GIL_DISABLED
+    _Atomic(Py_ssize_t) active_decodes;
+#else
+    Py_ssize_t active_decodes;
+#endif
 } JSONDecoder;
+
+#ifdef Py_GIL_DISABLED
+#define JSONDecoder_decodes_inc(self) \
+    atomic_fetch_add_explicit( \
+        &(self)->active_decodes, 1, memory_order_relaxed \
+    )
+#define JSONDecoder_decodes_dec(self) \
+    atomic_fetch_sub_explicit( \
+        &(self)->active_decodes, 1, memory_order_relaxed \
+    )
+#define JSONDecoder_is_decoding(self) \
+    (atomic_load_explicit( \
+        &(self)->active_decodes, memory_order_relaxed \
+    ) != 0)
+#else
+#define JSONDecoder_decodes_inc(self) ((self)->active_decodes++)
+#define JSONDecoder_decodes_dec(self) ((self)->active_decodes--)
+#define JSONDecoder_is_decoding(self) ((self)->active_decodes != 0)
+#endif
 
 PyDoc_STRVAR(JSONDecoder__doc__,
 "Decoder(type='Any', *, strict=True)\n"
@@ -16295,17 +16451,31 @@ JSONDecoder_init(JSONDecoder *self, PyObject *args, PyObject *kwds)
 {
     char *kwlist[] = {"type", "strict", NULL};
     StructspecState *st = structtype_get_global_state();
-    PyObject *type = st->typing_any;
+    PyObject *type;
     int strict = 1;
+
+    /* Re-initializing frees the TypeNode tree below; an in-flight `decode()`
+     * (this thread via a callback, or another thread) is still walking it. */
+    if (MS_UNLIKELY(JSONDecoder_is_decoding(self))) {
+        PyErr_SetString(
+            PyExc_RuntimeError,
+            "cannot re-initialize a Decoder while it is decoding"
+        );
+        return -1;
+    }
+    if (MS_UNLIKELY(st == NULL)) {
+        PyErr_SetString(
+            PyExc_RuntimeError, "structtype module is not initialized"
+        );
+        return -1;
+    }
+    type = st->typing_any;
 
     if (!PyArg_ParseTupleAndKeywords(
         args, kwds, "|O$p", kwlist, &type, &strict)
     ) {
         return -1;
     }
-
-    /* Handle strict */
-    self->strict = strict;
 
     /* Handle type. Convert into a local first, so a failed
      * re-initialization preserves the previous configuration. */
@@ -16319,6 +16489,9 @@ JSONDecoder_init(JSONDecoder *self, PyObject *args, PyObject *kwds)
     self->type = new_type;
     Py_INCREF(type);
     self->orig_type = type;
+
+    /* Only apply `strict` once the fallible part has succeeded. */
+    self->strict = strict;
 
     return 0;
 }
@@ -18263,7 +18436,14 @@ json_decode_struct_map_inner(
         if (MS_LIKELY(field_index >= 0)) {
             field_path.index = field_index;
             TypeNode *type = info->types[field_index];
-            assert(type != NULL);
+            if (MS_UNLIKELY(type == NULL)) {
+                PyErr_Format(
+                    PyExc_RuntimeError,
+                    "Type information for %R isn't fully initialized",
+                    (PyObject *)st_type
+                );
+                goto error;
+            }
             val = json_decode(self, type, &field_path);
             if (val == NULL) goto error;
             Struct_set_index(out, field_index, val);
@@ -18738,13 +18918,9 @@ PyDoc_STRVAR(JSONDecoder_decode__doc__,
 "obj : Any\n"
 "    The deserialized object.\n"
 );
-static PyObject*
-JSONDecoder_decode(JSONDecoder *self, PyObject *const *args, Py_ssize_t nargs)
+static PyObject *
+JSONDecoder_decode_inner(JSONDecoder *self, PyObject *buf)
 {
-    if (!check_positional_nargs(nargs, 1, 1)) {
-        return NULL;
-    }
-
     JSONDecoderState state = {
         .type = self->type,
         .strict = self->strict,
@@ -18755,9 +18931,9 @@ JSONDecoder_decode(JSONDecoder *self, PyObject *const *args, Py_ssize_t nargs)
 
     Py_buffer buffer;
     buffer.buf = NULL;
-    if (ms_get_buffer(args[0], &buffer) >= 0) {
+    if (ms_get_buffer(buf, &buffer) >= 0) {
 
-        state.buffer_obj = args[0];
+        state.buffer_obj = buf;
         state.input_start = buffer.buf;
         state.input_pos = buffer.buf;
         state.input_end = state.input_pos + buffer.len;
@@ -18775,6 +18951,31 @@ JSONDecoder_decode(JSONDecoder *self, PyObject *const *args, Py_ssize_t nargs)
     }
 
     return NULL;
+}
+
+static PyObject*
+JSONDecoder_decode(JSONDecoder *self, PyObject *const *args, Py_ssize_t nargs)
+{
+    if (!check_positional_nargs(nargs, 1, 1)) {
+        return NULL;
+    }
+
+    /* `tp_new` is `PyType_GenericNew`; an instance obtained via
+     * `Decoder.__new__(Decoder)` (without `__init__`) has no type node. */
+    if (MS_UNLIKELY(self->type == NULL)) {
+        PyErr_SetString(
+            PyExc_RuntimeError,
+            "Decoder is not initialized; call Decoder() to create one"
+        );
+        return NULL;
+    }
+
+    /* Pin the TypeNode tree: a callback (or another thread) must not be able
+     * to re-initialize and free it while the recursion is using it. */
+    JSONDecoder_decodes_inc(self);
+    PyObject *res = JSONDecoder_decode_inner(self, args[0]);
+    JSONDecoder_decodes_dec(self);
+    return res;
 }
 
 static PyMemberDef JSONDecoder_members[] = {
@@ -19041,6 +19242,14 @@ dump_list(DumpState *self, PyObject *obj) {
     PyObject *out = PyList_New(size);
     if (out == NULL) goto cleanup;
     for (Py_ssize_t i = 0; i < size; i++) {
+        /* A conversion callback may clear or trim the list. */
+        if (MS_UNLIKELY(PyList_GET_SIZE(obj) <= i)) {
+            PyErr_SetString(
+                self->mod->EncodeError, "list changed size during encoding"
+            );
+            Py_CLEAR(out);
+            goto cleanup;
+        }
         PyObject *item = PyList_GET_ITEM(obj, i);
         PyObject *new = dump_obj(self, item, false);
         if (new == NULL) {
@@ -19154,7 +19363,15 @@ dump_dict(DumpState *self, PyObject *obj) {
     if (out == NULL) goto cleanup;
 
     Py_ssize_t pos = 0;
-    while (PyDict_Next(obj, &pos, &key, &val)) {
+    Py_ssize_t ndict = PyDict_GET_SIZE(obj);
+    while (true) {
+        if (MS_UNLIKELY(PyDict_GET_SIZE(obj) != ndict)) {
+            PyErr_SetString(
+                self->mod->EncodeError, "dict changed size during encoding"
+            );
+            goto cleanup;
+        }
+        if (!PyDict_Next(obj, &pos, &key, &val)) break;
         if (self->str_keys) {
             /* A key has to become a str, so a type listed in `builtin_types`
              * is still converted when used as a dict key. */
@@ -19400,8 +19617,18 @@ dump_object(DumpState *self, PyObject *obj) {
     else {
         PyObject *key, *val;
         Py_ssize_t pos = 0;
+        Py_ssize_t ndict = PyDict_GET_SIZE(dict);
         int err = 0;
-        while (PyDict_Next(dict, &pos, &key, &val)) {
+        while (true) {
+            if (MS_UNLIKELY(PyDict_GET_SIZE(dict) != ndict)) {
+                PyErr_SetString(
+                    self->mod->EncodeError,
+                    "dict changed size during encoding"
+                );
+                err = 1;
+                break;
+            }
+            if (!PyDict_Next(dict, &pos, &key, &val)) break;
             if (MS_LIKELY(PyUnicode_CheckExact(key))) {
                 Py_ssize_t key_len;
                 if (MS_UNLIKELY(val == UNSET)) continue;
@@ -19469,17 +19696,9 @@ cleanup:
 }
 
 static PyObject *
-dump_obj(DumpState *self, PyObject *obj, bool is_key) {
-    PyTypeObject *type = Py_TYPE(obj);
-    if (
-        obj == Py_None ||
-        type == &PyBool_Type ||
-        type == &PyLong_Type ||
-        type == &PyFloat_Type ||
-        PyUnicode_CheckExact(obj)
-    ) {
-        goto builtin;
-    }
+dump_obj_non_scalar(
+    DumpState *self, PyObject *obj, PyTypeObject *type, bool is_key
+) {
     /* Per-field dump codecs take precedence over the native encoders below. */
     if (self->codecs != NULL) {
         PyObject *dump = codecs_lookup(self->codecs, type);
@@ -19638,6 +19857,32 @@ dump_obj(DumpState *self, PyObject *obj, bool is_key) {
 
     ms_encode_err_type_unsupported(type);
     return NULL;
+
+builtin:
+    Py_INCREF(obj);
+    return obj;
+}
+
+static PyObject *
+dump_obj(DumpState *self, PyObject *obj, bool is_key) {
+    PyTypeObject *type = Py_TYPE(obj);
+    if (
+        obj == Py_None ||
+        type == &PyBool_Type ||
+        type == &PyLong_Type ||
+        type == &PyFloat_Type ||
+        PyUnicode_CheckExact(obj)
+    ) {
+        goto builtin;
+    }
+    /* Non-scalar conversions may run arbitrary user code (`struct_dump`,
+     * `model_dump`, `Serializer.dump`, ...) which can drop the last reference
+     * held by the surrounding container. Keep the value alive while it is
+     * being converted. */
+    Py_INCREF(obj);
+    PyObject *out = dump_obj_non_scalar(self, obj, type, is_key);
+    Py_DECREF(obj);
+    return out;
 
 builtin:
     Py_INCREF(obj);
@@ -20667,8 +20912,17 @@ validate_seq_to_struct_array_inner(
     for (Py_ssize_t i = 0; i < nfields; i++) {
         PyObject *val;
         if (size > 0) {
+            TypeNode *field_type = info->types[i];
+            if (MS_UNLIKELY(field_type == NULL)) {
+                PyErr_Format(
+                    PyExc_RuntimeError,
+                    "Type information for %R isn't fully initialized",
+                    (PyObject *)st_type
+                );
+                goto error;
+            }
             val = validate_obj(
-                self, items[item_path.index], info->types[i], &item_path
+                self, items[item_path.index], field_type, &item_path
             );
             if (MS_UNLIKELY(val == NULL)) goto error;
             size--;
@@ -20945,8 +21199,17 @@ validate_dict_to_struct(
         }
         else {
             PathNode field_path = {path, field_index, (PyObject *)struct_type};
+            TypeNode *field_type = info->types[field_index];
+            if (MS_UNLIKELY(field_type == NULL)) {
+                PyErr_Format(
+                    PyExc_RuntimeError,
+                    "Type information for %R isn't fully initialized",
+                    (PyObject *)struct_type
+                );
+                goto error;
+            }
             PyObject *val = validate_obj(
-                self, val_obj, info->types[field_index], &field_path
+                self, val_obj, field_type, &field_path
             );
             if (val == NULL) goto error;
             Struct_set_index(out, field_index, val);

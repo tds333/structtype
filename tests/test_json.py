@@ -4313,6 +4313,15 @@ class TestReinitReferenceLifecycle:
         assert dec.decode(b"[[1]]") == [[1]]
         assert sys.getrefcount(t) == base + 1
 
+    def test_decoder_failed_reinit_preserves_strict(self):
+        dec = JSONDecoder(int, strict=True)
+
+        with pytest.raises(TypeError, match="is not supported"):
+            dec.__init__(object(), strict=False)
+
+        # A failed re-init must not change the working configuration
+        assert dec.strict is True
+
 
 class TestTimedeltaEdgeCases:
     """ISO-8601 duration parsing/encoding edge cases (signs, all components,
