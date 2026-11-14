@@ -2319,17 +2319,14 @@ class TestStruct:
             _json_decode(b'{"x": 1}', type=BrokenAnnotations)
 
     def test_dump_sorted_dict_key_hash_error(self):
-        class Key(str):
-            def __new__(cls):
-                obj = super().__new__(cls, "k")
-                cls.calls = 0
-                return obj
+        class Key:
+            calls = 0
 
             def __hash__(self):
                 Key.calls += 1
                 if Key.calls > 2:
                     raise RuntimeError("hash failed")
-                return super().__hash__()
+                return 42
 
             def __eq__(self, other):
                 return self is other
@@ -2337,8 +2334,10 @@ class TestStruct:
         class Ex(Struct):
             x: dict[Any, int]
 
+        # `builtin_types` keeps the user key in the dumped dict, so
+        # `sort_dict_inplace` re-hashes it.
         with pytest.raises(RuntimeError, match="hash failed"):
-            Ex({Key(): 1}).struct_dump(sort_keys=True)
+            Ex({Key(): 1}).struct_dump(sort_keys=True, builtin_types=[Key])
 
     def test_decoder_unhashable_origin(self):
         class Origin:
@@ -4484,3 +4483,43 @@ class TestDataclassLifecycle:
 
         src = type("Src", (), {"x": 7})()
         assert Msg.struct_validate({"d": src}, from_attributes=True).d == Inner(7)
+
+
+class TestDumpStrSubclassAndEnum:
+    def test_str_enum_value_and_dict_key(self):
+        class Color(str, enum.Enum):
+            RED = "red"
+
+        class Msg(Struct):
+            c: Color
+            d: dict[Color, int]
+
+        msg = Msg(Color.RED, {Color.RED: 1})
+        assert msg.struct_dump() == {"c": "red", "d": {"red": 1}}
+        assert msg.struct_dump(str_keys=True) == {
+            "c": "red",
+            "d": {"red": 1},
+        }
+        assert msg.struct_dump_json() == b'{"c":"red","d":{"red":1}}'
+
+    def test_plain_str_subclass_key_works(self):
+        class SubStr(str):
+            pass
+
+        class Msg(Struct):
+            d: dict[SubStr, int]
+
+        msg = Msg({SubStr("k"): 1})
+        dumped = msg.struct_dump(str_keys=True)
+        assert dumped == {"d": {"k": 1}}
+        assert type(next(iter(dumped["d"]))) is str
+        assert msg.struct_dump() == {"d": {"k": 1}}
+
+    def test_plain_str_subclass_value_still_passes_through(self):
+        class SubStr(str):
+            pass
+
+        class Msg(Struct):
+            v: SubStr
+
+        assert Msg(SubStr("x")).struct_dump() == {"v": "x"}

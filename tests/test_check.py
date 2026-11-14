@@ -1,18 +1,21 @@
 import datetime
 import subprocess
 import sys
-from typing import Annotated, TypedDict
+from dataclasses import dataclass
+from typing import Annotated, NamedTuple, TypedDict
 
 import pytest
 
 from structtype import (
-    Struct,
-    StructConfig,
-    ValidationError,
+    UNSET,
     Constraint,
     NumericConstraint,
     StrConstraint,
+    Struct,
+    StructConfig,
     TimezoneConstraint,
+    UnsetType,
+    ValidationError,
 )
 
 from .utils import requires_subprocess
@@ -151,9 +154,7 @@ def test_check_optional_set_like_still_recurses():
     with pytest.raises(ValidationError, match="Expected `int`"):
         OptSetNone(items={FrozenPoint("bad", 2)}).struct_check_types()
     with pytest.raises(ValidationError, match="Expected `int`"):
-        OptFrozenSetNone(
-            items=frozenset({FrozenPoint("bad", 2)})
-        ).struct_check_types()
+        OptFrozenSetNone(items=frozenset({FrozenPoint("bad", 2)})).struct_check_types()
     with pytest.raises(ValidationError, match="Expected `int`"):
         OptDictNone(mapping={"a": Point("bad", 2)}).struct_check_types()
 
@@ -954,3 +955,125 @@ def test_validator_float_constraint_checked():
         RangedF.struct_validate({"x": -1.0})
     with pytest.raises(structtype.ValidationError):
         RangedF.struct_validate({"x": 0.0})
+
+
+class NestedList(Struct):
+    items: list[list[Point]]
+
+
+class NestedDict(Struct):
+    mapping: dict[str, list[Point]]
+
+
+class PointDict(TypedDict):
+    p: Point
+
+
+class NestedTypedDict(Struct):
+    td: PointDict
+
+
+@dataclass
+class PointDataclass:
+    p: Point
+
+
+class NestedDataclass(Struct):
+    dc: PointDataclass
+
+
+class NestedDataclassInit(Struct):
+    struct_config = StructConfig(check_types_on_init=True)
+    dc: PointDataclass
+
+
+class PointTuple(NamedTuple):
+    p: Point
+
+
+class NestedNamedTuple(Struct):
+    nt: PointTuple
+
+
+def test_check_nested_list_of_lists():
+    obj = NestedList([[Point(1, 2)]])
+    obj.items[0][0].x = "bad"
+    with pytest.raises(ValidationError, match=r"at `\$\.items\[0\]\[0\]\.x`"):
+        obj.struct_check_types()
+    assert NestedList([[Point(1, 2)]]).struct_check_types() is None
+
+
+def test_check_nested_dict_of_lists():
+    obj = NestedDict({"a": [Point(1, 2)]})
+    obj.mapping["a"][0].x = "bad"
+    with pytest.raises(ValidationError, match=r"at `\$\.mapping\['a'\]\[0\]\.x`"):
+        obj.struct_check_types()
+
+
+def test_check_nested_typeddict():
+    obj = NestedTypedDict({"p": Point(1, 2)})
+    obj.td["p"].x = "bad"
+    with pytest.raises(ValidationError, match=r"at `\$\.td\.p\.x`"):
+        obj.struct_check_types()
+
+
+def test_check_nested_dataclass():
+    obj = NestedDataclass(PointDataclass(Point(1, 2)))
+    obj.dc.p.x = "bad"
+    with pytest.raises(ValidationError, match=r"at `\$\.dc\.p\.x`"):
+        obj.struct_check_types()
+    assert NestedDataclass(PointDataclass(Point(1, 2))).struct_check_types() is None
+
+
+def test_check_on_init_nested_dataclass():
+    with pytest.raises(ValidationError):
+        NestedDataclassInit(PointDataclass(Point("bad", 2)))
+
+
+def test_check_nested_namedtuple():
+    obj = NestedNamedTuple(PointTuple(Point(1, 2)))
+    obj.nt.p.x = "bad"
+    with pytest.raises(ValidationError, match=r"at `\$\.nt\[0\]\.x`"):
+        obj.struct_check_types()
+    assert NestedNamedTuple(PointTuple(Point(1, 2))).struct_check_types() is None
+
+
+def test_check_nested_dataclass_constraint():
+    @dataclass
+    class RangedDataclass:
+        v: Annotated[int, NumericConstraint(ge=0)]
+
+    class NestedRangedDataclass(Struct):
+        dc: RangedDataclass
+
+    assert NestedRangedDataclass(RangedDataclass(1)).struct_check_types() is None
+    with pytest.raises(ValidationError):
+        NestedRangedDataclass(RangedDataclass(-1)).struct_check_types()
+
+
+class UnsetDefault(Struct):
+    x: int | None | UnsetType = UNSET
+
+
+class UnsetDefaultInit(Struct):
+    struct_config = StructConfig(check_types_on_init=True)
+    x: int | None | UnsetType = UNSET
+
+
+def test_check_unset_value_passes():
+    assert UnsetDefault().struct_check_types() is None
+    assert UnsetDefault(x=UNSET).struct_check_types() is None
+    assert UnsetDefault(x=1).struct_check_types() is None
+    assert UnsetDefault(x=None).struct_check_types() is None
+
+
+def test_check_on_init_unset_value_passes():
+    assert UnsetDefaultInit().x is UNSET
+    assert UnsetDefaultInit(x=1).x == 1
+    with pytest.raises(ValidationError):
+        UnsetDefaultInit(x="bad")
+
+
+def test_check_unset_still_rejects_bad_values():
+    with pytest.raises(ValidationError):
+        UnsetDefault(x="bad").struct_check_types()
