@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0 (2026-11-15)
 
 - **Breaking:** drop support for Python 3.10. Python 3.11 or newer is required.
 - Fix crash and hang paths in the codecs and struct internals: re-entrant
