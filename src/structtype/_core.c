@@ -383,6 +383,13 @@ fast_long_extract_parts(PyObject *vv, bool *neg, uint64_t *scale) {
     return false;
 }
 
+/* Negate an unsigned magnitude without signed overflow. `ux` may be 2**63,
+ * which is INT64_MIN when negated and would overflow in int64 arithmetic. */
+static MS_INLINE int64_t
+ms_negate_magnitude(uint64_t ux) {
+    return ux == ((uint64_t)INT64_MAX + 1) ? INT64_MIN : -(int64_t)ux;
+}
+
 /* Access macro to the members which are floating "behind" the object */
 #define MS_PyHeapType_GET_MEMBERS(etype) \
     ((PyMemberDef *)(((char *)(etype)) + Py_TYPE(etype)->tp_basicsize))
@@ -1437,7 +1444,7 @@ IntLookup_GetPyIntOrError(IntLookup *self, PyObject *key, PathNode *path) {
     overflow = fast_long_extract_parts(key, &neg, &x);
     if (!overflow) {
         if (neg) {
-            out = IntLookup_GetInt64(self, -(int64_t)x);
+            out = IntLookup_GetInt64(self, ms_negate_magnitude(x));
         }
         else {
             out = IntLookup_GetUInt64(self, x);
@@ -5288,6 +5295,11 @@ TypeNode_get_traverse_ranges(
         if (type->types & MS_TYPE_FIXTUPLE) {
             TypeNode_get_fixtuple(type, &ft_offset, &ft_size);
         }
+    }
+    else {
+        /* `Any` can still carry a user constraint (and, defensively, a
+         * codec) as a plain object detail. */
+        n_obj = ms_popcount(type->types & (MS_CONSTR_USER | MS_CONSTR_CODEC));
     }
     *n_objects = n_obj;
     *n_typenode = n_type;
@@ -12772,13 +12784,6 @@ ms_decode_uint(uint64_t x, TypeNode *type, PathNode *path) {
     return PyLong_FromUnsignedLongLong(x);
 }
 
-/* Negate an unsigned magnitude without signed overflow. `ux` may be 2**63,
- * which is INT64_MIN when negated and would overflow in int64 arithmetic. */
-static MS_INLINE int64_t
-ms_negate_magnitude(uint64_t ux) {
-    return ux == ((uint64_t)INT64_MAX + 1) ? INT64_MIN : -(int64_t)ux;
-}
-
 static MS_NOINLINE bool
 ms_passes_int_constraints(uint64_t ux, bool neg, ConstraintNode *cn, PathNode *path) {
     if (cn->mask & MS_CN_INT_MIN) {
@@ -12897,7 +12902,7 @@ ms_decode_pyint(PyObject *obj, TypeNode *type, PathNode *path) {
     if (!neg) {
         return PyLong_FromUnsignedLongLong(ux);
     }
-    return PyLong_FromLongLong(-(int64_t)ux);
+    return PyLong_FromLongLong(ms_negate_magnitude(ux));
 }
 
 static MS_NOINLINE PyObject *
@@ -15998,9 +16003,10 @@ json_encode_object(EncoderState *self, PyObject *obj)
                     if (MS_UNLIKELY(val == NULL)) continue;
                     if (MS_UNLIKELY(val == UNSET)) continue;
                     if (MS_UNLIKELY(*mp->name == '_')) continue;
-                    /* Slot names are valid identifiers, so they never need
-                     * JSON escaping. */
-                    if (MS_UNLIKELY(json_encode_cstr_noescape(self, mp->name, strlen(mp->name)) < 0)) goto cleanup;
+                    /* Member names are usually identifiers, but extension
+                     * `PyMemberDef` names are arbitrary C strings, so escape
+                     * them like any other key. */
+                    if (MS_UNLIKELY(json_encode_cstr(self, mp->name, strlen(mp->name)) < 0)) goto cleanup;
                     if (MS_UNLIKELY(ms_write(self, ":", 1) < 0)) goto cleanup;
                     if (MS_UNLIKELY(json_encode(self, val) < 0)) goto cleanup;
                     if (MS_UNLIKELY(ms_write(self, ",", 1) < 0)) goto cleanup;
@@ -20885,7 +20891,9 @@ validate_lookup_tag(
         overflow = fast_long_extract_parts(tag, &neg, &ux);
         if (overflow) goto invalid_value;
         if (neg) {
-            out = (StructInfo *)IntLookup_GetInt64((IntLookup *)lookup, -(int64_t)ux);
+            out = (StructInfo *)IntLookup_GetInt64(
+                (IntLookup *)lookup, ms_negate_magnitude(ux)
+            );
         }
         else {
             out = (StructInfo *)IntLookup_GetUInt64((IntLookup *)lookup, ux);

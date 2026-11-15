@@ -1,4 +1,5 @@
 import datetime
+import enum
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -799,6 +800,46 @@ def test_validator_int_tagged_union():
     assert Holder.struct_validate({"v": {"type": 2, "b": "x"}}).v == Tag2("x")
     with pytest.raises(ValidationError):
         Holder.struct_validate({"v": {"type": 9, "b": "x"}})
+
+
+def test_validate_int_subclass_int64_min():
+    class MyInt(int):
+        pass
+
+    class S(Struct):
+        x: int
+
+    assert S.struct_validate({"x": MyInt(-(2**63))}).x == -(2**63)
+
+
+def test_validate_int_enum_int64_min():
+    class MyInt(int):
+        pass
+
+    class E(enum.IntEnum):
+        MIN = -(2**63)
+
+    class S(Struct):
+        x: E
+
+    assert S.struct_validate({"x": MyInt(-(2**63))}).x is E.MIN
+
+
+def test_validate_tagged_union_int64_min_tag():
+    class Min(Struct):
+        struct_config = StructConfig(tag=-(2**63))
+        a: int
+
+    class Other(Struct):
+        struct_config = StructConfig(tag=1)
+        b: str
+
+    class Holder(Struct):
+        v: Min | Other
+
+    assert Holder.struct_validate({"v": {"type": -(2**63), "a": 5}}).v == Min(5)
+    with pytest.raises(ValidationError, match="Invalid value"):
+        Holder.struct_validate({"v": {"type": -(2**63) + 1, "a": 5}})
 
 
 def test_validator_object_to_struct_from_attributes():

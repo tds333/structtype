@@ -32,6 +32,10 @@ if SANITIZE:
             "-fsanitize=address",
             "-fsanitize=undefined",
             "-fsanitize=signed-integer-overflow",
+            # CPython's CFLAGS include `-fno-strict-overflow`, which makes
+            # signed overflow wrap and suppresses UBSan's signed-integer
+            # overflow checks. Re-enable the checks after that flag.
+            "-fstrict-overflow",
         ]
     )
     if sys.platform != "darwin":

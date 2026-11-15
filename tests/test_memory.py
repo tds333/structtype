@@ -2,12 +2,13 @@ import gc
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Annotated, Any, NamedTuple
 
 import pytest
 
 import structtype
 from structtype import StructConfig
+from structtype._core import _validate
 
 from .utils import temp_module
 
@@ -246,3 +247,19 @@ def test_nested_deep_check_does_not_leak():
     with pytest.raises(structtype.ValidationError):
         holder.struct_check_types()
     assert sys.getrefcount(leaf) == before
+
+
+def test_annotated_any_constraint_not_leaked():
+    calls = []
+    c = structtype.Constraint(lambda value: calls.append(value) or True)
+    typ = Annotated[Any, c]
+
+    for _ in range(100):
+        assert _validate(1, typ) == 1
+
+    before = sys.getrefcount(c)
+    for _ in range(10):
+        assert _validate(1, typ) == 1
+
+    assert sys.getrefcount(c) == before
+    assert len(calls) == 110

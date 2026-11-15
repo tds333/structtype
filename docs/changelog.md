@@ -35,6 +35,9 @@
   invalid JSON.
 - Raise `ValidationError` instead of leaking `AttributeError` when a
   `dict`/`frozendict` target receives a mapping-like object without `keys()`.
+- Fix a reference leak for `Annotated[Any, Constraint(...)]` types.
+- Avoid signed-overflow UB when validating `-2**63` as an `int` subclass,
+  int enum/literal, or integer tag.
 - JSON Schema fixes: distinct dynamically generated types with the same module
   and qualified name no longer overwrite each other; empty component names
   produce valid `$ref`s; string `Literal`/`Enum` dictionary keys emit
