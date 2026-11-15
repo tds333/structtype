@@ -3,48 +3,45 @@
 ## Unreleased
 
 - **Breaking:** drop support for Python 3.10. Python 3.11 or newer is required.
-- Reject embedded NUL bytes in RFC3339 `datetime`/`time` strings; they were
-  treated as end-of-input and silently truncated the value.
-- Raise `ValidationError` instead of crashing when a tuple subclass with
-  malformed named-tuple metadata (`_fields` not a tuple, or a missing/non-dict
-  `_field_defaults`) is used as a type. `inspect.type_info` now agrees with the
-  decoder about what counts as a namedtuple.
-- Fix a crash in `Struct.__rich_repr__()` for an unset field with a factory
-  default when `repr_omit_defaults=True`.
+- Fix crash and hang paths in the codecs and struct internals: re-entrant
+  `Struct` metadata builds, decoder re-initialization during `decode()`, list
+  mutation during encoding/`struct_dump`, and `JSONEncoder`/`JSONDecoder`
+  instances created without `__init__` now raise clean exceptions instead of
+  hanging or crashing. Malformed named-tuple metadata and `__rich_repr__()`
+  with an unset factory default no longer crash.
+- Decode non-ASCII `TypedDict`, dataclass, attrs and external-struct field
+  names reliably, accept `str` subclasses as JSON input, and escape
+  external-struct keys in JSON output.
+- Reject embedded NUL bytes in RFC3339 `datetime`/`time` strings.
 - Encode `decimal.Decimal` dictionary keys as JSON strings even with
-  `decimal_as_number=True`, producing valid JSON.
-- Raise `ValidationError` (with a path) instead of a bare `TypeError` when a
-  decoded set item or converted dictionary key is unhashable.
+  `decimal_as_number=True`; raise `ValidationError` for unhashable set items or
+  converted dictionary keys; and still stringify/parse dictionary keys listed
+  in `builtin_types`.
 - Preserve `Annotated` metadata around `Required`/`NotRequired` in `TypedDict`
-  fields; inherited type arguments on generic `TypedDict` subclasses are now
-  applied, and PEP 695 annotations resolve without `NameError`.
+  fields, apply inherited type arguments on generic `TypedDict` subclasses, and
+  resolve PEP 695 annotations without `NameError`.
 - Raise `ValueError` instead of leaking `OverflowError` for constraint bounds
   too large to represent as a float.
-- `struct_dump(..., str_keys=True, builtin_types=...)` and the internal
-  validation path now still stringify/parse dictionary keys whose type is listed
-  in `builtin_types`.
-- `struct_check_types()` and `check_types_on_init` now recurse into nested
-  structs at any depth and through lists, dicts, `TypedDict`s, dataclasses and
-  `NamedTuple`s, reporting the path of the failing leaf. `UNSET` field values
-  are accepted.
+- `struct_check_types()` and `check_types_on_init` recurse into nested structs
+  at any depth and through containers, `TypedDict`, dataclass and `NamedTuple`
+  values, reporting the failing path. Optional containers and `UNSET` values
+  are accepted; cycles raise `RecursionError` under a platform-safe limit.
 - `struct_dump()` converts `str`-enum values and `str`-subclass dictionary keys
-  to their string value, fixing spurious `TypeError`s with `str_keys=True`;
-  codecs still take precedence and `builtin_types` values are still preserved.
-- Escape arbitrary `__dict__` keys when JSON-encoding attrs-style objects;
-  keys containing quotes, backslashes or control characters previously produced
-  invalid JSON.
-- Raise `ValidationError` instead of leaking `AttributeError` when a
+  to strings, fixing `str_keys=True` `TypeError`s; codecs still take precedence
+  and `builtin_types` values remain preserved.
+- Escape arbitrary `__dict__` keys and C-extension member names when
+  JSON-encoding attrs-style objects; control characters and quotes previously
+  produced invalid JSON.
+- Raise `ValidationError` instead of `AttributeError` when a
   `dict`/`frozendict` target receives a mapping-like object without `keys()`.
-- Fix a reference leak for `Annotated[Any, Constraint(...)]` types.
-- Avoid signed-overflow UB when validating `-2**63` as an `int` subclass,
-  int enum/literal, or integer tag.
+- Fix reference leaks for `Annotated[Any, Constraint(...)]`, `Struct`
+  definition on Python 3.12+ and `X | Y` unions on Python 3.14+, and avoid
+  signed-overflow UB when validating `-2**63`.
 - JSON Schema fixes: distinct dynamically generated types with the same module
   and qualified name no longer overwrite each other; empty component names
   produce valid `$ref`s; string `Literal`/`Enum` dictionary keys emit
   `propertyNames`; dataclass/attrs `default_factory` fields emit defaults; and
   declared zero/composite `Flag` members appear in `enum`.
-- Fix reference leaks when defining a `Struct` with a non-`Struct` base on
-  Python 3.12+ and when resolving `X | Y` unions on Python 3.14+.
 - Fix error handling in several C paths that could swallow the original
   exception and raise `SystemError` instead: annotation lookups, sorted-dict
   re-hashing, dataclass `__dict__` iteration, tagged-union tag lookup, and

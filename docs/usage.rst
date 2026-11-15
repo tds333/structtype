@@ -414,6 +414,12 @@ You can also validate an existing struct instance at any time using
 
     Any annotated ``Constraint`` **is** called on correctly-typed values.
 
+    Validation is recursive: nested structs, dataclasses, ``NamedTuple`` and
+    ``TypedDict`` values and the contents of containers are checked, with
+    errors carrying the failing path. Optional container fields and ``UNSET``
+    values are accepted, and cyclic values raise ``RecursionError``. See
+    :ref:`struct-check-types-on-init` for details.
+
 
 Pattern Matching
 ----------------

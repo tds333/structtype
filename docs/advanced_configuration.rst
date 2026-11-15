@@ -183,6 +183,13 @@ definition enables type and constraint checking during ``__init__``:
     If you need type coercion, use ``struct_validate`` or
     ``struct_validate_json`` instead.
 
+Validation is recursive: nested structs, dataclasses, ``NamedTuple`` and
+``TypedDict`` values, and the contents of lists, dicts, sets, tuples and
+``frozendict`` are checked, with errors pointing at the failing leaf (for
+example ``$.items[0].x``). Optional container fields and fields holding
+``UNSET`` are accepted. Cyclic values raise ``RecursionError`` under a
+platform-safe nesting limit rather than exhausting the C stack.
+
 While convenient, this adds overhead to every ``__init__`` call. Prefer static
 type checking with mypy_/pyright_ when possible, and use ``struct_check_types``
 for explicit runtime validation.

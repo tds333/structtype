@@ -1128,7 +1128,8 @@ other than a field for one of these types.
 
 Omission of ``UNSET`` fields applies to `struct_dump_json` and
 `struct_dump`. ``dict()`` always includes every field, so ``UNSET`` values
-appear unchanged.
+appear unchanged. `struct_check_types` and ``check_types_on_init`` accept
+``UNSET`` field values.
 
 ``Enum`` / ``IntEnum`` / ``StrEnum``
 ------------------------------------
@@ -1466,6 +1467,11 @@ instances of their most common concrete type.
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
     structtype.ValidationError: Expected `int`, got `str` - at `$[...]`
+
+Custom mapping objects are accepted for ``dict`` and ``frozendict`` targets
+when they provide both ``keys()`` and ``__getitem__``. An object implementing
+only ``__getitem__`` raises ``ValidationError`` when a ``dict``/``frozendict``
+target is requested.
 
 ``Union`` /  ``Optional``
 -------------------------
