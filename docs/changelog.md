@@ -30,6 +30,11 @@
 - `struct_dump()` converts `str`-enum values and `str`-subclass dictionary keys
   to their string value, fixing spurious `TypeError`s with `str_keys=True`;
   codecs still take precedence and `builtin_types` values are still preserved.
+- Escape arbitrary `__dict__` keys when JSON-encoding attrs-style objects;
+  keys containing quotes, backslashes or control characters previously produced
+  invalid JSON.
+- Raise `ValidationError` instead of leaking `AttributeError` when a
+  `dict`/`frozendict` target receives a mapping-like object without `keys()`.
 - JSON Schema fixes: distinct dynamically generated types with the same module
   and qualified name no longer overwrite each other; empty component names
   produce valid `$ref`s; string `Literal`/`Enum` dictionary keys emit

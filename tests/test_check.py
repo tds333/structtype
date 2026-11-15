@@ -1165,3 +1165,15 @@ def test_check_on_init_unset_value_passes():
 def test_check_unset_still_rejects_bad_values():
     with pytest.raises(ValidationError):
         UnsetDefault(x="bad").struct_check_types()
+
+
+def test_dict_field_getitem_without_keys_raises_validation_error():
+    class Table:
+        def __getitem__(self, key):
+            pytest.fail("Should not access non-mapping items")
+
+    class Ex(Struct):
+        table: dict[str, int]
+
+    with pytest.raises(ValidationError, match=r"at `\$\.table`"):
+        Ex.struct_validate({"table": Table()})

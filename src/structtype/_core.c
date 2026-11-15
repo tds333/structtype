@@ -15965,7 +15965,7 @@ json_encode_object(EncoderState *self, PyObject *obj)
                     break;
                 }
                 if (MS_UNLIKELY(*key_buf == '_')) continue;
-                if (MS_UNLIKELY(json_encode_cstr_noescape(self, key_buf, key_len) < 0)) {
+                if (MS_UNLIKELY(json_encode_cstr(self, key_buf, key_len) < 0)) {
                     err = 1;
                     break;
                 }
@@ -15998,6 +15998,8 @@ json_encode_object(EncoderState *self, PyObject *obj)
                     if (MS_UNLIKELY(val == NULL)) continue;
                     if (MS_UNLIKELY(val == UNSET)) continue;
                     if (MS_UNLIKELY(*mp->name == '_')) continue;
+                    /* Slot names are valid identifiers, so they never need
+                     * JSON escaping. */
                     if (MS_UNLIKELY(json_encode_cstr_noescape(self, mp->name, strlen(mp->name)) < 0)) goto cleanup;
                     if (MS_UNLIKELY(ms_write(self, ":", 1) < 0)) goto cleanup;
                     if (MS_UNLIKELY(json_encode(self, val) < 0)) goto cleanup;
@@ -21171,10 +21173,30 @@ validate_dict_to_frozendict(
 }
 #endif
 
+static int
+ms_mapping_has_keys(PyObject *obj) {
+    PyObject *keys_method = PyObject_GetAttrString(obj, "keys");
+    if (keys_method == NULL) {
+        if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
+            PyErr_Clear();
+            return 0;
+        }
+        return -1;
+    }
+    Py_DECREF(keys_method);
+    return 1;
+}
+
 static PyObject *
 validate_mapping_to_dict(
     ValidateState *self, PyObject *obj, TypeNode *type, PathNode *path
 ) {
+    int has_keys = ms_mapping_has_keys(obj);
+    if (has_keys < 0) return NULL;
+    if (!has_keys) {
+        return ms_validation_error(Py_TYPE(obj)->tp_name, type, path);
+    }
+
     PyObject *out = NULL;
     PyObject *temp = PyDict_New();
     if (temp == NULL) return NULL;

@@ -97,3 +97,29 @@ def test_attrs_nonascii_field_name_decodes_json():
     A = attr.make_class("A", {key: attr.ib(type=int)})
     out = _json_decode(b'{"f\xc3\xafeld": 1}', type=A)
     assert getattr(out, key) == 1
+
+
+def test_attrs_object_dict_keys_are_escaped():
+    import json
+
+    from structtype._core import _json_encode
+
+    class A:
+        __attrs_attrs__ = ()
+
+        def __init__(self):
+            object.__setattr__(self, 'a"b', 1)
+            object.__setattr__(self, "c\nd", 2)
+            object.__setattr__(self, "tab\tkey", 3)
+            object.__setattr__(self, "back\\slash", 4)
+            object.__setattr__(self, "nönascii", 5)
+            object.__setattr__(self, "_private", 6)
+
+    out = _json_encode(A())
+    assert json.loads(out) == {
+        'a"b': 1,
+        "c\nd": 2,
+        "tab\tkey": 3,
+        "back\\slash": 4,
+        "nönascii": 5,
+    }

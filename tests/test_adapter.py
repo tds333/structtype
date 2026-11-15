@@ -5,6 +5,7 @@ import ipaddress
 import pathlib
 import sys
 import uuid
+from collections import UserDict
 from typing import (
     Annotated,
     Any,
@@ -845,3 +846,82 @@ class TestDecoderCaching:
         assert ta.struct_validate_json(b"[1, 2]") == [1, 2]
         assert ta._decoder_strict is not None
         assert ta._decoder_loose is None
+
+
+class TestDictDuckMapping:
+    @pytest.mark.parametrize("strict", [True, False])
+    def test_getitem_without_keys_raises_validation_error(self, strict):
+        class Table:
+            def __getitem__(self, key):
+                pytest.fail("Should not access non-mapping items")
+
+        ta = StructAdapter(dict[str, int])
+        with pytest.raises(
+            ValidationError, match=r"Expected .*got `Table`"
+        ):
+            ta.struct_validate(Table(), strict=strict)
+
+    @pytest.mark.parametrize(
+        "keys_type",
+        [
+            list,
+            tuple,
+            iter,
+            lambda keys: dict.fromkeys(keys).keys(),
+            lambda keys: UserDict.fromkeys(keys).keys(),
+        ],
+    )
+    def test_duck_mapping_converts(self, keys_type):
+        class DuckMapping:
+            def keys(self):
+                return keys_type(["x", "y", "x"])
+
+            def __getitem__(self, key):
+                return {"x": 1, "y": 2}[key]
+
+        ta = StructAdapter(dict[str, float])
+        assert ta.struct_validate(DuckMapping()) == {"x": 1.0, "y": 2.0}
+
+    def test_keys_property_error_propagates(self):
+        class BadMapping:
+            @property
+            def keys(self):
+                raise RuntimeError("boom")
+
+            def __getitem__(self, key):
+                pytest.fail("Should not access items when keys lookup fails")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            StructAdapter(dict).struct_validate(BadMapping())
+
+    def test_keys_call_error_propagates(self):
+        class BadMapping:
+            def keys(self):
+                raise RuntimeError("boom")
+
+            def __getitem__(self, key):
+                pytest.fail("Should not access items when keys call fails")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            StructAdapter(dict).struct_validate(BadMapping())
+
+    def test_getitem_error_propagates(self):
+        class BadMapping:
+            def keys(self):
+                return ["x"]
+
+            def __getitem__(self, key):
+                raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            StructAdapter(dict).struct_validate(BadMapping())
+
+    def test_keys_not_callable_propagates(self):
+        class BadMapping:
+            keys = None
+
+            def __getitem__(self, key):
+                return 1
+
+        with pytest.raises(TypeError, match="not callable"):
+            StructAdapter(dict).struct_validate(BadMapping())

@@ -91,3 +91,25 @@ def test_frozendict_adapter():
     assert ta.struct_validate_json(b'{"a":1}') == frozendict({"a": 1})
     assert ta.struct_dump_json(frozendict({"a": 1})) == b'{"a":1}'
     assert isinstance(ta.struct_validate({"a": 1}), frozendict)
+
+
+def test_getitem_without_keys_raises_validation_error():
+    class DuckMapping:
+        def __getitem__(self, key):
+            return 1
+
+    with pytest.raises(ValidationError, match="DuckMapping"):
+        StructAdapter(frozendict[str, float]).struct_validate(DuckMapping())
+
+
+def test_duck_mapping_converts():
+    class DuckMapping:
+        def keys(self):
+            return ["x"]
+
+        def __getitem__(self, key):
+            return 1
+
+    result = StructAdapter(frozendict[str, float]).struct_validate(DuckMapping())
+    assert type(result) is frozendict
+    assert result == frozendict({"x": 1.0})
