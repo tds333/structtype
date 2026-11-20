@@ -8535,12 +8535,13 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
     }
 
     /* Strip NewType / TypeAliasType / Final wrappers. */
-    PyObject *supertype = PyObject_GetAttr(t, mod->str___supertype__);
-    if (supertype != NULL) {
-        Py_SETREF(t, supertype);
-    }
-    else {
-        PyErr_Clear();
+    {
+        PyObject *supertype = NULL;
+        int status = PyObject_GetOptionalAttr(t, mod->str___supertype__, &supertype);
+        if (status < 0) PyErr_Clear();
+        if (supertype != NULL) {
+            Py_SETREF(t, supertype);
+        }
     }
 #if PY312_PLUS
     if (Py_TYPE(t) == (PyTypeObject *)(mod->typing_typealiastype)) {
@@ -8551,29 +8552,30 @@ codec_walk_annotation(PyObject *ann, PyObject *codecs, StructspecState *mod, PyO
 #endif
 
     /* Recurse into container/union args. */
-    PyObject *origin = PyObject_GetAttr(t, mod->str___origin__);
-    if (origin != NULL) {
-        PyObject *args = PyObject_GetAttr(t, mod->str___args__);
-        if (args != NULL && PyTuple_Check(args)) {
-            for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(args); i++) {
-                PyObject *arg = PyTuple_GET_ITEM(args, i);
-                if (arg == Py_Ellipsis) continue;
-                if (codec_walk_annotation(arg, codecs, mod, ctx) < 0) {
-                    Py_DECREF(args);
-                    Py_DECREF(origin);
-                    goto error;
+    {
+        PyObject *origin = NULL;
+        int ostatus = PyObject_GetOptionalAttr(t, mod->str___origin__, &origin);
+        if (ostatus < 0) PyErr_Clear();
+        if (origin != NULL) {
+            PyObject *args = PyObject_GetAttr(t, mod->str___args__);
+            if (args != NULL && PyTuple_Check(args)) {
+                for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(args); i++) {
+                    PyObject *arg = PyTuple_GET_ITEM(args, i);
+                    if (arg == Py_Ellipsis) continue;
+                    if (codec_walk_annotation(arg, codecs, mod, ctx) < 0) {
+                        Py_DECREF(args);
+                        Py_DECREF(origin);
+                        goto error;
+                    }
                 }
+                Py_DECREF(args);
             }
-            Py_DECREF(args);
+            else {
+                Py_XDECREF(args);
+                PyErr_Clear();
+            }
+            Py_DECREF(origin);
         }
-        else {
-            Py_XDECREF(args);
-            PyErr_Clear();
-        }
-        Py_DECREF(origin);
-    }
-    else {
-        PyErr_Clear();
     }
 
     out = 0;
@@ -9485,9 +9487,11 @@ StructMeta_new_inner(
     if (structmeta_construct_offsets(&info, mod, cls) < 0) goto cleanup;
 
     /* Cache access to __post_init__ (if defined). */
-    cls->post_init = PyObject_GetAttr((PyObject *)cls, mod->str___post_init__);
-    if (cls->post_init == NULL) {
-        PyErr_Clear();
+    {
+        PyObject *post_init = NULL;
+        int pstatus = PyObject_GetOptionalAttr((PyObject *)cls, mod->str___post_init__, &post_init);
+        if (pstatus < 0) PyErr_Clear();
+        cls->post_init = post_init;
     }
 
     cls->nkwonly = info.nkwonly;
@@ -11956,7 +11960,7 @@ found_val:
  * Shared Encoder structs/methods                                        *
  *************************************************************************/
 
-#define ENC_INIT_BUFSIZE 256
+#define ENC_INIT_BUFSIZE 1024
 #define ENC_LINES_INIT_BUFSIZE 1024
 
 typedef struct EncoderState {
@@ -16974,6 +16978,14 @@ top:
         /* An escape string requires at most 4 bytes to decode */
         Py_ssize_t required = self->scratch_len + block_size + 4;
         if (MS_UNLIKELY(required >= self->scratch_capacity)) {
+            if (MS_UNLIKELY(self->scratch_len == 0)) {
+                /* First scratch use this call: the remaining input bounds
+                 * the rest of the decoded string, so allocate for it once
+                 * instead of growing geometrically. Capped so a tiny
+                 * escaped string in a large document stays cheap. */
+                Py_ssize_t hint = Py_MIN(self->input_end - self->input_pos, 64 * 1024);
+                required = Py_MAX(required, hint);
+            }
             if (MS_UNLIKELY(json_scratch_expand(self, required) < 0)) return -1;
         }
         memcpy(self->scratch + self->scratch_len, start, block_size);
