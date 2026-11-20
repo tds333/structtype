@@ -5085,8 +5085,10 @@ TypeNode_get_fixtuple(TypeNode *type, Py_ssize_t *offset, Py_ssize_t *size) {
 
 /* --- ConstraintNode accessors (index into the side node's `details`) --- */
 
+/* The detail stored for MS_CN_STR_REGEX is the bound `search` method of
+ * the compiled pattern; its `__self__` is the `re.Pattern`. */
 static MS_INLINE PyObject *
-ConstraintNode_get_str_regex(ConstraintNode *cn) {
+ConstraintNode_get_str_search(ConstraintNode *cn) {
     return cn->details[0].pointer;
 }
 
@@ -5330,7 +5332,7 @@ static void
 ConstraintNode_Free(ConstraintNode *cn) {
     if (cn == NULL) return;
     if (cn->mask & MS_CN_STR_REGEX) {
-        Py_XDECREF(ConstraintNode_get_str_regex(cn));
+        Py_XDECREF(ConstraintNode_get_str_search(cn));
     }
     PyMem_Free(cn);
 }
@@ -5339,7 +5341,7 @@ static int
 ConstraintNode_traverse(ConstraintNode *cn, visitproc visit, void *arg) {
     if (cn == NULL) return 0;
     if (cn->mask & MS_CN_STR_REGEX) {
-        Py_VISIT(ConstraintNode_get_str_regex(cn));
+        Py_VISIT(ConstraintNode_get_str_search(cn));
     }
     return 0;
 }
@@ -5506,9 +5508,9 @@ typedef struct {
     double c_float_min;
     double c_float_max;
     double c_float_multiple_of;
-    PyObject *c_str_regex;
+    PyObject *c_str_search;
     PyObject *serializer_obj;  /* Serializer* with load/dump, or NULL */
-    PyObject *user_constr_obj;   /* owned Constraint instance (never ._fn), or NULL */
+    PyObject *user_constr_callable;  /* owned: `_fn` of an exact-base `Constraint` (dispatch skips tp_call), or the instance for Python subclasses; NULL if unregistered */
     Py_ssize_t c_str_min_length;
     Py_ssize_t c_str_max_length;
     Py_ssize_t c_bytes_min_length;
@@ -5716,9 +5718,15 @@ typenode_collect_constraints(
             }
             else {
                 if (v->regex != NULL) {
+                    /* Store the bound `search` method (not the pattern) so
+                     * the per-value check pays no method lookup. The
+                     * pattern stays reachable via the method's `__self__`
+                     * on the (cold) error path. */
+                    StructspecState *st = structtype_get_global_state();
+                    PyObject *search = PyObject_GetAttr(v->regex, st->str_search);
+                    if (search == NULL) return -1;
                     state->constr_mask |= MS_CN_STR_REGEX;
-                    Py_INCREF(v->regex);
-                    state->c_str_regex = v->regex;
+                    state->c_str_search = search;  /* owned */
                 }
                 if (v->min_length != NULL) {
                     state->constr_mask |= MS_CN_STR_MIN_LENGTH;
@@ -5786,12 +5794,24 @@ typenode_collect_constraints(
                 state->constr_mask |= MS_CN_TZ_NAIVE;
             }
         }
+        else if (vtype == &Constraint_Type) {
+            /* Exact base `Constraint`: `__call__` cannot be overridden, so
+             * store the wrapped callable directly — the per-value call then
+             * goes straight to `_fn` with no tuple/`tp_call` dispatch. Bare
+             * `Constraint()` is inert (no `_fn`): register nothing. */
+            Constraint *v = (Constraint *)validator;
+            if (v->_fn != NULL) {
+                state->types |= MS_CONSTR_USER;
+                Py_INCREF(v->_fn);
+                state->user_constr_callable = v->_fn;
+            }
+        }
         else {
-            /* Base `Constraint` or a user-defined Python subclass: keep the
-             * instance itself for the decode path */
+            /* user-defined Python subclass: keep the instance itself for the
+             * decode path (a `__call__` override must keep running) */
             state->types |= MS_CONSTR_USER;
             Py_INCREF(validator);
-            state->user_constr_obj = (PyObject *)validator;
+            state->user_constr_callable = (PyObject *)validator;
         }
     }
 
@@ -5923,8 +5943,8 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
         out->details[e_ind++].pointer = state->serializer_obj;
     }
     if (state->types & MS_CONSTR_USER) {
-        Py_INCREF(state->user_constr_obj);
-        out->details[e_ind++].pointer = state->user_constr_obj;
+        Py_INCREF(state->user_constr_callable);
+        out->details[e_ind++].pointer = state->user_constr_callable;
     }
     if (state->dict_key_obj != NULL && state->dict_val_obj != NULL) {
         TypeNode *temp = TypeNode_Convert(state->dict_key_obj);
@@ -5976,8 +5996,8 @@ typenode_from_collect_state(TypeNodeCollectState *state) {
         cn->mask = m;
         Py_ssize_t c_ind = 0;
         if (m & MS_CN_STR_REGEX) {
-            Py_INCREF(state->c_str_regex);
-            cn->details[c_ind++].pointer = state->c_str_regex;
+            Py_INCREF(state->c_str_search);
+            cn->details[c_ind++].pointer = state->c_str_search;
         }
         if (m & MS_CN_INT_MIN) {
             cn->details[c_ind++].i64 = state->c_int_min;
@@ -6715,9 +6735,9 @@ typenode_collect_clear_state(TypeNodeCollectState *state) {
     Py_CLEAR(state->literal_int_lookup);
     Py_CLEAR(state->literal_str_values);
     Py_CLEAR(state->literal_str_lookup);
-    Py_CLEAR(state->c_str_regex);
+    Py_CLEAR(state->c_str_search);
     Py_CLEAR(state->serializer_obj);
-    Py_CLEAR(state->user_constr_obj);
+    Py_CLEAR(state->user_constr_callable);
     state->constr_mask = 0;
 }
 
@@ -13087,16 +13107,19 @@ _ms_check_str_constraints(PyObject *obj, ConstraintNode *cn, PathNode *path) {
         }
     }
     if (cn->mask & MS_CN_STR_REGEX) {
-        StructspecState *st = structtype_get_global_state();
-        PyObject *regex = ConstraintNode_get_str_regex(cn);
-        PyObject *res = PyObject_CallMethodObjArgs(
-            regex, st->str_search, obj, NULL
-        );
+        /* The detail stores the bound `search` method of the compiled
+         * pattern; calling it directly skips a per-value method lookup. */
+        PyObject *search = ConstraintNode_get_str_search(cn);
+        PyObject *res = PyObject_CallOneArg(search, obj);
         if (res == NULL) goto error;
         bool ok = (res != Py_None);
         Py_DECREF(res);
         if (!ok) {
+            StructspecState *st = structtype_get_global_state();
+            PyObject *regex = PyObject_GetAttrString(search, "__self__");
+            if (regex == NULL) goto error;
             PyObject *pattern = PyObject_GetAttr(regex, st->str_pattern);
+            Py_DECREF(regex);
             if (pattern == NULL) goto error;
             ms_raise_validation_error(
                 path, "Expected `str` matching regex %R%U", pattern
