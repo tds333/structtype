@@ -11,9 +11,9 @@
 # ///
 
 """Benchmark JSON round-trip for a struct with a long ``str`` field, compared
-against msgspec and pydantic. Strings are 100000 characters (ASCII, non-ASCII
-and escape-heavy). Reports ns/UTF-8-byte and the structtype speedup vs
-pydantic.
+against msgspec and pydantic. Strings are 100000 characters (ASCII, non-ASCII,
+escape-heavy, and escape-heavy at the start). Reports ns/UTF-8-byte and the
+structtype speedup vs pydantic.
 """
 
 from __future__ import annotations
@@ -46,10 +46,15 @@ def _text_with_escapes(size=SIZE):
     return "".join(chars)
 
 
+def _text_with_early_escape(size=SIZE):
+    return "\n" + "x" * (size - 1)
+
+
 CASES = [
     ("ascii", "x" * SIZE),
     ("nonascii", "é" * SIZE),
     ("escape", _text_with_escapes()),
+    ("escape_early", _text_with_early_escape()),
 ]
 
 

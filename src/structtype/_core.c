@@ -11980,7 +11980,7 @@ found_val:
  * Shared Encoder structs/methods                                        *
  *************************************************************************/
 
-#define ENC_INIT_BUFSIZE 1024
+#define ENC_INIT_BUFSIZE 512
 #define ENC_LINES_INIT_BUFSIZE 1024
 
 typedef struct EncoderState {
@@ -16761,6 +16761,11 @@ json_decode_false(JSONDecoderState *self, TypeNode *type, PathNode *path) {
 
 #define JS_SCRATCH_MAX_SIZE 1024
 
+/* Upper bound for the one-shot first-use scratch pre-size. Kept small so a
+ * short escaped string in a large document does not cause a large transient
+ * allocation (and copy) when the actual string turns out to be longer. */
+#define JSON_SCRATCH_HINT_MAX (32 * 1024)
+
 static int
 json_scratch_resize(JSONDecoderState *state, Py_ssize_t size) {
     unsigned char *temp = PyMem_Realloc(state->scratch, size);
@@ -17004,10 +17009,14 @@ top:
             if (MS_UNLIKELY(self->scratch_len == 0)) {
                 /* First scratch use this call: the remaining input bounds
                  * the rest of the decoded string, so allocate for it once
-                 * instead of growing geometrically. Capped so a tiny
-                 * escaped string in a large document stays cheap. */
-                Py_ssize_t hint = Py_MIN(self->input_end - self->input_pos, 64 * 1024);
-                required = Py_MAX(required, hint);
+                 * instead of growing geometrically. The hint covers only the
+                 * bytes after `input_pos`, so add the block already scanned.
+                 * Capped so a tiny escaped string in a large document stays
+                 * cheap. */
+                Py_ssize_t hint = Py_MIN(
+                    self->input_end - self->input_pos, JSON_SCRATCH_HINT_MAX
+                );
+                required = Py_MAX(required, block_size + hint);
             }
             if (MS_UNLIKELY(json_scratch_expand(self, required) < 0)) return -1;
         }
